@@ -1,0 +1,335 @@
+#!/usr/bin/env php
+<?php
+/**
+ * MyStack CLI Tool
+ * A powerful, intelligent command-line interface for the MyStack framework.
+ */
+
+define('ROOT_DIR', __DIR__);
+
+// Load library to utilize DIR class
+$libraryPath = ROOT_DIR . '/library/library.php';
+if (file_exists($libraryPath)) {
+    require_once $libraryPath;
+    if (class_exists('DIR') && method_exists('DIR', 'initialize')) {
+        DIR::initialize(['rootDir' => ROOT_DIR]);
+    }
+} else {
+    echo "\033[31m[!] Error: library/library.php not found. Are you in the project root?\033[0m\n";
+    exit(1);
+}
+
+// Ensure necessary core directories exist
+$appDir = class_exists('DIR') ? DIR::path('app') : ROOT_DIR . '/app';
+$componentDir = class_exists('DIR') ? DIR::path('component') : ROOT_DIR . '/component';
+
+if (!is_dir($appDir)) mkdir($appDir, 0777, true);
+if (!is_dir($componentDir)) mkdir($componentDir, 0777, true);
+
+// Utility functions for CLI output
+function printColor($msg, $colorCode) { echo "\033[{$colorCode}m{$msg}\033[0m"; }
+function info($msg) { printColor("[INFO] ", "1;36"); echo "$msg\n"; }
+function success($msg) { printColor("[SUCCESS] ", "1;32"); echo "$msg\n"; }
+function error($msg) { printColor("[ERROR] ", "1;31"); echo "$msg\n"; exit(1); }
+function warning($msg) { printColor("[WARNING] ", "1;33"); echo "$msg\n"; }
+
+function generateFile($path, $content, $type) {
+    if (file_exists($path)) {
+        error("$type already exists at: $path\nIf you want to recreate it, please delete the existing file first.");
+    }
+    file_put_contents($path, $content);
+    success("$type successfully created -> $path");
+}
+
+function showHelp() {
+    echo "\n";
+    printColor(" 🚀 MyStack CLI Tool (v1.1.0) \n", "1;44;97");
+    echo "\n";
+    printColor(" Usage:\n", "1;33");
+    echo "  php mystack [command] [arguments]\n\n";
+    
+    printColor(" Backend Commands (Generated in ./app):\n", "1;36");
+    echo "  make:controller <Name>      Generate a Controller with CRUD demo code.\n";
+    echo "  make:model <Name>           Generate a Model with PHDB demo queries.\n";
+    echo "  make:middleware <Name>      Generate a Middleware for Auth/Protection.\n\n";
+
+    printColor(" Frontend Commands (Generated in ./component):\n", "1;35");
+    echo "  make:component <Name>       Generate a reusable UI component (Tailwind ready).\n";
+    echo "  make:view <Name>            Generate a full page view structure.\n\n";
+
+    printColor(" Utility Commands:\n", "1;32");
+    echo "  get:started                 Generate a demo controller, route and view to quickly start.
+";
+    echo "  serve [port]                Start the PHP local development server (default: 8000).\n";
+    echo "  cache:clear                 Clear application cache.\n";
+    echo "  doctor                      Scan, diagnose and autofix code issues in app and component.\n";
+    echo "  help                        Show this beautiful help screen.\n\n";
+    
+    printColor(" Example:\n", "1;37");
+    echo "  php mystack make:controller User\n";
+    echo "  php mystack make:view dashboard\n\n";
+}
+
+function runDoctor($dirPaths) {
+    echo "\n";
+    printColor(" 🩺 MyStack Doctor - Highly Advanced Code Diagnosis & Repair \n", "1;42;97");
+    echo "\n";
+    
+    $totalScanned = 0;
+    $totalFixed = 0;
+    
+    foreach ($dirPaths as $dirPath) {
+        if (!is_dir($dirPath)) continue;
+        
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dirPath));
+        
+        foreach ($files as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $totalScanned++;
+                $filePath = $file->getPathname();
+                $content = file_get_contents($filePath);
+                $originalContent = $content;
+                $filename = pathinfo($filePath, PATHINFO_FILENAME);
+                $isModified = false;
+                $fixesApplied = [];
+
+                // 1. Remove UTF-8 BOM if present (breaks headers)
+                $bom = pack('H*','EFBBBF');
+                if (preg_match("/^$bom/", $content)) {
+                    $content = preg_replace("/^$bom/", '', $content);
+                    $fixesApplied[] = "Removed UTF-8 BOM (Byte Order Mark)";
+                    $isModified = true;
+                }
+
+                // 2. Handle completely empty files
+                if (trim($content) === '') {
+                    $content = "<?php\n\n";
+                    $fixesApplied[] = "Initialized empty file with PHP tag";
+                    $isModified = true;
+                }
+
+                // 3. Convert short open tags to standard tags (<? -> <?php)
+                // Need to be careful not to replace <?= (echo short tag)
+                if (preg_match('/<\?(?!php|=)/i', $content)) {
+                    $content = preg_replace('/<\?(?!php|=)\s*/i', "<?php\n", $content);
+                    $fixesApplied[] = "Converted short open tags (<?) to standard tags (<?php)";
+                    $isModified = true;
+                }
+
+                // 4. Check for missing <?php tag (if it's not a pure HTML view)
+                if (strpos($content, '<?php') === false && strpos($content, '<?=') === false && strpos(strtolower($content), '<html') === false) {
+                    $content = "<?php\n" . ltrim($content);
+                    $fixesApplied[] = "Added missing <?php tag";
+                    $isModified = true;
+                }
+                
+                // 5. Enforce single trailing newline at EOF (PSR standard)
+                $trimmedContent = rtrim($content);
+                if ($trimmedContent . "\n" !== $content) {
+                    $content = $trimmedContent . "\n";
+                    $fixesApplied[] = "Enforced single trailing newline (PSR standard)";
+                    $isModified = true;
+                }
+
+                // 6. Check for class name mismatch (class name should match filename if it's a class file)
+                if (preg_match('/class\s+([a-zA-Z0-9_]+)\s*/i', $content, $matches)) {
+                    $className = $matches[1];
+                    if ($className !== $filename) {
+                         // Attempt to fix class name mismatch automatically
+                         $content = preg_replace('/class\s+' . $className . '\s*/i', "class {$filename} ", $content);
+                         $fixesApplied[] = "Fixed class name mismatch: '{$className}' -> '{$filename}'";
+                         $isModified = true;
+                    }
+                }
+
+                // 7. Fix incorrect file permissions (Should be 0644 for PHP files)
+                $currentPerms = substr(sprintf('%o', fileperms($filePath)), -4);
+                if ($currentPerms !== '0644' && $currentPerms !== '0664') {
+                    if (chmod($filePath, 0644)) {
+                         $fixesApplied[] = "Fixed unsafe file permissions ($currentPerms -> 0644)";
+                         $isModified = true;
+                    }
+                }
+
+                if ($isModified && $content !== $originalContent) {
+                    // Try to save
+                    if (file_put_contents($filePath, $content) !== false) {
+                        $totalFixed++;
+                        printColor("[FIXED] ", "1;32");
+                        echo str_replace(ROOT_DIR, '', $filePath) . "\n";
+                        foreach ($fixesApplied as $fix) {
+                            if (strpos($fix, 'permission') === false || $content !== $originalContent) {
+                                echo "        - $fix\n";
+                            }
+                        }
+                    } else {
+                        printColor("[ERROR] ", "1;31");
+                        echo "Failed to write to $filePath\n";
+                    }
+                } elseif ($isModified && count($fixesApplied) > 0) {
+                     // Permission only fix
+                     $totalFixed++;
+                     printColor("[FIXED] ", "1;32");
+                     echo str_replace(ROOT_DIR, '', $filePath) . "\n";
+                     foreach ($fixesApplied as $fix) {
+                          echo "        - $fix\n";
+                     }
+                }
+                
+                // 8. Syntax check using php -l
+                exec("php -l " . escapeshellarg($filePath) . " 2>&1", $output, $returnVar);
+                if ($returnVar !== 0) {
+                     printColor("[SYNTAX ERROR] ", "1;31");
+                     echo str_replace(ROOT_DIR, '', $filePath) . "\n";
+                     echo "               " . implode("\n               ", $output) . "\n";
+                }
+            }
+        }
+    }
+    
+    echo "\n";
+    printColor(" 📊 Doctor Report (ডাক্তারের রিপোর্ট): \n", "1;44;97");
+    echo "  Total files scanned (মোট স্ক্যান করা ফাইল): $totalScanned\n";
+    echo "  Total files auto-fixed (মোট ফাইল স্বয়ংক্রিয়ভাবে মেরামত করা হয়েছে): $totalFixed\n";
+    
+    if ($totalFixed > 0) {
+        echo "  \033[1;32mMyStack Doctor successfully repaired structure, formatting, and naming issues automatically! (মাইস্ট্যাক ডাক্তার সফলভাবে স্বয়ংক্রিয়ভাবে কাঠামোগত, ফরম্যাটিং এবং নামের সমস্যাগুলি সমাধান করেছে!)\033[0m\n";
+    } else {
+         echo "  \033[1;32mYour application is completely healthy! No issues found. (আপনার অ্যাপ্লিকেশন সম্পূর্ণ সুস্থ! কোনো সমস্যা পাওয়া যায়নি।)\033[0m\n";
+    }
+    echo "\n";
+}
+
+$args = $argv;
+array_shift($args); // remove script name
+$command = array_shift($args);
+$name = $args[0] ?? null;
+
+if (!$command || $command === 'help' || $command === '--help' || $command === '-h') {
+    showHelp();
+    exit(0);
+}
+
+// Smart Name Formatting
+$cleanName = ucfirst(preg_replace('/[^a-zA-Z0-9_]/', '', (string)$name));
+
+switch ($command) {
+    case 'make:controller':
+        if (!$name) error("Controller name is required. Example: php mystack make:controller User");
+        $className = str_ends_with($cleanName, 'Controller') ? $cleanName : $cleanName . 'Controller';
+        $path = $appDir . '/' . $className . '.php';
+        
+        $content = "<?php\n/**\n * $className\n * Auto-generated by MyStack CLI\n */\nclass {$className} {\n\n    /**\n     * Fetch all records\n     */\n    public function index() {\n        // Demo: \$users = PHDB::query('SELECT * FROM users');\n        return ['status' => 'success', 'data' => 'List of items'];\n    }\n\n    /**\n     * Handle record creation\n     */\n    public function store(\$request) {\n        // Demo: PHDB::query('INSERT INTO users (name) VALUES (?)', [\$request['name']]);\n        return ['status' => 'success', 'message' => 'Created successfully'];\n    }\n\n    /**\n     * Fetch specific record\n     */\n    public function show(\$id) {\n        // Demo: \$user = PHDB::query('SELECT * FROM users WHERE id = ?', [\$id]);\n        return ['status' => 'success', 'id' => \$id];\n    }\n}\n";
+        generateFile($path, $content, 'Controller');
+        break;
+
+    case 'make:model':
+        if (!$name) error("Model name is required. Example: php mystack make:model Product");
+        $className = str_ends_with($cleanName, 'Model') ? $cleanName : $cleanName . 'Model';
+        $tableName = strtolower(str_replace('Model', '', $className)) . 's';
+        $path = $appDir . '/' . $className . '.php';
+        
+        $content = "<?php\n/**\n * $className\n * Auto-generated by MyStack CLI\n */\nclass {$className} {\n    protected static \$table = '{$tableName}';\n\n    public static function all() {\n        return PHDB::query(\"SELECT * FROM \" . self::\$table);\n    }\n\n    public static function find(\$id) {\n        \$result = PHDB::query(\"SELECT * FROM \" . self::\$table . \" WHERE id = ? LIMIT 1\", [\$id]);\n        return \$result[0] ?? null;\n    }\n\n    public static function create(array \$data) {\n        \$columns = implode(',', array_keys(\$data));\n        \$placeholders = implode(',', array_fill(0, count(\$data), '?'));\n        return PHDB::query(\"INSERT INTO \" . self::\$table . \" (\$columns) VALUES (\$placeholders)\", array_values(\$data));\n    }\n}\n";
+        generateFile($path, $content, 'Model');
+        break;
+
+    case 'make:middleware':
+        if (!$name) error("Middleware name is required. Example: php mystack make:middleware Auth");
+        $className = str_ends_with($cleanName, 'Middleware') ? $cleanName : $cleanName . 'Middleware';
+        $path = $appDir . '/' . $className . '.php';
+        
+        $content = "<?php\n/**\n * $className\n * Auto-generated by MyStack CLI\n */\nclass {$className} {\n    public static function handle(\$request, \$next) {\n        // Demo Auth Logic:\n        // if (!isset(\$_SESSION['user'])) { return ['error' => 'Unauthorized']; }\n\n        return \$next(\$request);\n    }\n}\n";
+        generateFile($path, $content, 'Middleware');
+        break;
+
+    case 'make:component':
+        if (!$name) error("Component name is required. Example: php mystack make:component Alert");
+        $className = str_ends_with($cleanName, 'Component') ? $cleanName : $cleanName . 'Component';
+        $path = $componentDir . '/' . $className . '.php';
+        
+        $content = "<?php\n/**\n * Component: $className\n * Render this using PHUI or include it directly.\n */\n\n\$title = \$data['title'] ?? 'Component Title';\n\$text = \$data['text'] ?? 'Component description goes here.';\n\$class = \$data['class'] ?? '';\n?>\n<div class=\"bg-card p-6 rounded-2xl shadow-sm border border-border <?= htmlspecialchars(\$class) ?>\">\n    <h3 class=\"text-xl font-bold text-foreground\"><?= htmlspecialchars(\$title) ?></h3>\n    <p class=\"text-muted-foreground mt-2\"><?= htmlspecialchars(\$text) ?></p>\n</div>\n";
+        generateFile($path, $content, 'UI Component');
+        break;
+
+    case 'make:view':
+        if (!$name) error("View name is required. Example: php mystack make:view Dashboard");
+        $className = str_ends_with($cleanName, 'View') ? $cleanName : $cleanName . 'View';
+        $path = $componentDir . '/' . $className . '.php';
+        
+        $content = "<?php\n/**\n * View: $className\n * Auto-generated page layout by MyStack CLI.\n */\n?>\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title><?= \$page_title ?? '{$cleanName}' ?></title>\n    <!-- CSS & JS injected by PHCS/PHJS automatically -->\n</head>\n<body class=\"bg-background text-foreground\">\n\n    <!-- Auto Header -->\n    <?= class_exists('PHUI') ? PHUI::ui('header:center', ['header_brand' => 'MyStack', 'header_items' => ['Home', 'About'], 'header_button' => ['label' => 'Login']]) : '<header>Header</header>' ?>\n\n    <main class=\"container mx-auto px-4 py-12\">\n        <h1 class=\"text-4xl font-extrabold mb-8\">Welcome to <?= \$page_title ?? '{$cleanName}' ?></h1>\n        \n        <div class=\"grid grid-cols-1 md:grid-cols-2 gap-6\">\n            <!-- Demo PHUI Component Usage -->\n            <?= class_exists('PHUI') ? PHUI::ui('section:feature-1', ['section_title' => 'Features', 'feature_items' => ['Fast', 'Secure', 'Native']]) : '<div>Content</div>' ?>\n        </div>\n    </main>\n\n    <!-- Auto Footer -->\n    <?= class_exists('PHUI') ? PHUI::ui('footer:simple', ['footer_copyright' => '&copy; 2024 MyStack']) : '<footer>Footer</footer>' ?>\n\n</body>\n</html>\n";
+        generateFile($path, $content, 'View');
+        break;
+
+        case "get:started":
+        info("Generating getting started demo code...");
+        
+        // 1. Create a demo route in app/
+        $routePath = $appDir . "/WelcomeController.php";
+        $routeContent = "<?php
+class WelcomeController {
+    public static function index() {
+        return import(\"component:welcome\");
+    }
+}
+
+PHRO::get(\"/\", [WelcomeController::class, \"index\"]);
+";
+        generateFile($routePath, $routeContent, "Demo Controller");
+
+        // 2. Create a demo view in component/
+        $viewPath = $componentDir . "/welcome.php";
+        $viewContent = "<?php
+/**
+ * View: Welcome
+ */
+?>
+<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"UTF-8\">
+    <title>Welcome to Mystack</title>
+</head>
+<body class=\"bg-slate-50 text-slate-800\">
+    <?= PHUI::ui(\"header:center\", [\"header_brand\" => \"MyStack\", \"header_items\" => [\"Home\", \"Features\", \"Docs\"], \"header_button\" => [\"label\" => \"Get Started\"]]) ?>
+    <main class=\"container mx-auto mt-20 px-4 text-center\">
+        <h1 class=\"text-5xl font-extrabold mb-4\">Welcome to MyStack Framework!</h1>
+        <p class=\"text-lg text-slate-600 mb-8\">The ultimate, zero-dependency, single-class oriented framework.</p>
+        <?= PHUI::ui(\"html:button\", [\"text\" => \"Read Documentation\", \"class\" => \"bg-blue-600 text-white px-6 py-3 rounded-full hover:bg-blue-700 transition\", \"@click\" => phjs(\"toast Hello from MyStack!\")]) ?>
+    </main>
+</body>
+</html>
+";
+        generateFile($viewPath, $viewContent, "Demo View");
+        
+        success("Getting started demo code created successfully!");
+        info("Run \"php mystack serve\" and open http://localhost:8000 in your browser to view the demo.");
+        break;
+
+    case 'serve':
+        $port = $name ?? 8000;
+        info("Starting MyStack intelligent dev server on http://localhost:$port");
+        info("Press Ctrl+C to stop the server.");
+        passthru("php -S localhost:$port");
+        break;
+        
+    case 'cache:clear':
+        $cacheDir = ROOT_DIR . '/src/cache';
+        if (is_dir($cacheDir)) {
+            $files = glob($cacheDir . '/*');
+            foreach ($files as $file) {
+                if (is_file($file)) unlink($file);
+            }
+            success("Application cache cleared instantly!");
+        } else {
+            warning("Cache directory not found or already empty.");
+        }
+        break;
+        
+    case 'doctor':
+        runDoctor([$appDir, $componentDir]);
+        break;
+
+    default:
+        error("Command not recognized: '$command'\nRun 'php mystack help' to see all valid commands.");
+        break;
+}

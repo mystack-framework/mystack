@@ -1,0 +1,37 @@
+<IfModule mod_rewrite.c>
+  Options -Indexes -MultiViews +SymLinksIfOwnerMatch
+
+  RewriteEngine On
+  RewriteCond %{HTTP:Authorization} ^(.*)
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+  RewriteCond %{HTTP:X-API-Key} ^(.*)
+  RewriteRule .* - [E=HTTP_X_API_KEY:%1]
+  RewriteCond %{HTTP:Origin} ^(.*)
+  RewriteRule .* - [E=HTTP_ORIGIN:%1]
+  RewriteCond %{HTTP:Access-Control-Request-Method} ^(.*)
+  RewriteRule .* - [E=HTTP_ACCESS_CONTROL_REQUEST_METHOD:%1]
+  RewriteCond %{HTTP:Access-Control-Request-Headers} ^(.*)
+  RewriteRule .* - [E=HTTP_ACCESS_CONTROL_REQUEST_HEADERS:%1]
+  RewriteCond %{HTTP:X-Forwarded-For} ^(.*)
+  RewriteRule .* - [E=HTTP_X_FORWARDED_FOR:%1]
+  RewriteCond %{HTTP:X-Forwarded-Proto} ^(.*)
+  RewriteRule .* - [E=HTTP_X_FORWARDED_PROTO:%1]
+  RewriteCond %{HTTP:X-Real-IP} ^(.*)
+  RewriteRule .* - [E=HTTP_X_REAL_IP:%1]
+  RewriteCond %{HTTP:X-Requested-With} ^(.*)
+  RewriteRule .* - [E=HTTP_X_REQUESTED_WITH:%1]
+  RewriteCond %{HTTP:Content-Type} ^(.*)
+  RewriteRule .* - [E=CONTENT_TYPE:%1]
+  RewriteCond %{HTTP:Content-Length} ^(.*)
+  RewriteRule .* - [E=CONTENT_LENGTH:%1]
+  RewriteCond %{REQUEST_URI}::$1 ^(/.+)/(.*)::\2$
+  RewriteRule ^(.*) - [E=BASE:%1]
+  RewriteRule ^\..*$ - [F,L]
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule . %{ENV:BASE}/index.php [QSA,L]
+</IfModule>
+<FilesMatch "(^\..*|composer\.(json|lock)|\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml|md)$|^mystack$|mystack\.)">
+    Require all denied
+</FilesMatch>

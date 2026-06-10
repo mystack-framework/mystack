@@ -1,0 +1,197 @@
+<?php
+
+/**
+ * ============================================================================
+ * Class: PHSE
+ * Author: Sakibur Rahman (@sakibweb)
+ * ============================================================================
+ * 
+ * This class is a core component of the MyStack framework.
+ * It provides essential functionalities tailored for high performance and security.
+ */
+
+
+
+
+class PHSE {
+    
+    /**
+     * সেশন স্টার্ট করার সময় ডিফল্ট সিকিউরিটি কনফিগারেশন চেক করা।
+     * Strict Mode এবং HttpOnly কুকি এনফোর্স করা হচ্ছে।
+     */
+    public static function start() {
+        if (session_status() === PHP_SESSION_NONE) {
+            // বেসিক সিকিউরিটি কনফিগারেশন (যদি php.ini তে সেট না থাকে)
+            if (ini_get('session.use_only_cookies') === '0') {
+                ini_set('session.use_only_cookies', '1');
+            }
+            
+            session_start();
+        }
+    }
+
+    /**
+     * সেশন ভেরিয়েবল সেট করা।
+     *
+     * @param string $key সেশনের নাম।
+     * @param mixed $value সেশনের ভ্যালু।
+     * @param int|null $expiry কত মিনিট পর এক্সপায়ার হবে (null হলে ডিফল্ট সেশন টাইম)।
+     */
+    public static function add($key, $value, $expiry = null) {
+        self::start(); // সেশন স্টার্ট নিশ্চিত করা
+
+        $_SESSION[$key] = [
+            'value' => $value,
+            'expiry' => $expiry !== null ? time() + ($expiry * 60) : null,
+            'created_at' => time() // ডিবাগিংয়ের জন্য সুবিধাজনক
+        ];
+    }
+
+    /**
+     * সেশন ভ্যালু আপডেট করা (শুধু যদি আগে থেকে সেট করা থাকে)।
+     *
+     * @param string $key সেশনের নাম।
+     * @param mixed $value নতুন ভ্যালু।
+     */
+    public static function update($key, $value) {
+        self::start();
+
+        if (self::isActive($key)) {
+            $_SESSION[$key]['value'] = $value;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * সেশন ভ্যালু ডিলিট করা।
+     *
+     * @param string $key সেশনের নাম।
+     */
+    public static function remove($key) {
+        self::start();
+        
+        if (isset($_SESSION[$key])) {
+            unset($_SESSION[$key]);
+        }
+    }
+
+    /**
+     * সেশন ভ্যালু পাওয়া।
+     * Dev Friendly Update: ডিফল্ট ভ্যালু সাপোর্ট যুক্ত করা হয়েছে।
+     *
+     * @param string $key সেশনের নাম।
+     * @param mixed $default যদি কি(key) না পাওয়া যায় তবে কি রিটার্ন করবে (ডিফল্ট null)।
+     * @return mixed
+     */
+    public static function get($key, $default = null) {
+        self::start();
+
+        if (isset($_SESSION[$key])) {
+            // এক্সপায়ার চেক
+            if (self::hasExpired($key)) {
+                self::remove($key);
+                return $default;
+            }
+            return $_SESSION[$key]['value'];
+        }
+
+        return $default;
+    }
+
+    /**
+     * সেশন ভেরিয়েবলটি অ্যাক্টিভ এবং ভ্যালিড কিনা তা চেক করা।
+     * (FIXED: আগের ভার্সনে এক্সপায়ার হয়ে গেলেও true দেখাতো, এখন ফিক্স করা হয়েছে)
+     *
+     * @param string $key
+     * @return bool
+     */
+    public static function isActive($key) {
+        self::start();
+
+        if (!isset($_SESSION[$key])) {
+            return false;
+        }
+
+        if (self::hasExpired($key)) {
+            self::remove($key); // চেক করার সময় এক্সপায়ার হলে রিমুভ করে দেওয়া ভালো
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * ইন্টারনাল হেল্পার মেথড এক্সপায়ার চেক করার জন্য।
+     */
+    private static function hasExpired($key) {
+        $expiry = $_SESSION[$key]['expiry'] ?? null;
+        if ($expiry !== null && time() > $expiry) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * সব সেশন ভেরিয়েবল ক্লিন করা।
+     */
+    public static function expireAll() {
+        self::start();
+        session_unset();
+    }
+
+    /**
+     * সেশন ধ্বংস করা (Logout বা Reset এর জন্য)।
+     */
+    public static function removeAll() {
+        self::start();
+        session_unset();
+        session_destroy();
+    }
+
+    /**
+     * সিকিউরিটির জন্য সেশন আইডি রি-জেনারেট করা।
+     * (Login এর পর ব্যবহার করা জরুরি)
+     */
+    public static function regenerateId() {
+        self::start();
+        session_regenerate_id(true);
+    }
+
+    /**
+     * সমস্ত ভ্যালিড সেশন ডাটা রিটার্ন করা।
+     * (Dev Friendly: ইন্টারনাল স্ট্রাকচার হাইড করে শুধু ভ্যালু রিটার্ন করবে)
+     *
+     * @return array
+     */
+    public static function getAll() {
+        self::start();
+        $cleanData = [];
+
+        foreach ($_SESSION as $key => $data) {
+            // ডাটা যদি অ্যারে না হয় বা আমাদের স্ট্রাকচার ফলো না করে, স্কিপ করবে
+            if (!is_array($data) || !isset($data['value'])) {
+                continue; 
+            }
+
+            if (!self::hasExpired($key)) {
+                $cleanData[$key] = $data['value'];
+            } else {
+                self::remove($key); // ক্লিনআপ
+            }
+        }
+        return $cleanData;
+    }
+
+    /**
+     * ডিবাগিং মেথড: সেশন কখন এক্সপায়ার হবে তা দেখার জন্য।
+     */
+    public static function getExpiryTime($key) {
+        self::start();
+        if (isset($_SESSION[$key]) && !self::hasExpired($key)) {
+            return $_SESSION[$key]['expiry'];
+        }
+        return null;
+    }
+}
+?>
