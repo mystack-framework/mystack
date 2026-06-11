@@ -175,7 +175,7 @@ EOT;
         return ['status' => true, 'code' => 200, 'message' => 'Login Successfully', 'data' => $jwtResult['data']];
     }
 
-    public static function check(string $table, string|array $tokenCol = "token", string $inputToken = null, string|null $identyCol = null): array
+    public static function check(string $table, string|array $tokenCol = "token", ?string $inputToken = null, string|null $identyCol = null): array
     {
         if (is_array($tokenCol)) {
             $columnName = array_key_first($tokenCol);
@@ -626,7 +626,7 @@ EOT;
             curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         }
         $response = curl_exec($ch);
-        curl_close($ch);
+        if (is_resource($ch)) { curl_close($ch); }
         return json_decode($response, true) ?: $response;
     }
 }

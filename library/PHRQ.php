@@ -67,7 +67,7 @@ class PHRQ {
                 throw new Exception(curl_error($ch));
             }
     
-            curl_close($ch);
+            if (is_resource($ch)) { curl_close($ch); }
     
             $decoded_response = json_decode($response, true);
             if (json_last_error() === JSON_ERROR_NONE) {
@@ -190,7 +190,7 @@ JS;
      * @param string|null $msg Custom message for the response (default is null).
      * @return array HTTP response information containing code and message.
      */
-    public static function status(int $code = 200, string $msg = null) {
+    public static function status(int $code = 200, ?string $msg = null) {
         $statusMessages = [
             100 => 'Continue',
             101 => 'Switching Protocols',
@@ -2083,7 +2083,7 @@ JS;
      * @param string $type The content type for the response (default: "text").
      * @param callable $callback The callback function to execute for generating data.
      */
-    public static function stream(int $sleep = 1, string $type = "text", callable $callback = null) {
+    public static function stream(int $sleep = 1, string $type = "text", ?callable $callback = null) {
         if ($sleep < 1 || $sleep > 300) {
             throw new InvalidArgumentException("Sleep duration must be between 1 and 300 seconds.");
         }

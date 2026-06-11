@@ -36,7 +36,7 @@
 
 interface PHPAGatewayInterface {
     public function setKeys(string $key1, string $key2 = '', string $key3 = '', string $key4 = ''): self;
-    public function setLogic(callable $chargeCallback = null, callable $verifyCallback = null): self;
+    public function setLogic(?callable $chargeCallback = null, ?callable $verifyCallback = null): self;
     public function charge(float $amount, string $currency, string $orderId, array $options = []): array;
     public function verify(string $transactionId): array;
 }
@@ -50,7 +50,7 @@ abstract class PHPA_BaseGateway implements PHPAGatewayInterface {
     protected $customChargeLogic = null;
     protected $customVerifyLogic = null;
 
-    public function setLogic(callable $chargeCallback = null, callable $verifyCallback = null): self {
+    public function setLogic(?callable $chargeCallback = null, ?callable $verifyCallback = null): self {
         $this->customChargeLogic = $chargeCallback;
         $this->customVerifyLogic = $verifyCallback;
         return $this;
@@ -73,7 +73,7 @@ abstract class PHPA_BaseGateway implements PHPAGatewayInterface {
         }
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        if (is_resource($ch)) { curl_close($ch); }
         return ['code' => $httpCode, 'raw' => $response, 'data' => json_decode($response, true) ?? $response];
     }
 }
@@ -112,7 +112,7 @@ class PHPA_Stripe extends PHPA_BaseGateway {
         $res = $this->request('GET', "https://api.stripe.com/v1/payment_intents/{$transactionId}", ["Authorization: Bearer {$this->key1}"]);
         return ['success' => ($res['data']['status'] ?? '') === 'succeeded', 'raw' => $res['data']];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Paypal extends PHPA_BaseGateway {
@@ -139,7 +139,7 @@ class PHPA_Paypal extends PHPA_BaseGateway {
         $res = $this->request('GET', $url, ["Authorization: Bearer $token", "Content-Type: application/json"]);
         return ['success' => ($res['data']['status'] ?? '') === 'COMPLETED', 'raw' => $res['data']];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Razorpay extends PHPA_BaseGateway {
@@ -157,7 +157,7 @@ class PHPA_Razorpay extends PHPA_BaseGateway {
         if(isset($res['data']['items'])) foreach($res['data']['items'] as $item) if($item['status'] == 'captured') $success = true;
         return ['success' => $success, 'raw' => $res['data']];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Braintree extends PHPA_BaseGateway {
@@ -168,7 +168,7 @@ class PHPA_Braintree extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Authorize extends PHPA_BaseGateway {
@@ -181,7 +181,7 @@ class PHPA_Authorize extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Twocheckout extends PHPA_BaseGateway {
@@ -192,7 +192,7 @@ class PHPA_Twocheckout extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Payoneer extends PHPA_BaseGateway {
@@ -204,7 +204,7 @@ class PHPA_Payoneer extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Square extends PHPA_BaseGateway {
@@ -216,7 +216,7 @@ class PHPA_Square extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Adyen extends PHPA_BaseGateway {
@@ -227,7 +227,7 @@ class PHPA_Adyen extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Mollie extends PHPA_BaseGateway {
@@ -241,7 +241,7 @@ class PHPA_Mollie extends PHPA_BaseGateway {
         $res = $this->request('GET', "https://api.mollie.com/v2/payments/{$transactionId}", ["Authorization: Bearer {$this->key1}"]);
         return ['success' => ($res['data']['status'] ?? '') === 'paid'];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 // ==========================================
@@ -260,7 +260,7 @@ class PHPA_Coinbase extends PHPA_BaseGateway {
         $status = end($timeline)['status'] ?? '';
         return ['success' => $status === 'COMPLETED'];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Binance extends PHPA_BaseGateway {
@@ -275,7 +275,7 @@ class PHPA_Binance extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Coinpayments extends PHPA_BaseGateway {
@@ -289,7 +289,7 @@ class PHPA_Coinpayments extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Bitpay extends PHPA_BaseGateway {
@@ -301,7 +301,7 @@ class PHPA_Bitpay extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Nowpayments extends PHPA_BaseGateway {
@@ -312,7 +312,7 @@ class PHPA_Nowpayments extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Cryptocom extends PHPA_BaseGateway {
@@ -323,7 +323,7 @@ class PHPA_Cryptocom extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Coingate extends PHPA_BaseGateway {
@@ -335,7 +335,7 @@ class PHPA_Coingate extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Trustwallet extends PHPA_BaseGateway {
@@ -346,7 +346,7 @@ class PHPA_Trustwallet extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Btcpay extends PHPA_BaseGateway {
@@ -357,7 +357,7 @@ class PHPA_Btcpay extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Metamask extends PHPA_BaseGateway {
@@ -368,7 +368,7 @@ class PHPA_Metamask extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 // ==========================================
@@ -394,7 +394,7 @@ class PHPA_Bkash extends PHPA_BaseGateway {
         $res = $this->request('POST', $url, ["Authorization: $token", "X-APP-Key: {$this->key1}", "Content-Type: application/json"], ['paymentID' => $paymentId]);
         return ['success' => ($res['data']['transactionStatus'] ?? '') === 'Completed'];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Nagad extends PHPA_BaseGateway {
@@ -456,7 +456,7 @@ class PHPA_Nagad extends PHPA_BaseGateway {
         $res = $this->request('GET', "$urlBase/verify/payment/$paymentRefId");
         return ['success' => ($res['data']['status'] ?? '') === 'Success'];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 class PHPA_Rocket extends PHPA_BaseGateway {
     public function charge(float $amount, string $currency, string $orderId, array $options = []): array {
@@ -465,7 +465,7 @@ class PHPA_Rocket extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Sslcommerz extends PHPA_BaseGateway {
@@ -482,7 +482,7 @@ class PHPA_Sslcommerz extends PHPA_BaseGateway {
         $res = $this->request('GET', "$url?val_id=$transactionId&store_id={$this->key1}&store_passwd={$this->key2}");
         return ['success' => ($res['data']['status'] ?? '') === 'VALID'];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Aamarpay extends PHPA_BaseGateway {
@@ -501,7 +501,7 @@ class PHPA_Aamarpay extends PHPA_BaseGateway {
         $res = $this->request('GET', "$url?request_id=$transactionId&store_id={$this->key1}&signature_key={$this->key2}&type=json");
         return ['success' => ($res['data']['pay_status'] ?? '') === 'Successful'];
     }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Surjopay extends PHPA_BaseGateway {
@@ -518,7 +518,7 @@ class PHPA_Surjopay extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Portwallet extends PHPA_BaseGateway {
@@ -532,7 +532,7 @@ class PHPA_Portwallet extends PHPA_BaseGateway {
     }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return ['success' => true]; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Upay extends PHPA_BaseGateway {
@@ -540,7 +540,7 @@ class PHPA_Upay extends PHPA_BaseGateway {
         if (is_callable($this->customChargeLogic)) { return call_user_func($this->customChargeLogic, $this, $amount, $currency, $orderId, $options); } return ['status' => 'initiated', 'gateway' => 'upay']; }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return []; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Shurjomukhi extends PHPA_BaseGateway {
@@ -548,7 +548,7 @@ class PHPA_Shurjomukhi extends PHPA_BaseGateway {
         if (is_callable($this->customChargeLogic)) { return call_user_func($this->customChargeLogic, $this, $amount, $currency, $orderId, $options); } return ['status' => 'initiated', 'gateway' => 'shurjomukhi']; }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return []; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }
 
 class PHPA_Nexuspay extends PHPA_BaseGateway {
@@ -556,5 +556,5 @@ class PHPA_Nexuspay extends PHPA_BaseGateway {
         if (is_callable($this->customChargeLogic)) { return call_user_func($this->customChargeLogic, $this, $amount, $currency, $orderId, $options); } return ['status' => 'initiated', 'gateway' => 'nexuspay']; }
     public function verify(string $transactionId): array {
         if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); } return []; }
-    public function refund(string $transactionId, float $amount = null): array { return []; }
+    public function refund(string $transactionId, ?float $amount = null): array { return []; }
 }

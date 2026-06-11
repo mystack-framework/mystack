@@ -1139,7 +1139,7 @@ class PHAI
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 $err = curl_error($ch);
-                curl_close($ch);
+                if (is_resource($ch)) { curl_close($ch); }
 
                 if ($err) {
                     $lastError = ["error" => ["code" => -32000, "message" => "cURL Error: $err"]];
@@ -1384,7 +1384,7 @@ class PHAI_AI
                     CURLOPT_SSL_VERIFYPEER => $ssl_verify,
                     CURLOPT_SSL_VERIFYHOST => $ssl_verify ? 2 : 0
                 ]);
-                $response = curl_exec($ch); $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+                $response = curl_exec($ch); $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE); if (is_resource($ch)) { curl_close($ch); }
 
                 if ($httpCode >= 400) {
                     $lastError = "[$provider] Model '$model' Error ($httpCode): " . strip_tags($response);

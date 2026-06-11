@@ -71,7 +71,7 @@ class PHOP {
             if (function_exists('curl_init')) {
                 $ch = curl_init($source);
                 curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_SSL_VERIFYPEER => false]);
-                $data = curl_exec($ch); curl_close($ch);
+                $data = curl_exec($ch); if (is_resource($ch)) { curl_close($ch); }
                 if ($data) return $data;
             }
             return @file_get_contents($source);

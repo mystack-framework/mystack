@@ -104,7 +104,7 @@ class PHJC {
         return "<span class='material-symbols-outlined' style='vertical-align:middle; $style'>$name</span>";
     }
 
-    public static function slot(string $name, string $content = null) {
+    public static function slot(string $name, ?string $content = null) {
         if ($content !== null) {
             self::$slots[$name] = $content;
             return '';
@@ -220,7 +220,7 @@ class PHJC {
     /**
      * মূল রেন্ডার মেথড
      */
-    public static function view(string $view, array $data = [], string $fragment = null): string {
+    public static function view(string $view, array $data = [], ?string $fragment = null): string {
         $viewFile = self::resolveViewPath($view);
 
         // FALLBACK TO PHUI (If no file exists and name starts with ui., ui: or ui-)

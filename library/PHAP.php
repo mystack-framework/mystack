@@ -191,7 +191,7 @@ class PHAP
      * @param mixed $default Default value.
      * @return mixed
      */
-    public static function input(string $key = null, mixed $default = null): mixed
+    public static function input(?string $key = null, mixed $default = null): mixed
     {
         static $data = null;
         if ($data === null) {

@@ -2596,7 +2596,7 @@ class PHRO
                 }
 
                 curl_multi_remove_handle($mh, $ch);
-                curl_close($ch);
+                if (is_resource($ch)) { curl_close($ch); }
             }
 
             curl_multi_close($mh);
@@ -2941,7 +2941,7 @@ class PHRO
      * @param array|null $params Optional. Parameters for URL generation.
      * @return array|null Route details array or null if not found.
      */
-    public static function route(string $identifier = null, ?array $params = [])
+    public static function route(?string $identifier = null, ?array $params = [])
     {
         if (!self::$initialized)
             self::initialize();
@@ -3420,10 +3420,10 @@ class PHRO
 
                 if (curl_errno($ch) || $httpCode !== 200) {
                     // Log only if needed, kept silent to keep logs clean during fallback switch
-                    curl_close($ch);
+                    if (is_resource($ch)) { curl_close($ch); }
                     continue; // Move to next provider
                 }
-                curl_close($ch);
+                if (is_resource($ch)) { curl_close($ch); }
 
                 $data = json_decode($response, true);
                 if (!$data)
@@ -3543,10 +3543,10 @@ class PHRO
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
                 if (curl_errno($ch) || $httpCode !== 200) {
-                    curl_close($ch);
+                    if (is_resource($ch)) { curl_close($ch); }
                     continue;
                 }
-                curl_close($ch);
+                if (is_resource($ch)) { curl_close($ch); }
 
                 $data = json_decode($response, true);
                 if (!$data)
@@ -3714,11 +3714,11 @@ class PHRO
 
         if (curl_errno($ch)) {
             $curl_error = curl_error($ch);
-            curl_close($ch);
+            if (is_resource($ch)) { curl_close($ch); }
             throw new Exception('Curl error: ' . $curl_error);
         }
 
-        curl_close($ch);
+        if (is_resource($ch)) { curl_close($ch); }
         return $response;
     }
 
