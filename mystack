@@ -2430,6 +2430,55 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         'SHA-256/byte diff, strict allowlist, confirmation, staging, smoke and rollback'
     );
 
+    $documentationFiles = ['README.md', 'MANUAL_BN.md', 'AGENTS.md', 'LICENSE'];
+    $documentation = [];
+    $documentationHealthy = true;
+    foreach ($documentationFiles as $documentationFile) {
+        $contents = @file_get_contents(ROOT_DIR . '/' . $documentationFile);
+        if (!is_string($contents) || $contents === '' || preg_match('//u', $contents) !== 1) {
+            $documentationHealthy = false;
+            continue;
+        }
+        $documentation[$documentationFile] = $contents;
+        if (str_contains($contents, 'à¦') || str_contains($contents, "\u{FFFD}")) {
+            $documentationHealthy = false;
+        }
+        if ($documentationFile !== 'LICENSE' && substr_count($contents, '```') % 2 !== 0) {
+            $documentationHealthy = false;
+        }
+    }
+    $manualLibraries = [
+        'PHAI', 'PHAP', 'PHAU', 'PHCD', 'PHCO', 'PHCS', 'PHDB', 'PHDE', 'PHED', 'PHEM',
+        'PHEV', 'PHFY', 'PHJC', 'PHJS', 'PHJT', 'PHLS', 'PHML', 'PHMO', 'PHOB', 'PHOP',
+        'PHPA', 'PHQR', 'PHRO', 'PHRQ', 'PHSE', 'PHTM', 'PHTP', 'PHTR', 'PHUI', 'PHVD',
+    ];
+    $manual = $documentation['MANUAL_BN.md'] ?? '';
+    foreach ($manualLibraries as $manualLibrary) {
+        if (!str_contains($manual, '`' . $manualLibrary . '`') && !str_contains($manual, $manualLibrary . ':')) {
+            $documentationHealthy = false;
+            break;
+        }
+    }
+    $readme = $documentation['README.md'] ?? '';
+    $agents = $documentation['AGENTS.md'] ?? '';
+    $license = $documentation['LICENSE'] ?? '';
+    $documentationHealthy = $documentationHealthy
+        && strlen($readme) > 8000
+        && strlen($manual) > 30000
+        && strlen($agents) > 12000
+        && str_contains($readme, 'MyStack does not automatically depend on `.env`, `APP_ENV`, or `APP_DEBUG`')
+        && str_contains($manual, 'src/js/PHJS-min.php')
+        && str_contains($manual, 'php mystack update --check')
+        && str_contains($agents, 'PHJS is self-contained')
+        && !str_contains($agents, 'Frontend reactivity relies on `src/js/phjs.js` and Alpine/HTMX')
+        && str_contains($license, 'MIT License')
+        && str_contains($license, 'THE SOFTWARE IS PROVIDED "AS IS"');
+    $check(
+        'Framework documentation integrity',
+        $documentationHealthy,
+        'UTF-8, balanced examples, 30-library catalog, current PHJS/config/CLI guidance and MIT text'
+    );
+
     $intelligence = MyStackBrain::analyze(
         ROOT_DIR,
         $GLOBALS['appDir'],
