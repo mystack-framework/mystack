@@ -782,3 +782,19 @@ document.addEventListener('alpine:init', () => {
         });
     });
 });
+
+// Keep the legacy global entry point on PHJS's single persistent toast layer.
+window.toast = (msg, type = 'success', time = 3500) => {
+    if (window.APP?.ui?.toast) {
+        return window.APP.ui.toast(msg, type, time);
+    }
+
+    // Very-early fallback until PHJS is ready; no external stylesheet required.
+    const item = document.createElement('div');
+    item.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    item.textContent = String(msg ?? '');
+    item.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:calc(100vw - 24px);padding:12px 20px;border-radius:8px;background:#1d4ed8;color:#fff;box-shadow:0 12px 35px rgba(0,0,0,.32);font:600 14px/1.45 system-ui,sans-serif;';
+    (document.body || document.documentElement).appendChild(item);
+    setTimeout(() => item.remove(), Math.max(1000, Number(time) || 3500));
+    return item;
+};
