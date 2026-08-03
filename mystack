@@ -46,6 +46,7 @@ final class MyStackBrain {
         'get:started',
         'serve',
         'cache:clear',
+        'update',
         'doctor',
         'audit',
         'smoke',
@@ -759,6 +760,470 @@ final class MyStackBrain {
     }
 }
 
+/**
+ * Secure branch-tree updater for the official public MyStack repository.
+ * It never uses releases and never extracts the GitHub archive into the
+ * project. Only explicitly allowed blobs are read and applied file-by-file.
+ */
+final class MyStackUpdater {
+    private const OWNER = 'mystack-framework';
+    private const REPOSITORY = 'mystack';
+    private const BRANCH = 'main';
+    private const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
+    private const MAX_FILE_BYTES = 16 * 1024 * 1024;
+    private const ROOT_FILES = [
+        'AGENTS.md', 'LICENSE', 'MANUAL_BN.md', 'README.md', 'mystack',
+    ];
+    private static ?bool $nodeAvailable = null;
+
+    public static function policy(): array {
+        return [
+            'repository' => self::OWNER . '/' . self::REPOSITORY,
+            'branch' => self::BRANCH,
+            'root_files' => self::ROOT_FILES,
+            'paths' => ['library/*', 'src/js/*'],
+            'deletes_local_files' => false,
+            'hash' => 'sha256',
+        ];
+    }
+
+    public static function run(string $root, array $arguments): bool {
+        $checkOnly = in_array('--check', $arguments, true)
+            || in_array('--dry-run', $arguments, true)
+            || in_array('-n', $arguments, true);
+        $assumeYes = in_array('--yes', $arguments, true) || in_array('-y', $arguments, true);
+        $scope = '';
+        foreach ($arguments as $argument) {
+            if (!str_starts_with((string) $argument, '-')) { $scope = (string) $argument; break; }
+        }
+        $scope = self::normalizeScope($scope);
+
+        echo "\n";
+        printColor(" MyStack Main-Branch Updater \n", '1;44;97');
+        info('Source: https://github.com/' . self::OWNER . '/' . self::REPOSITORY . '/tree/' . self::BRANCH);
+        info('Mode: ' . ($checkOnly ? 'check only' : 'compare, confirm, verify, apply and rollback on failure'));
+        if ($scope !== '') info('Scope: ' . $scope);
+
+        $archivePath = self::downloadBranchArchive();
+        $stageRoot = null;
+        try {
+            $remote = self::readAllowedFiles($archivePath, $scope);
+            if ($remote === []) {
+                throw new RuntimeException($scope === ''
+                    ? 'The official main branch contains no allowlisted update files.'
+                    : "No allowlisted remote file matched scope '$scope'.");
+            }
+            $comparison = self::compare($root, $remote);
+            self::printComparison($comparison);
+            $changes = array_values(array_filter(
+                $comparison,
+                static fn(array $item): bool => $item['status'] !== 'same'
+            ));
+            if ($changes === []) {
+                success('All selected framework files already match the GitHub main branch.');
+                return true;
+            }
+            echo '  Changes: ' . count($changes)
+                . ' | New: ' . count(array_filter($changes, static fn($item) => $item['status'] === 'new'))
+                . ' | Different: ' . count(array_filter($changes, static fn($item) => $item['status'] === 'different'))
+                . "\n";
+            echo "  Note: without framework versions, a hash difference means different—not automatically newer.\n\n";
+
+            if ($checkOnly) {
+                warning('Updates are available. Nothing was changed because --check/--dry-run is active.');
+                return true;
+            }
+            if (!$assumeYes && !self::confirm('Apply these verified changes now? [y/N]: ')) {
+                warning('Update cancelled. No project file was changed.');
+                return true;
+            }
+
+            $stageRoot = self::createStage($root);
+            self::stageAndValidate($stageRoot, $changes);
+            $applied = self::apply($root, $stageRoot, $changes);
+            try {
+                self::verifyAppliedHashes($root, $changes);
+                self::verifyFramework($root);
+            } catch (Throwable $error) {
+                self::rollback($root, $stageRoot, $applied);
+                throw new RuntimeException('Post-update verification failed; every changed file was rolled back. ' . $error->getMessage(), 0, $error);
+            }
+            success(count($changes) . ' framework file(s) updated from GitHub main and verified successfully.');
+            return true;
+        } finally {
+            if (is_file($archivePath)) @unlink($archivePath);
+            if (is_string($stageRoot) && is_dir($stageRoot)) self::removeTree($stageRoot, $root);
+        }
+    }
+
+    private static function normalizeScope(string $scope): string {
+        $scope = trim(str_replace('\\', '/', $scope));
+        $scope = preg_replace('#/+#', '/', $scope) ?? '';
+        $scope = trim($scope, '/');
+        $scope = preg_replace('#/\*$#', '', $scope) ?? $scope;
+        if ($scope === '' || $scope === '*' || $scope === 'all') return '';
+        if (str_contains($scope, "\0") || preg_match('#(^|/)\.\.(/|$)#', $scope)) {
+            throw new InvalidArgumentException('Update scope contains an unsafe path.');
+        }
+        if (!self::isAllowedPath($scope) && $scope !== 'library' && $scope !== 'src/js') {
+            throw new InvalidArgumentException("Update scope '$scope' is outside the framework update allowlist.");
+        }
+        return $scope;
+    }
+
+    private static function isAllowedPath(string $path): bool {
+        $path = trim(str_replace('\\', '/', $path), '/');
+        if ($path === '' || str_contains($path, "\0") || preg_match('#(^|/)\.\.?(/|$)#', $path)) return false;
+        if (in_array($path, self::ROOT_FILES, true)) return true;
+        return (str_starts_with($path, 'library/') && strlen($path) > 8)
+            || (str_starts_with($path, 'src/js/') && strlen($path) > 7);
+    }
+
+    private static function matchesScope(string $path, string $scope): bool {
+        if ($scope === '') return true;
+        return $path === $scope || str_starts_with($path, rtrim($scope, '/') . '/');
+    }
+
+    private static function downloadBranchArchive(): string {
+        if (!function_exists('curl_init') || !class_exists('ZipArchive')) {
+            throw new RuntimeException('The updater requires PHP cURL and ZipArchive extensions.');
+        }
+        $temporary = tempnam(sys_get_temp_dir(), 'mystack-main-');
+        if ($temporary === false) throw new RuntimeException('Unable to create a temporary update archive.');
+        $handle = fopen($temporary, 'wb');
+        if ($handle === false) { @unlink($temporary); throw new RuntimeException('Unable to open the temporary update archive.'); }
+        $downloaded = 0;
+        $url = 'https://codeload.github.com/' . self::OWNER . '/' . self::REPOSITORY
+            . '/zip/refs/heads/' . rawurlencode(self::BRANCH);
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => $url,
+            CURLOPT_FILE => $handle,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+            CURLOPT_USERAGENT => 'MyStack-Updater/1.0 (+https://github.com/mystack-framework/mystack)',
+            CURLOPT_NOPROGRESS => false,
+            CURLOPT_XFERINFOFUNCTION => static function ($resource, float $total, float $now) use (&$downloaded): int {
+                $downloaded = (int) $now;
+                return $now > self::MAX_ARCHIVE_BYTES ? 1 : 0;
+            },
+        ]);
+        $ok = curl_exec($curl);
+        $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $error = curl_error($curl);
+        curl_close($curl); fclose($handle);
+        if ($ok !== true || $status !== 200 || $downloaded <= 0) {
+            $detail = $downloaded > self::MAX_ARCHIVE_BYTES
+                ? 'The branch archive exceeded the 64 MB safety limit.'
+                : ($error !== '' ? $error : 'GitHub returned HTTP ' . $status . '.');
+            // Some portable Windows PHP distributions ship without a cainfo
+            // path. Native curl uses the OS certificate store and remains a
+            // fully verified HTTPS fallback; TLS verification is never disabled.
+            if (!self::downloadWithNativeCurl($url, $temporary)) {
+                @unlink($temporary);
+                throw new RuntimeException('Unable to download the GitHub main tree: ' . $detail);
+            }
+        }
+        clearstatcache(true, $temporary);
+        $finalSize = is_file($temporary) ? (int) filesize($temporary) : 0;
+        if ($finalSize <= 0 || $finalSize > self::MAX_ARCHIVE_BYTES) {
+            @unlink($temporary);
+            throw new RuntimeException('The downloaded GitHub branch archive failed its size validation.');
+        }
+        return $temporary;
+    }
+
+    private static function downloadWithNativeCurl(string $url, string $destination): bool {
+        [$exitCode] = self::process([
+            'curl', '--fail', '--silent', '--show-error',
+            '--proto', '=https', '--tlsv1.2',
+            '--connect-timeout', '10', '--max-time', '120',
+            '--max-filesize', (string) self::MAX_ARCHIVE_BYTES,
+            '--output', $destination, $url,
+        ], 130);
+        return $exitCode === 0 && is_file($destination)
+            && ($size = (int) filesize($destination)) > 0
+            && $size <= self::MAX_ARCHIVE_BYTES;
+    }
+
+    private static function readAllowedFiles(string $archivePath, string $scope): array {
+        $zip = new ZipArchive();
+        if ($zip->open($archivePath) !== true) throw new RuntimeException('The downloaded GitHub archive is not a valid ZIP file.');
+        $files = [];
+        try {
+            for ($index = 0; $index < $zip->numFiles; $index++) {
+                $stat = $zip->statIndex($index, ZipArchive::FL_UNCHANGED);
+                if (!is_array($stat)) continue;
+                $entry = str_replace('\\', '/', (string) ($stat['name'] ?? ''));
+                if ($entry === '' || str_ends_with($entry, '/')) continue;
+                $parts = explode('/', trim($entry, '/'));
+                array_shift($parts); // GitHub archive root: repository-branch/
+                $path = implode('/', $parts);
+                if (!self::isAllowedPath($path) || !self::matchesScope($path, $scope)) continue;
+                $size = (int) ($stat['size'] ?? -1);
+                if ($size < 0 || $size > self::MAX_FILE_BYTES) {
+                    throw new RuntimeException("Remote file '$path' exceeds the 16 MB per-file safety limit.");
+                }
+                $content = $zip->getFromIndex($index, 0, ZipArchive::FL_UNCHANGED);
+                if (!is_string($content) || strlen($content) !== $size) {
+                    throw new RuntimeException("Unable to read complete remote file '$path'.");
+                }
+                $files[$path] = [
+                    'path' => $path,
+                    'bytes' => $size,
+                    'sha256' => hash('sha256', $content),
+                    'content' => $content,
+                ];
+            }
+        } finally {
+            $zip->close();
+        }
+        ksort($files, SORT_NATURAL | SORT_FLAG_CASE);
+        return $files;
+    }
+
+    private static function compare(string $root, array $remote): array {
+        $result = [];
+        foreach ($remote as $path => $item) {
+            $destination = self::destination($root, $path, false);
+            $exists = is_file($destination);
+            $localBytes = $exists ? (int) filesize($destination) : 0;
+            $localHash = $exists ? hash_file('sha256', $destination) : null;
+            $same = $exists && $localBytes === $item['bytes'] && hash_equals((string) $item['sha256'], (string) $localHash);
+            $result[] = [
+                ...$item,
+                'destination' => $destination,
+                'local_bytes' => $localBytes,
+                'local_sha256' => $localHash,
+                'status' => $same ? 'same' : ($exists ? 'different' : 'new'),
+            ];
+        }
+        return $result;
+    }
+
+    private static function printComparison(array $comparison): void {
+        echo "\n";
+        printf("  %-11s %-52s %12s  %-12s\n", 'STATUS', 'FILE', 'REMOTE', 'SHA-256');
+        echo '  ' . str_repeat('-', 92) . "\n";
+        foreach ($comparison as $item) {
+            $status = strtoupper($item['status']);
+            $color = $item['status'] === 'same' ? '0;90' : ($item['status'] === 'new' ? '1;32' : '1;33');
+            printColor('  ' . str_pad($status, 11), $color);
+            $path = strlen($item['path']) > 51 ? '...' . substr($item['path'], -48) : $item['path'];
+            printf(" %-52s %12s  %-12s\n", $path, self::formatBytes((int) $item['bytes']), substr($item['sha256'], 0, 12));
+        }
+        echo "\n";
+    }
+
+    private static function confirm(string $prompt): bool {
+        echo $prompt;
+        $answer = fgets(STDIN);
+        if ($answer === false) return false;
+        return in_array(strtolower(trim($answer)), ['y', 'yes'], true);
+    }
+
+    private static function createStage(string $root): string {
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $path = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . '.mystack-update-' . bin2hex(random_bytes(6));
+            if (@mkdir($path, 0700)) return $path;
+        }
+        throw new RuntimeException('Unable to create a private update staging directory in the project root.');
+    }
+
+    private static function stageAndValidate(string $stageRoot, array $changes): void {
+        foreach ($changes as $item) {
+            $path = $item['path'];
+            $staged = $stageRoot . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path);
+            $parent = dirname($staged);
+            if (!is_dir($parent) && !mkdir($parent, 0700, true) && !is_dir($parent)) {
+                throw new RuntimeException("Unable to stage '$path'.");
+            }
+            if (file_put_contents($staged, $item['content'], LOCK_EX) !== $item['bytes']) {
+                throw new RuntimeException("Staging write failed for '$path'.");
+            }
+            if (!hash_equals($item['sha256'], (string) hash_file('sha256', $staged))) {
+                throw new RuntimeException("Staged SHA-256 verification failed for '$path'.");
+            }
+            self::validateTextFile($staged, $path);
+        }
+        success('Every changed file passed staging, byte and SHA-256 verification.');
+    }
+
+    private static function validateTextFile(string $file, string $path): void {
+        $content = file_get_contents($file);
+        if (!is_string($content) || str_contains($content, "\0")) {
+            throw new RuntimeException("Remote file '$path' is not a valid text framework file.");
+        }
+        if (preg_match('//u', $content) !== 1) throw new RuntimeException("Remote file '$path' is not valid UTF-8.");
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if ($extension === 'php' || $path === 'mystack') {
+            [$exitCode, $output] = self::process([PHP_BINARY, '-l', $file], 30);
+            if ($exitCode !== 0) throw new RuntimeException("PHP syntax validation failed for '$path': " . trim($output));
+        } elseif ($extension === 'js' && self::hasNode()) {
+            [$exitCode, $output] = self::process(['node', '--check', $file], 60);
+            if ($exitCode !== 0) throw new RuntimeException("JavaScript syntax validation failed for '$path': " . trim($output));
+        }
+    }
+
+    private static function hasNode(): bool {
+        if (self::$nodeAvailable !== null) return self::$nodeAvailable;
+        [$exitCode] = self::process(['node', '--version'], 5);
+        return self::$nodeAvailable = $exitCode === 0;
+    }
+
+    private static function apply(string $root, string $stageRoot, array $changes): array {
+        usort($changes, static function (array $left, array $right): int {
+            if ($left['path'] === 'mystack') return 1;
+            if ($right['path'] === 'mystack') return -1;
+            return strnatcasecmp($left['path'], $right['path']);
+        });
+        $applied = [];
+        try {
+            foreach ($changes as $item) {
+                $path = $item['path'];
+                $destination = self::destination($root, $path, true);
+                $parent = dirname($destination);
+                if (!is_dir($parent) && !mkdir($parent, 0755, true) && !is_dir($parent)) {
+                    throw new RuntimeException("Unable to create destination directory for '$path'.");
+                }
+                $staged = $stageRoot . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path);
+                $candidate = $destination . '.mystack-new-' . bin2hex(random_bytes(4));
+                if (!copy($staged, $candidate)) throw new RuntimeException("Unable to prepare atomic replacement for '$path'.");
+                $mode = is_file($destination) ? (fileperms($destination) & 0777) : ($path === 'mystack' ? 0755 : 0644);
+                @chmod($candidate, $mode);
+                if (!hash_equals($item['sha256'], (string) hash_file('sha256', $candidate))) {
+                    @unlink($candidate);
+                    throw new RuntimeException("Final candidate verification failed for '$path'.");
+                }
+                $backup = $stageRoot . DIRECTORY_SEPARATOR . 'rollback' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path);
+                $hadOriginal = is_file($destination);
+                if ($hadOriginal) {
+                    if (!is_dir(dirname($backup)) && !mkdir(dirname($backup), 0700, true) && !is_dir(dirname($backup))) {
+                        @unlink($candidate); throw new RuntimeException("Unable to protect the current '$path'.");
+                    }
+                    if (!rename($destination, $backup)) { @unlink($candidate); throw new RuntimeException("Unable to stage rollback copy for '$path'."); }
+                }
+                if (!rename($candidate, $destination)) {
+                    @unlink($candidate);
+                    if ($hadOriginal && is_file($backup)) @rename($backup, $destination);
+                    throw new RuntimeException("Unable to activate '$path'.");
+                }
+                $applied[] = ['path' => $path, 'destination' => $destination, 'backup' => $backup, 'had_original' => $hadOriginal];
+            }
+        } catch (Throwable $error) {
+            self::rollback($root, $stageRoot, $applied);
+            throw $error;
+        }
+        return $applied;
+    }
+
+    private static function verifyAppliedHashes(string $root, array $changes): void {
+        foreach ($changes as $item) {
+            $destination = self::destination($root, $item['path'], false);
+            if (!is_file($destination) || !hash_equals($item['sha256'], (string) hash_file('sha256', $destination))) {
+                throw new RuntimeException("Activated file verification failed for '{$item['path']}'.");
+            }
+        }
+    }
+
+    private static function verifyFramework(string $root): void {
+        $cli = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . 'mystack';
+        if (!is_file($cli)) throw new RuntimeException('The updated mystack CLI is missing.');
+        info('Running post-update framework smoke test...');
+        [$exitCode, $output] = self::process([PHP_BINARY, $cli, 'smoke'], 180);
+        if ($exitCode !== 0) {
+            $lines = preg_split('/\R/', trim($output)) ?: [];
+            throw new RuntimeException(implode("\n", array_slice($lines, -20)) ?: 'Smoke test failed.');
+        }
+        success('Post-update framework smoke test passed.');
+    }
+
+    private static function rollback(string $root, string $stageRoot, array $applied): void {
+        foreach (array_reverse($applied) as $item) {
+            $destination = self::destination($root, $item['path'], false);
+            if (is_file($destination)) @unlink($destination);
+            if (!empty($item['had_original']) && is_file($item['backup'])) @rename($item['backup'], $destination);
+        }
+        if ($applied !== []) warning('Updater rollback restored the previous framework files.');
+    }
+
+    private static function destination(string $root, string $path, bool $allowMissingParent): string {
+        if (!self::isAllowedPath($path)) throw new RuntimeException("Blocked unsafe update target '$path'.");
+        $root = rtrim(str_replace('\\', '/', $root), '/');
+        $segments = explode('/', $path);
+        $cursor = $root;
+        foreach ($segments as $index => $segment) {
+            $cursor .= '/' . $segment;
+            if ($index < count($segments) - 1 && file_exists($cursor) && is_link($cursor)) {
+                throw new RuntimeException("Blocked symlinked update directory '$path'.");
+            }
+        }
+        if (is_link($cursor)) throw new RuntimeException("Blocked symlinked update file '$path'.");
+        $parent = dirname($cursor);
+        if (!$allowMissingParent && !is_dir($parent)) return str_replace('/', DIRECTORY_SEPARATOR, $cursor);
+        if (is_dir($parent)) {
+            $resolvedRoot = realpath($root);
+            $resolvedParent = realpath($parent);
+            if ($resolvedRoot === false || $resolvedParent === false
+                || !str_starts_with(strtolower(str_replace('\\', '/', $resolvedParent)) . '/', strtolower(str_replace('\\', '/', $resolvedRoot)) . '/')) {
+                throw new RuntimeException("Update target escaped the project root: '$path'.");
+            }
+        }
+        return str_replace('/', DIRECTORY_SEPARATOR, $cursor);
+    }
+
+    private static function process(array $command, int $timeout): array {
+        $descriptor = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        try {
+            $process = @proc_open($command, $descriptor, $pipes, ROOT_DIR, null, ['bypass_shell' => true]);
+        } catch (Throwable $error) {
+            return [127, $error->getMessage()];
+        }
+        if (!is_resource($process)) return [1, 'Unable to start verification process.'];
+        foreach ($pipes as $pipe) stream_set_blocking($pipe, false);
+        $output = ''; $started = microtime(true); $timedOut = false;
+        while (true) {
+            $status = proc_get_status($process);
+            foreach ($pipes as $pipe) $output .= stream_get_contents($pipe);
+            if (!$status['running']) break;
+            if (microtime(true) - $started > $timeout) { proc_terminate($process); $timedOut = true; break; }
+            usleep(20000);
+        }
+        foreach ($pipes as $pipe) { $output .= stream_get_contents($pipe); fclose($pipe); }
+        $exitCode = proc_close($process);
+        if ($timedOut) return [124, $output . "\nVerification process timed out."];
+        return [$exitCode, $output];
+    }
+
+    private static function removeTree(string $path, string $root): void {
+        $resolvedRoot = realpath($root);
+        $resolvedPath = realpath($path);
+        if ($resolvedRoot === false || $resolvedPath === false) return;
+        $rootNormalized = strtolower(rtrim(str_replace('\\', '/', $resolvedRoot), '/')) . '/';
+        $pathNormalized = strtolower(rtrim(str_replace('\\', '/', $resolvedPath), '/')) . '/';
+        if (!str_starts_with($pathNormalized, $rootNormalized . '.mystack-update-')) return;
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($resolvedPath, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($iterator as $item) {
+            if ($item->isLink() || $item->isFile()) @unlink($item->getPathname());
+            elseif ($item->isDir()) @rmdir($item->getPathname());
+        }
+        @rmdir($resolvedPath);
+    }
+
+    private static function formatBytes(int $bytes): string {
+        if ($bytes < 1024) return $bytes . ' B';
+        if ($bytes < 1024 * 1024) return number_format($bytes / 1024, 1) . ' KB';
+        return number_format($bytes / 1024 / 1024, 2) . ' MB';
+    }
+}
+
 $folderRepairCommands = [
     'make:controller',
     'make:model',
@@ -809,6 +1274,9 @@ function showHelp() {
 ";
     echo "  serve [port]                Start the PHP local development server (default: 8000).\n";
     echo "  cache:clear                 Clear application cache.\n";
+    echo "  update [path]               Compare and update allowlisted files from GitHub main.\n";
+    echo "  update [path] --check       Show remote SHA-256/byte differences without changing files.\n";
+    echo "  update [path] --yes         Apply verified changes without an interactive prompt.\n";
     echo "  doctor                      Scan code; auto-heal framework folders and permissions.\n";
     echo "  doctor --fix                Apply safe formatting and permission fixes.\n";
     echo "  audit                       Run the read-only framework production audit.\n";
@@ -1942,6 +2410,26 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         ($folderState['ready'] ?? 0) . '/' . ($folderState['total'] ?? 0) . ' ready, auto-repair verified'
     );
 
+    $updatePolicy = MyStackUpdater::policy();
+    $updaterSource = (string) file_get_contents(ROOT_DIR . '/mystack');
+    $check(
+        'MyStack secure main-branch updater',
+        ($updatePolicy['repository'] ?? '') === 'mystack-framework/mystack'
+            && ($updatePolicy['branch'] ?? '') === 'main'
+            && ($updatePolicy['hash'] ?? '') === 'sha256'
+            && ($updatePolicy['deletes_local_files'] ?? true) === false
+            && in_array('library/*', $updatePolicy['paths'] ?? [], true)
+            && in_array('src/js/*', $updatePolicy['paths'] ?? [], true)
+            && count($updatePolicy['root_files'] ?? []) === 5
+            && MyStackBrain::suggestCommand('updat') === 'update'
+            && str_contains($updaterSource, 'codeload.github.com/')
+            && str_contains($updaterSource, 'ZipArchive')
+            && str_contains($updaterSource, 'Post-update verification failed; every changed file was rolled back.')
+            && str_contains($updaterSource, 'CURLOPT_SSL_VERIFYPEER')
+            && str_contains($updaterSource, "'--proto', '=https'"),
+        'SHA-256/byte diff, strict allowlist, confirmation, staging, smoke and rollback'
+    );
+
     $intelligence = MyStackBrain::analyze(
         ROOT_DIR,
         $GLOBALS['appDir'],
@@ -2144,6 +2632,14 @@ PHRO::get(\"/\", [WelcomeController::class, \"index\"]);
             success("Application cache cleared instantly!");
         } else {
             warning("Cache directory not found or already empty.");
+        }
+        break;
+
+    case 'update':
+        try {
+            if (!MyStackUpdater::run(ROOT_DIR, $args)) exit(1);
+        } catch (Throwable $exception) {
+            error('Update failed safely: ' . $exception->getMessage());
         }
         break;
         
