@@ -14,6 +14,8 @@
 
 class PHED {
 
+    private const FORMAT_V2 = "PHED2";
+
     /**
      * Default encryption key. This should be changed or set securely.
      * @var string
@@ -29,10 +31,7 @@ class PHED {
     private function encrypt_string($plaintext, $key) {
         try {
             // Generate a secure IV
-            $iv = openssl_random_pseudo_bytes(openssl_cipher_iv_length('aes-256-cbc'));
-            if ($iv === false) {
-                throw new Exception('IV generation failed.');
-            }
+            $iv = random_bytes(openssl_cipher_iv_length('aes-256-cbc'));
 
             // Encrypt the plaintext
             $ciphertext = openssl_encrypt($plaintext, 'aes-256-cbc', $key, OPENSSL_RAW_DATA, $iv);
@@ -49,7 +48,7 @@ class PHED {
                 'message' => 'Encryption successful.',
                 'data' => base64_encode($iv . $hmac . $ciphertext)
             ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return ['status' => false, 'message' => 'Encryption error: ' . $e->getMessage(), 'data' => null];
         }
     }
@@ -63,13 +62,13 @@ class PHED {
     private function decrypt_string($ciphertext, $key) {
         try {
             // Decode the base64 encoded ciphertext
-            $decoded = base64_decode($ciphertext);
-            if ($decoded === false) {
+            $decoded = base64_decode($ciphertext, true);
+            $iv_length = openssl_cipher_iv_length('aes-256-cbc');
+            if ($decoded === false || strlen($decoded) < $iv_length + 64 + 1) {
                 throw new Exception('Invalid base64 string.');
             }
 
             // Extract IV, HMAC, and ciphertext components
-            $iv_length = openssl_cipher_iv_length('aes-256-cbc');
             $iv = substr($decoded, 0, $iv_length);
             $hmac = substr($decoded, $iv_length, 64);
             $ciphertext = substr($decoded, $iv_length + 64);
@@ -87,7 +86,7 @@ class PHED {
             }
 
             return ['status' => true, 'message' => 'Decryption successful.', 'data' => $decrypted];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return ['status' => false, 'message' => 'Decryption error: ' . $e->getMessage(), 'data' => null];
         }
     }
@@ -102,8 +101,69 @@ class PHED {
         try {
             // Derive a secure key using PBKDF2
             return hash_pbkdf2('sha512', $key, $salt, 100000, 32, true);
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return false;
+        }
+    }
+
+    /** Encrypt using a versioned AEAD envelope while legacy CBC remains readable. */
+    private function encrypt_v2(string $plaintext, string $key): array {
+        try {
+            if (!in_array('aes-256-gcm', openssl_get_cipher_methods(), true)) {
+                throw new \RuntimeException('AES-256-GCM is unavailable.');
+            }
+            $salt = random_bytes(16);
+            $iv = random_bytes(12);
+            $derivedKey = $this->derive_key($key, $salt);
+            if ($derivedKey === false) throw new \RuntimeException('Key derivation failed.');
+            $tag = '';
+            $ciphertext = openssl_encrypt(
+                $plaintext,
+                'aes-256-gcm',
+                $derivedKey,
+                OPENSSL_RAW_DATA,
+                $iv,
+                $tag,
+                self::FORMAT_V2,
+                16
+            );
+            if ($ciphertext === false || strlen($tag) !== 16) throw new \RuntimeException('Encryption failed.');
+            return [
+                'status' => true,
+                'message' => 'Encryption successful.',
+                'data' => base64_encode(self::FORMAT_V2 . $salt . $iv . $tag . $ciphertext),
+            ];
+        } catch (\Throwable $e) {
+            return ['status' => false, 'message' => 'Encryption error: ' . $e->getMessage(), 'data' => null];
+        }
+    }
+
+    private function decrypt_v2(string $decoded, string $key): array {
+        try {
+            $minimum = strlen(self::FORMAT_V2) + 16 + 12 + 16;
+            if (strlen($decoded) < $minimum || !str_starts_with($decoded, self::FORMAT_V2)) {
+                throw new \RuntimeException('Invalid encrypted envelope.');
+            }
+            $offset = strlen(self::FORMAT_V2);
+            $salt = substr($decoded, $offset, 16); $offset += 16;
+            $iv = substr($decoded, $offset, 12); $offset += 12;
+            $tag = substr($decoded, $offset, 16); $offset += 16;
+            $ciphertext = substr($decoded, $offset);
+            $derivedKey = $this->derive_key($key, $salt);
+            if ($derivedKey === false) throw new \RuntimeException('Key derivation failed.');
+            $plaintext = openssl_decrypt(
+                $ciphertext,
+                'aes-256-gcm',
+                $derivedKey,
+                OPENSSL_RAW_DATA,
+                $iv,
+                $tag,
+                self::FORMAT_V2
+            );
+            if ($plaintext === false) throw new \RuntimeException('Authentication or decryption failed.');
+            return ['status' => true, 'message' => 'Decryption successful.', 'data' => $plaintext];
+        } catch (\Throwable $e) {
+            return ['status' => false, 'message' => 'Decryption error: ' . $e->getMessage(), 'data' => null];
         }
     }
 
@@ -122,11 +182,11 @@ class PHED {
             }
 
             if ($action === 'encrypt') {
-                // Generate a secure salt
-                $salt = openssl_random_pseudo_bytes(16);
-                if ($salt === false) {
-                    throw new Exception('Salt generation failed.');
+                if (function_exists('openssl_get_cipher_methods') && in_array('aes-256-gcm', openssl_get_cipher_methods(), true)) {
+                    return $this->encrypt_v2((string) $string, (string) $key);
                 }
+                // Generate a secure salt
+                $salt = random_bytes(16);
 
                 // Derive encryption key
                 $derived_key = $this->derive_key($key, $salt);
@@ -148,9 +208,13 @@ class PHED {
                 ];
             } elseif ($action === 'decrypt') {
                 // Decode the base64 string and extract salt
-                $decoded = base64_decode($string);
-                if ($decoded === false) {
+                $decoded = base64_decode($string, true);
+                if ($decoded === false || strlen($decoded) < 17) {
                     throw new Exception('Invalid base64 string.');
+                }
+
+                if (str_starts_with($decoded, self::FORMAT_V2)) {
+                    return $this->decrypt_v2($decoded, (string) $key);
                 }
 
                 $salt = substr($decoded, 0, 16);
@@ -162,7 +226,7 @@ class PHED {
                 // Decrypt the data
                 return $this->decrypt_string($encrypted_data, $derived_key);
             }
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return ['status' => false, 'message' => $e->getMessage(), 'data' => null];
         }
     }
@@ -175,6 +239,11 @@ class PHED {
      */
     public static function make($string, $action) {
         try {
+            $action = match (strtolower(trim((string) $action))) {
+                'en', 'encode' => 'encrypt',
+                'de', 'decode' => 'decrypt',
+                default => strtolower(trim((string) $action)),
+            };
             // Ensure key is securely set
             $key = self::$key;
             if (empty($key) || strlen($key) < 18) {
@@ -190,7 +259,7 @@ class PHED {
             }
 
             return $phed->hide($string, $key, $action);
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return ['status' => false, 'message' => $e->getMessage(), 'data' => null];
         }
     }
@@ -208,7 +277,8 @@ class PHED {
         }
 
         // Check for secure cipher algorithm
-        if (!in_array('aes-256-cbc', openssl_get_cipher_methods())) {
+        if (!function_exists('openssl_get_cipher_methods') ||
+            (!in_array('aes-256-gcm', openssl_get_cipher_methods(), true) && !in_array('aes-256-cbc', openssl_get_cipher_methods(), true))) {
             $score -= 40;
         }
 
@@ -233,7 +303,7 @@ class PHED {
             } else {
                 throw new Exception('New key must be at least 18 characters long.');
             }
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return ['status' => false, 'message' => $e->getMessage(), 'data' => null];
         }
     }

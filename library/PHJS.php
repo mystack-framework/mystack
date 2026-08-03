@@ -15,6 +15,9 @@
  * - 100% Compatibility with Alpine.js and HTMX modifiers out of the box.
  * - Fuzzy intent recognition (e.g., 'toast Hello', 'hide modal').
  * - Fluent JS builder for chaining frontend interactivity directly from PHP.
+ * - Typed PHP-to-JavaScript values, expressions and nested objects.
+ * - Template literals, async/await, functions, classes and ES modules.
+ * - Declarative program compiler with an explicit raw-expression escape hatch.
  * 
  * Usage Example:
  * ```php
@@ -23,10 +26,33 @@
  * 
  * // Generate Titanium chained JS
  * echo PHJS::gen('toast "Data Saved Successfully!"');
+ *
+ * // Build modern JavaScript safely from PHP
+ * echo PHJS::module([
+ *     ['type' => 'const', 'name' => 'now', 'value' => PHJS::expr('Date.now()')],
+ *     ['type' => 'export', 'names' => ['now']],
+ * ]);
  * ```
  */
 
 
+
+/**
+ * Explicit JavaScript expression/value.
+ *
+ * PHP strings are encoded as JavaScript strings by default. Use PHJS::expr()
+ * only when a value must remain executable JavaScript.
+ */
+final class PHJSExpression implements Stringable {
+    public function __construct(private readonly string $code) {
+        if (trim($code) === '') {
+            throw new InvalidArgumentException('JavaScript expression cannot be empty.');
+        }
+    }
+
+    public function code(): string { return $this->code; }
+    public function __toString(): string { return $this->code; }
+}
 
 class PHJS {
     
@@ -217,9 +243,20 @@ class PHJS {
         while ($i < $len) {
             if ($html[$i] === '@' && isset($html[$i+1]) && $html[$i+1] === '[') {
                 $contentStart = $i + 2; $bracketDepth = 1; $j = $contentStart; $dslContent = ''; $foundEnd = false;
+                $quote = null; $escaped = false;
                 while ($j < $len) {
                     $char = $html[$j];
-                    if ($char === '[') $bracketDepth++; elseif ($char === ']') {
+                    if ($escaped) {
+                        $escaped = false;
+                    } elseif ($char === '\\' && $quote !== null) {
+                        $escaped = true;
+                    } elseif ($quote !== null) {
+                        if ($char === $quote) $quote = null;
+                    } elseif ($char === "'" || $char === '"' || $char === '`') {
+                        $quote = $char;
+                    } elseif ($char === '[') {
+                        $bracketDepth++;
+                    } elseif ($char === ']') {
                         $bracketDepth--; if ($bracketDepth === 0) { $foundEnd = true; break; }
                     }
                     $dslContent .= $char; $j++;
@@ -249,11 +286,12 @@ class PHJS {
                 
                 if (!str_starts_with($val, '{') && !str_starts_with($val, '[') && preg_match('/^[a-zA-Z0-9_\-]+\s*=/', $val)) {
                     $obj = [];
-                    $props = explode(',', $val);
+                    $props = self::smartSplit($val, ',');
                     foreach ($props as $prop) {
                         $p = explode('=', trim($prop), 2);
                         if (count($p) === 2) {
                             $k = trim($p[0]); $v = trim($p[1]);
+                            if (!preg_match('/^[a-zA-Z_$][\w$-]*$/', $k)) continue;
                             $isNum = is_numeric($v);
                             $isBool = in_array(strtolower($v), ['true', 'false', 'null']);                            
                             $vStr = ($isNum || $isBool) ? $v : "'".addslashes($v)."'";
@@ -261,14 +299,11 @@ class PHJS {
                         }
                     }
                     $finalVal = "{ " . implode(', ', $obj) . " }";
-                    $attributes[] = "{$attrKey}=\"{$finalVal}\"";
+                    $safeVal = htmlspecialchars($finalVal, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                    $attributes[] = "{$attrKey}=\"{$safeVal}\"";
                 } else {
-                    if (str_starts_with($val, '{') || str_starts_with($val, '[')) {
-                        $attributes[] = "{$attrKey}='{$val}'";
-                    } else {
-                        $safeVal = htmlspecialchars($val, ENT_QUOTES, 'UTF-8');
-                        $attributes[] = "{$attrKey}=\"{$safeVal}\"";
-                    }
+                    $safeVal = htmlspecialchars($val, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                    $attributes[] = "{$attrKey}=\"{$safeVal}\"";
                 }
             } else { 
                 $attributes[] = self::resolveKey($part); 
@@ -277,21 +312,39 @@ class PHJS {
         return implode(' ', $attributes);
     }
 
-    private static function smartSplit($str, $separator) {
-        $parts = []; $buffer = ''; $stack = 0; $inQuote = false; $len = strlen($str);
+    private static function smartSplit(string $str, string $separator): array {
+        $parts = []; $buffer = ''; $stack = []; $quote = null; $escaped = false; $len = strlen($str);
+        $opening = ['{' => '}', '[' => ']', '(' => ')'];
         for ($i = 0; $i < $len; $i++) {
             $char = $str[$i];
-            if ($char === '{' || $char === '[' || $char === '(') $stack++;
-            if ($char === '}' || $char === ']' || $char === ')') $stack--;
-            if ($char === "'" || $char === '"') $inQuote = !$inQuote;
-            if ($char === $separator && $stack === 0 && !$inQuote) { $parts[] = $buffer; $buffer = ''; } else { $buffer .= $char; }
+            if ($escaped) {
+                $escaped = false;
+            } elseif ($char === '\\' && $quote !== null) {
+                $escaped = true;
+            } elseif ($quote !== null) {
+                if ($char === $quote) $quote = null;
+            } elseif ($char === "'" || $char === '"' || $char === '`') {
+                $quote = $char;
+            } elseif (isset($opening[$char])) {
+                $stack[] = $opening[$char];
+            } elseif ($stack !== [] && $char === end($stack)) {
+                array_pop($stack);
+            }
+
+            if ($char === $separator && $stack === [] && $quote === null) {
+                $parts[] = $buffer;
+                $buffer = '';
+            } else {
+                $buffer .= $char;
+            }
         }
-        if (!empty($buffer)) $parts[] = $buffer;
+        if ($buffer !== '') $parts[] = $buffer;
         return $parts;
     }
 
     private static function resolveKey($key) {
-        if (isset(self::$map[$key])) return self::$map[$key];
+        $normalized = strtolower(trim((string) $key));
+        if (isset(self::$map[$normalized])) return self::$map[$normalized];
         if (str_starts_with($key, '@') || str_starts_with($key, ':')) return $key;
         return $key;
     }
@@ -305,20 +358,20 @@ class PHJS {
     // =================================================================
 
     // --- Alpine Globals ---
-    public static function alpineData(string $name, array $obj): string { return "document.addEventListener('alpine:init', () => { Alpine.data('$name', () => (".self::encodeFunction($obj).")) });"; }
-    public static function alpineStore(string $name, array $obj): string { return "document.addEventListener('alpine:init', () => { Alpine.store('$name', ".self::encodeFunction($obj).") });"; }
-    public static function alpineBind(string $name, array $obj): string { return "document.addEventListener('alpine:init', () => { Alpine.bind('$name', () => (".self::encodeFunction($obj).")) });"; }
+    public static function alpineData(string $name, array $obj): string { return "document.addEventListener('alpine:init', () => { Alpine.data(".self::encode($name).", () => (".self::encodeFunction($obj).")) });"; }
+    public static function alpineStore(string $name, array $obj): string { return "document.addEventListener('alpine:init', () => { Alpine.store(".self::encode($name).", ".self::encodeFunction($obj).") });"; }
+    public static function alpineBind(string $name, array $obj): string { return "document.addEventListener('alpine:init', () => { Alpine.bind(".self::encode($name).", () => (".self::encodeFunction($obj).")) });"; }
 
     // --- Magic Variables & Globals ---
     public static function el(): string { return '$el'; }
-    public static function refs(string $name = ''): string { return $name ? "\$refs.$name" : '$refs'; }
-    public static function store(string $name): string { return "\$store.$name"; }
-    public static function watch(string $prop, string $callback): string { return "\$watch('$prop', $callback)"; }
-    public static function dispatch(string $event, array $detail = []): string { return "\$dispatch('$event', ".self::encodeFunction($detail).")"; }
+    public static function refs(string $name = ''): string { if ($name !== '') self::assertIdentifier($name); return $name ? "\$refs.$name" : '$refs'; }
+    public static function store(string $name): string { self::assertIdentifier($name); return "\$store.$name"; }
+    public static function watch(string $prop, string $callback): string { return "\$watch(".self::encode($prop).", $callback)"; }
+    public static function dispatch(string $event, array $detail = []): string { return "\$dispatch(".self::encode($event).", ".self::encodeFunction($detail).")"; }
     public static function nextTick(string $callback): string { return "\$nextTick($callback)"; }
     public static function root(): string { return '$root'; }
     public static function data(): string { return '$data'; }
-    public static function id(string $name): string { return "\$id('$name')"; }
+    public static function id(string $name): string { return "\$id(".self::encode($name).")"; }
     public static function state_magic(): string { return '$state'; }
     public static function params_magic(): string { return '$params'; }
     public static function route_magic(): string { return '$route'; }
@@ -330,12 +383,12 @@ class PHJS {
 
     // --- HTMX JS API ---
     public static function hxProcess(string $sel): string { return "htmx.process(" . self::ele($sel) . ");"; }
-    public static function hxTrigger(string $sel, string $event): string { return "htmx.trigger(" . self::ele($sel) . ", '$event');"; }
-    public static function hxAjax(string $method, string $url, string $target): string { return "htmx.ajax('$method', '$url', '$target');"; }
+    public static function hxTrigger(string $sel, string $event): string { return "htmx.trigger(" . self::ele($sel) . ", ".self::encode($event).");"; }
+    public static function hxAjax(string $method, string $url, string $target): string { return "htmx.ajax(".self::encode($method).", ".self::encode($url).", ".self::encode($target).");"; }
     public static function hxRemove(string $sel): string { return "htmx.remove(" . self::ele($sel) . ");"; }
-    public static function hxAddClass(string $sel, string $cls): string { return "htmx.addClass(" . self::ele($sel) . ", '$cls');"; }
-    public static function hxRemoveClass(string $sel, string $cls): string { return "htmx.removeClass(" . self::ele($sel) . ", '$cls');"; }
-    public static function hxToggleClass(string $sel, string $cls): string { return "htmx.toggleClass(" . self::ele($sel) . ", '$cls');"; }
+    public static function hxAddClass(string $sel, string $cls): string { return "htmx.addClass(" . self::ele($sel) . ", ".self::encode($cls).");"; }
+    public static function hxRemoveClass(string $sel, string $cls): string { return "htmx.removeClass(" . self::ele($sel) . ", ".self::encode($cls).");"; }
+    public static function hxToggleClass(string $sel, string $cls): string { return "htmx.toggleClass(" . self::ele($sel) . ", ".self::encode($cls).");"; }
     public static function hxConfig(array $config): string { return "htmx.config = Object.assign(htmx.config, ".self::encodeFunction($config).");"; }
 
     // --- Variables ---
@@ -344,9 +397,15 @@ class PHJS {
     public static function var($name, $value = null): string { return self::declareVar('var', $name, $value); }
     private static function declareVar($type, $name, $value) {
         if (is_array($name)) {
-            $lines = []; foreach ($name as $k => $v) $lines[] = "$type $k = " . self::encode($v) . ";";
+            $lines = [];
+            foreach ($name as $k => $v) {
+                self::assertIdentifier((string) $k);
+                $lines[] = "$type $k = " . self::encode($v) . ";";
+            }
             return implode("\n", $lines);
-        } return "$type $name = " . self::encode($value) . ";";
+        }
+        self::assertIdentifier((string) $name);
+        return "$type $name = " . self::encode($value) . ";";
     }
 
     // --- Console ---
@@ -356,90 +415,447 @@ class PHJS {
     public static function table($msg): string { return "console.table(".self::encode($msg).");"; }
 
     // --- Storage ---
-    public static function localSet(string $key, $val): string { return "localStorage.setItem('$key', ".self::encode($val).");"; }
-    public static function localGet(string $key): string { return "localStorage.getItem('$key')"; }
-    public static function localRemove(string $key): string { return "localStorage.removeItem('$key');"; }
-    public static function sessionSet(string $key, $val): string { return "sessionStorage.setItem('$key', ".self::encode($val).");"; }
-    public static function sessionGet(string $key): string { return "sessionStorage.getItem('$key')"; }
-    public static function cookieSet(string $name, string $value, int $days = 7): string { return "document.cookie = '$name=".urlencode($value)."; path=/; max-age=' + ($days * 86400);"; }
+    public static function localSet(string $key, $val): string { return "localStorage.setItem(".self::encode($key).", ".self::encode($val).");"; }
+    public static function localGet(string $key): string { return "localStorage.getItem(".self::encode($key).")"; }
+    public static function localRemove(string $key): string { return "localStorage.removeItem(".self::encode($key).");"; }
+    public static function sessionSet(string $key, $val): string { return "sessionStorage.setItem(".self::encode($key).", ".self::encode($val).");"; }
+    public static function sessionGet(string $key): string { return "sessionStorage.getItem(".self::encode($key).")"; }
+    public static function cookieSet(string $name, string $value, int $days = 7): string { return "document.cookie = ".self::encode(rawurlencode($name).'='.rawurlencode($value).'; path=/; max-age=')." + ".($days * 86400).";"; }
 
     // --- DOM ---
-    private static function ele(string $sel): string { return str_starts_with($sel, '#') ? "document.getElementById('" . substr($sel, 1) . "')" : (in_array($sel, ['window','document','body']) ? $sel : "document.querySelector('$sel')"); }
+    private static function ele(string $sel): string { return str_starts_with($sel, '#') ? "document.getElementById(" . self::encode(substr($sel, 1)) . ")" : (in_array($sel, ['window','document','body'], true) ? $sel : "document.querySelector(".self::encode($sel).")"); }
     public static function html(string $sel, string $html): string { return self::ele($sel).".innerHTML = ".self::encode($html).";"; }
     public static function text(string $sel, string $text): string { return self::ele($sel).".innerText = ".self::encode($text).";"; }
     public static function val(string $sel, $val): string { return self::ele($sel).".value = ".self::encode($val).";"; }
-    public static function addClass(string $sel, string $cls): string { return self::ele($sel).".classList.add('$cls');"; }
-    public static function removeClass(string $sel, string $cls): string { return self::ele($sel).".classList.remove('$cls');"; }
-    public static function toggleClass(string $sel, string $cls): string { return self::ele($sel).".classList.toggle('$cls');"; }
-    public static function css(string $sel, string $prop, string $val): string { return self::ele($sel).".style.$prop = '$val';"; }
-    public static function attr(string $sel, string $attr, string $val): string { return self::ele($sel).".setAttribute('$attr', '$val');"; }
+    public static function addClass(string $sel, string $cls): string { return self::ele($sel).".classList.add(".self::encode($cls).");"; }
+    public static function removeClass(string $sel, string $cls): string { return self::ele($sel).".classList.remove(".self::encode($cls).");"; }
+    public static function toggleClass(string $sel, string $cls): string { return self::ele($sel).".classList.toggle(".self::encode($cls).");"; }
+    public static function css(string $sel, string $prop, string $val): string { return self::ele($sel).".style.setProperty(".self::encode($prop).", ".self::encode($val).");"; }
+    public static function attr(string $sel, string $attr, string $val): string { return self::ele($sel).".setAttribute(".self::encode($attr).", ".self::encode($val).");"; }
     public static function remove(string $sel): string { return self::ele($sel).".remove();"; }
 
     // --- Events ---
-    public static function event(string $sel, string $evt, string $code): string { return self::ele($sel) . ".addEventListener('$evt', function(e) { $code });"; }
+    public static function event(string $sel, string $evt, string $code): string { return self::ele($sel) . ".addEventListener(".self::encode($evt).", function(e) { $code });"; }
     public static function onReady(string $code): string { return "document.addEventListener('DOMContentLoaded', function() { $code });"; }
 
     // --- Network ---
-    public static function redirect(string $url): string { return "window.location.href = '$url';"; }
+    public static function redirect(string $url): string { return "window.location.href = ".self::encode($url).";"; }
     public static function reload(): string { return "window.location.reload();"; }
     public static function alert($msg): string { return "alert(".self::encode($msg).");"; }
-    public static function fetch(string $url, array $opts = []): string { return "fetch('$url', ".self::encodeFunction($opts).").then(r => r.json()).then(d => console.log(d));"; }
+    public static function fetch(string $url, array $opts = []): string { return "fetch(".self::encode($url).", ".self::encodeFunction($opts).").then(r => r.json()).then(d => console.log(d));"; }
     public static function raw(string $code): string { return $code . ";"; }
 
     // --- APP JS Engine (PHJS Core) ---
     public static function appReady(string $code): string { return "APP.ready(function(APP) { $code });"; }
-    public static function appNavigate(string $url): string { return "APP.navigate('$url');"; }
-    public static function appLink(string $url): string { return "APP.link('$url')"; }
-    public static function appApi(string $url): string { return "APP.api('$url')"; }
-    public static function appRoutePath(string $url = ''): string { return "APP.getRoutePath('$url')"; }
-    public static function appToast(string $msg, string $type = 'info'): string { return "APP.ui.toast(".self::encode($msg).", '$type');"; }
-    public static function appModal(string $id, string $action = 'open'): string { return "APP.ui.modal('$id', '$action');"; }
+    public static function appNavigate(string $url): string { return "APP.navigate(".self::encode($url).");"; }
+    public static function appLink(string $url): string { return "APP.link(".self::encode($url).")"; }
+    public static function appApi(string $url): string { return "APP.api(".self::encode($url).")"; }
+    public static function appRoutePath(string $url = ''): string { return "APP.getRoutePath(".self::encode($url).")"; }
+    public static function appToast(string $msg, string $type = 'info'): string { return "APP.ui.toast(".self::encode($msg).", ".self::encode($type).");"; }
+    public static function appModal(string $id, string $action = 'open'): string { return "APP.ui.modal(".self::encode($id).", ".self::encode($action).");"; }
     public static function appProgress(bool $start = true): string { return $start ? "APP.ui.progress.start();" : "APP.ui.progress.done();"; }
-    public static function appTheme(string $name): string { return "APP.theme.set('$name');"; }
+    public static function appTheme(string $name): string { return "APP.theme.set(".self::encode($name).");"; }
     public static function appThemeToggle(): string { return "APP.theme.toggle();"; }
-    public static function appValidate(string $selector): string { return "APP.validate('$selector');"; }
-    public static function appCheck(string $selector, ?string $successMsg = null): string { return "APP.check('$selector', " . ($successMsg ? self::encode($successMsg) : 'null') . ");"; }
+    public static function appValidate(string $selector): string { return "APP.validate(".self::encode($selector).");"; }
+    public static function appCheck(string $selector, ?string $successMsg = null): string { return "APP.check(".self::encode($selector).", " . ($successMsg !== null ? self::encode($successMsg) : 'null') . ");"; }
     public static function appSeo(array $config): string { return "APP.seo.set(".self::encodeFunction($config).");"; }
-    public static function appI18n(string $lang): string { return "APP.i18n.set('$lang');"; }
-    public static function appStoreGet(string $name): string { return "APP.store('$name')"; }
-    public static function appStoreSet(string $name, $value): string { return "APP.store('$name', ".self::encode($value).");"; }
-    public static function appStoreDispatch(string $action, $payload = null): string { return "APP.store.dispatch('$action', ".self::encode($payload).");"; }
-    public static function appDbStorageSet(string $key, $val): string { return "APP.storage.set('$key', ".self::encode($val).");"; }
-    public static function appDbStorageGet(string $key): string { return "APP.storage.get('$key')"; }
-    public static function appDbStorageDel(string $key): string { return "APP.storage.del('$key');"; }
-    public static function appDbSync(string $namespace, string $url): string { return "APP.db.sync('$namespace', '$url');"; }
-    public static function appRequest(string $url, array $opts = []): string { return "APP.request('$url', ".self::encodeFunction($opts).");"; }
-    public static function appUpload(string $fileVar, string $endpoint, array $options = []): string { return "APP.uploader.upload($fileVar, '$endpoint', ".self::encodeFunction($options).");"; }
-    public static function appSearch(string $indexName, string $query): string { return "APP.search.query('$indexName', ".self::encode($query).")"; }
-    public static function appSearchIndex(string $indexName, array $data): string { return "APP.search.index('$indexName', ".self::encodeFunction($data).");"; }
-    public static function appHardware(string $type, string $action = 'connect', array $args = []): string { return "APP.hardware.$type.$action(".self::encodeFunction($args).");"; }
-    public static function appDrmProtect(string $selector, array $config = []): string { return "APP.drm.protect(document.querySelector('$selector'), ".self::encodeFunction($config).");"; }
-    public static function appFsRead(string $accept = '.txt,.json,.md'): string { return "APP.fs.readFile('$accept')"; }
-    public static function appFsSave(string $content, string $defaultName = 'export.txt'): string { return "APP.fs.saveFile(".self::encode($content).", '$defaultName')"; }
-    public static function appMediaInit(string $selector, array $options = []): string { return "APP.media.init(document.querySelector('$selector'), ".self::encodeFunction($options).");"; }
-    public static function appChartInit(string $selector, array $options = []): string { return "APP.charts.init(document.querySelector('$selector'), ".self::encodeFunction($options).");"; }
-    public static function appWorker(string $task, array $data = []): string { return "APP.worker.run('$task', ".self::encodeFunction($data).");"; }
+    public static function appI18n(string $lang): string { return "APP.i18n.set(".self::encode($lang).");"; }
+    public static function appStoreGet(string $name): string { return "APP.store(".self::encode($name).")"; }
+    public static function appStoreSet(string $name, $value): string { return "APP.store(".self::encode($name).", ".self::encode($value).");"; }
+    public static function appStoreDispatch(string $action, $payload = null): string { return "APP.store.dispatch(".self::encode($action).", ".self::encode($payload).");"; }
+    public static function appDbStorageSet(string $key, $val): string { return "APP.storage.set(".self::encode($key).", ".self::encode($val).");"; }
+    public static function appDbStorageGet(string $key): string { return "APP.storage.get(".self::encode($key).")"; }
+    public static function appDbStorageDel(string $key): string { return "APP.storage.del(".self::encode($key).");"; }
+    public static function appDbSync(string $namespace, string $url): string { return "APP.db.sync(".self::encode($namespace).", ".self::encode($url).");"; }
+    public static function appRequest(string $url, array $opts = []): string { return "APP.request(".self::encode($url).", ".self::encodeFunction($opts).");"; }
+    public static function appUpload(string $fileVar, string $endpoint, array $options = []): string { self::assertIdentifier($fileVar); return "APP.uploader.upload($fileVar, ".self::encode($endpoint).", ".self::encodeFunction($options).");"; }
+    public static function appSearch(string $indexName, string $query): string { return "APP.search.query(".self::encode($indexName).", ".self::encode($query).")"; }
+    public static function appSearchIndex(string $indexName, array $data): string { return "APP.search.index(".self::encode($indexName).", ".self::encodeFunction($data).");"; }
+    public static function appHardware(string $type, string $action = 'connect', array $args = []): string { self::assertIdentifier($type); self::assertIdentifier($action); return "APP.hardware.$type.$action(".self::encodeFunction($args).");"; }
+    public static function appDrmProtect(string $selector, array $config = []): string { return "APP.drm.protect(document.querySelector(".self::encode($selector)."), ".self::encodeFunction($config).");"; }
+    public static function appFsRead(string $accept = '.txt,.json,.md'): string { return "APP.fs.readFile(".self::encode($accept).")"; }
+    public static function appFsSave(string $content, string $defaultName = 'export.txt'): string { return "APP.fs.saveFile(".self::encode($content).", ".self::encode($defaultName).")"; }
+    public static function appMediaInit(string $selector, array $options = []): string { return "APP.media.init(document.querySelector(".self::encode($selector)."), ".self::encodeFunction($options).");"; }
+    public static function appChartInit(string $selector, array $options = []): string { return "APP.charts.init(document.querySelector(".self::encode($selector)."), ".self::encodeFunction($options).");"; }
+    public static function appWorker(string $task, array $data = []): string { return "APP.worker.run(".self::encode($task).", ".self::encodeFunction($data).");"; }
     public static function appInspector(): string { return "APP.inspector.toggle();"; }
     public static function appPalette(): string { return "APP.palette.toggle();"; }
-    public static function appA11yTrap(string $selector): string { return "APP.a11y.trapFocus(document.querySelector('$selector'));"; }
-    public static function appDesignSet(string $name, string $value): string { return "APP.design.set('$name', ".self::encode($value).");"; }
-    public static function appDesignGet(string $name): string { return "APP.design.get('$name')"; }
-    public static function appTimeFormat(string $dateVar = 'new Date()', string $pattern = 'YYYY-MM-DD HH:mm:ss'): string { return "APP.time.format($dateVar, '$pattern')"; }
+    public static function appA11yTrap(string $selector): string { return "APP.a11y.trapFocus(document.querySelector(".self::encode($selector)."));"; }
+    public static function appDesignSet(string $name, string $value): string { return "APP.design.set(".self::encode($name).", ".self::encode($value).");"; }
+    public static function appDesignGet(string $name): string { return "APP.design.get(".self::encode($name).")"; }
+    public static function appTimeFormat(string $dateVar = 'new Date()', string $pattern = 'YYYY-MM-DD HH:mm:ss'): string { return "APP.time.format($dateVar, ".self::encode($pattern).")"; }
     public static function appTimeAgo(string $dateVar): string { return "APP.time.ago($dateVar)"; }
-    public static function appAuthTotp(string $secret): string { return "APP.auth.totp.getCode('$secret')"; }
-    public static function appHeroUpdate(string $selector): string { return "APP.hero.update(document.querySelector('$selector'));"; }
-    public static function appAnimateTo(string $selector, array $props, array $options = []): string { return "APP.animate.to('$selector', ".self::encodeFunction($props).", ".self::encodeFunction($options).");"; }
-    public static function appAnimateSpring(string $selector, array $props): string { return "APP.animate.spring('$selector', ".self::encodeFunction($props).");"; }
-    public static function appFontLoad(string $name, string $url): string { return "APP.font.load('$name', '$url');"; }
+    /** Local enrollment-preview helper only; server-side PHTP must verify codes. */
+    public static function appAuthTotp(string $secret, array $options = []): string { return "APP.auth.totp.getCode(".self::encode($secret).", ".self::encodeFunction($options).")"; }
+    public static function appOAuthStart(string $url, array $options = []): string { return "APP.auth.oauth.start(".self::encode($url).", ".self::encodeFunction($options).");"; }
+    public static function appOAuthCallback(array $result = [], array $options = []): string { return "APP.auth.oauth.callback(".self::encodeFunction($result).", ".self::encodeFunction($options).");"; }
+    public static function appTwoFactorSubmit(string $endpoint, string $codeExpression, array $options = []): string { return "APP.auth.twoFactor.submit(".self::encode($endpoint).", ".$codeExpression.", ".self::encodeFunction($options).")"; }
+    public static function appPaymentStart(string $endpoint, array $data = [], array $options = []): string { return "APP.payment.start(".self::encode($endpoint).", ".self::encodeFunction($data).", ".self::encodeFunction($options).")"; }
+    public static function appPaymentStatus(string $endpoint, array $options = []): string { return "APP.payment.status(".self::encode($endpoint).", ".self::encodeFunction($options).")"; }
+    public static function appHeroUpdate(string $selector): string { return "APP.hero.update(document.querySelector(".self::encode($selector)."));"; }
+    public static function appAnimateTo(string $selector, array $props, array $options = []): string { return "APP.animate.to(".self::encode($selector).", ".self::encodeFunction($props).", ".self::encodeFunction($options).");"; }
+    public static function appAnimateSpring(string $selector, array $props): string { return "APP.animate.spring(".self::encode($selector).", ".self::encodeFunction($props).");"; }
+    public static function appFontLoad(string $name, string $url): string { return "APP.font.load(".self::encode($name).", ".self::encode($url).");"; }
     public static function appAi(string $prompt, array $opts = []): string { return "APP.ai.prompt(".self::encode($prompt).", ".self::encodeFunction($opts).");"; }
     public static function appXrInit(array $opts = []): string { return "APP.xr.init(".self::encodeFunction($opts).");"; }
     public static function appPwaEnable(array $opts = []): string { return "APP.enablePWA(".self::encodeFunction($opts).");"; }
     public static function appHydrate(): string { return "APP.hydrate();"; }
 
+    // =================================================================
+    // PART 2.5: TYPED JAVASCRIPT BUILDER (PHP -> modern JavaScript)
+    // =================================================================
+
+    /**
+     * Mark trusted input as executable JavaScript instead of a JS string.
+     */
+    public static function expr(string $code): PHJSExpression {
+        return new PHJSExpression($code);
+    }
+
+    /**
+     * Translate a PHP value into a JavaScript value.
+     *
+     * Nested PHJSExpression instances remain executable inside arrays/objects.
+     */
+    public static function value(mixed $value): string {
+        return self::encodeValue($value);
+    }
+
+    public static function translate(mixed $value): string {
+        return self::encodeValue($value);
+    }
+
+    public static function arrayValue(array $values): PHJSExpression {
+        return self::expr(self::encodeValue(array_values($values)));
+    }
+
+    public static function object(array|object $values): PHJSExpression {
+        return self::expr(self::encodeValue($values));
+    }
+
+    /**
+     * Build a JavaScript template literal.
+     *
+     * Example:
+     * PHJS::template('Hello {{name}}', ['name' => PHJS::expr('user.name')])
+     */
+    public static function template(string $template, array $values = []): PHJSExpression {
+        $escaped = str_replace(['\\', '`', '${'], ['\\\\', '\`', '\${'], $template);
+        $compiled = preg_replace_callback('/\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}/', function (array $match) use ($values): string {
+            $key = $match[1];
+            if (!array_key_exists($key, $values)) {
+                throw new InvalidArgumentException("Missing PHJS template value: {$key}");
+            }
+            return '${' . self::encodeValue($values[$key]) . '}';
+        }, $escaped);
+        return self::expr('`' . $compiled . '`');
+    }
+
+    public static function statement(string|PHJSExpression $code): string {
+        $code = trim((string) $code);
+        if ($code === '') return '';
+        return preg_match('/[;{}]\s*$/', $code) ? $code : $code . ';';
+    }
+
+    public static function program(mixed ...$parts): string {
+        $lines = [];
+        foreach ($parts as $part) {
+            $compiled = self::build($part);
+            if ($compiled !== '') $lines[] = $compiled;
+        }
+        return implode("\n", $lines);
+    }
+
+    public static function compile(mixed $definition): string {
+        return self::build($definition);
+    }
+
+    public static function module(array $definitions): string {
+        return self::build($definitions);
+    }
+
+    /**
+     * Declarative JavaScript compiler.
+     *
+     * Each node uses a `type`, for example:
+     * ['type'=>'const', 'name'=>'count', 'value'=>0]
+     * ['type'=>'if', 'test'=>PHJS::expr('count > 0'), 'then'=>[...]]
+     */
+    public static function build(mixed $definition): string {
+        if ($definition === null) return '';
+        if ($definition instanceof PHJSExpression) return self::statement($definition);
+        if (is_string($definition)) return trim($definition);
+        if (!is_array($definition)) {
+            throw new InvalidArgumentException('PHJS build definition must be a string, expression, array, or null.');
+        }
+        if (array_is_list($definition)) {
+            $compiled = [];
+            foreach ($definition as $node) {
+                $line = self::build($node);
+                if ($line !== '') $compiled[] = $line;
+            }
+            return implode("\n", $compiled);
+        }
+
+        $type = strtolower((string) ($definition['type'] ?? ''));
+        if ($type === '') {
+            return self::statement(self::expr(self::encodeValue($definition)));
+        }
+
+        return match ($type) {
+            'raw', 'statement' => self::statement((string) ($definition['code'] ?? '')),
+            'expression' => self::statement(self::asExpression($definition['value'] ?? $definition['code'] ?? null)),
+            'const', 'let', 'var' => self::declarationNode($type, $definition),
+            'assign' => self::assign(
+                (string) ($definition['target'] ?? ''),
+                $definition['value'] ?? null,
+                (string) ($definition['operator'] ?? '=')
+            ),
+            'call' => self::statement(self::invoke(
+                (string) ($definition['name'] ?? ''),
+                ...(array) ($definition['args'] ?? [])
+            )),
+            'return' => self::returnValue($definition['value'] ?? null),
+            'throw' => self::throwValue($definition['value'] ?? 'Error'),
+            'break' => self::flowStatement('break', (string) ($definition['label'] ?? '')),
+            'continue' => self::flowStatement('continue', (string) ($definition['label'] ?? '')),
+            'if' => self::ifBlock(
+                $definition['test'] ?? false,
+                $definition['then'] ?? [],
+                $definition['else'] ?? null
+            ),
+            'for-of' => self::forOf(
+                (string) ($definition['value'] ?? 'item'),
+                $definition['iterable'] ?? [],
+                $definition['body'] ?? [],
+                (string) ($definition['key'] ?? '')
+            ),
+            'while' => self::whileBlock($definition['test'] ?? false, $definition['body'] ?? []),
+            'do-while' => self::doWhileBlock($definition['body'] ?? [], $definition['test'] ?? false),
+            'for' => self::forBlock(
+                $definition['init'] ?? '',
+                $definition['test'] ?? true,
+                $definition['update'] ?? '',
+                $definition['body'] ?? []
+            ),
+            'switch' => self::switchBlock(
+                $definition['test'] ?? null,
+                (array) ($definition['cases'] ?? []),
+                $definition['default'] ?? null
+            ),
+            'function' => self::functionDef(
+                (string) ($definition['name'] ?? ''),
+                (array) ($definition['params'] ?? []),
+                $definition['body'] ?? [],
+                (bool) ($definition['async'] ?? false),
+                (bool) ($definition['generator'] ?? false)
+            ),
+            'class' => self::classDef(
+                (string) ($definition['name'] ?? ''),
+                (array) ($definition['methods'] ?? []),
+                isset($definition['extends']) ? (string) $definition['extends'] : null
+            ),
+            'try' => self::tryCatch(
+                $definition['try'] ?? [],
+                (string) ($definition['catch'] ?? 'error'),
+                $definition['catchBody'] ?? [],
+                $definition['finally'] ?? null
+            ),
+            'import' => self::importModule(
+                (string) ($definition['from'] ?? ''),
+                isset($definition['default']) ? (string) $definition['default'] : null,
+                (array) ($definition['named'] ?? [])
+            ),
+            'export-default' => self::exportDefault($definition['value'] ?? null),
+            'export' => self::exportNamed((array) ($definition['names'] ?? [])),
+            default => throw new InvalidArgumentException("Unsupported PHJS build node type: {$type}"),
+        };
+    }
+
+    public static function arrow(array|string $params, mixed $body, bool $async = false, bool $expression = false): PHJSExpression {
+        $params = self::parameterList($params);
+        $prefix = $async ? 'async ' : '';
+        if ($expression) {
+            return self::expr("{$prefix}({$params}) => " . self::asExpression($body));
+        }
+        return self::expr("{$prefix}({$params}) => {\n" . self::indent(self::build($body)) . "\n}");
+    }
+
+    public static function functionDef(
+        string $name,
+        array $params,
+        mixed $body,
+        bool $async = false,
+        bool $generator = false
+    ): string {
+        self::assertIdentifier($name);
+        $prefix = $async ? 'async ' : '';
+        $star = $generator ? '*' : '';
+        return "{$prefix}function{$star} {$name}(" . self::parameterList($params) . ") {\n"
+            . self::indent(self::build($body)) . "\n}";
+    }
+
+    public static function assign(string $target, mixed $value, string $operator = '='): string {
+        self::assertAssignable($target);
+        if (!in_array($operator, ['=', '+=', '-=', '*=', '/=', '%=', '&&=', '||=', '??='], true)) {
+            throw new InvalidArgumentException("Unsupported JavaScript assignment operator: {$operator}");
+        }
+        return "{$target} {$operator} " . self::encodeValue($value) . ';';
+    }
+
+    public static function returnValue(mixed $value = null): string {
+        return func_num_args() === 0 ? 'return;' : 'return ' . self::encodeValue($value) . ';';
+    }
+
+    public static function throwValue(mixed $value): string {
+        $expression = $value instanceof PHJSExpression
+            ? self::encodeValue($value)
+            : 'new Error(' . self::encodeValue($value) . ')';
+        return "throw {$expression};";
+    }
+
+    public static function awaitValue(mixed $value): PHJSExpression {
+        return self::expr('await ' . self::asExpression($value));
+    }
+
+    public static function invoke(string|PHJSExpression $callable, mixed ...$args): PHJSExpression {
+        $callee = $callable instanceof PHJSExpression ? (string) $callable : trim($callable);
+        self::assertCallable($callee);
+        return self::expr($callee . '(' . implode(', ', array_map([self::class, 'encodeValue'], $args)) . ')');
+    }
+
+    public static function construct(string $className, mixed ...$args): PHJSExpression {
+        self::assertCallable($className);
+        return self::expr('new ' . $className . '(' . implode(', ', array_map([self::class, 'encodeValue'], $args)) . ')');
+    }
+
+    public static function dynamicImport(string $from): PHJSExpression {
+        return self::expr('import(' . self::encodeValue($from) . ')');
+    }
+
+    public static function ternary(mixed $test, mixed $truthy, mixed $falsy): PHJSExpression {
+        return self::expr(
+            '(' . self::asExpression($test) . ' ? ' . self::asExpression($truthy) . ' : ' . self::asExpression($falsy) . ')'
+        );
+    }
+
+    public static function ifBlock(mixed $test, mixed $then, mixed $else = null): string {
+        $code = 'if (' . self::asExpression($test) . ") {\n" . self::indent(self::build($then)) . "\n}";
+        if ($else !== null) $code .= " else {\n" . self::indent(self::build($else)) . "\n}";
+        return $code;
+    }
+
+    public static function forOf(string $value, mixed $iterable, mixed $body, string $key = ''): string {
+        self::assertIdentifier($value);
+        if ($key !== '') {
+            self::assertIdentifier($key);
+            $binding = "[{$key}, {$value}]";
+            $source = 'Object.entries(' . self::asExpression($iterable) . ')';
+        } else {
+            $binding = $value;
+            $source = self::asExpression($iterable);
+        }
+        return "for (const {$binding} of {$source}) {\n" . self::indent(self::build($body)) . "\n}";
+    }
+
+    public static function whileBlock(mixed $test, mixed $body): string {
+        return 'while (' . self::asExpression($test) . ") {\n" . self::indent(self::build($body)) . "\n}";
+    }
+
+    public static function doWhileBlock(mixed $body, mixed $test): string {
+        return "do {\n" . self::indent(self::build($body)) . "\n} while (" . self::asExpression($test) . ');';
+    }
+
+    public static function forBlock(mixed $init, mixed $test, mixed $update, mixed $body): string {
+        $initCode = self::forClause($init);
+        $testCode = $test === '' ? '' : self::asExpression($test);
+        $updateCode = self::forClause($update);
+        return "for ({$initCode}; {$testCode}; {$updateCode}) {\n" . self::indent(self::build($body)) . "\n}";
+    }
+
+    public static function switchBlock(mixed $test, array $cases, mixed $default = null): string {
+        $parts = [];
+        foreach ($cases as $case => $body) {
+            $parts[] = 'case ' . self::asExpression($case instanceof PHJSExpression ? $case : $case) . ":\n"
+                . self::indent(self::build($body), 2);
+        }
+        if ($default !== null) $parts[] = "default:\n" . self::indent(self::build($default), 2);
+        return 'switch (' . self::asExpression($test) . ") {\n" . self::indent(implode("\n", $parts)) . "\n}";
+    }
+
+    public static function tryCatch(mixed $try, string $catch, mixed $catchBody, mixed $finally = null): string {
+        self::assertIdentifier($catch);
+        $code = "try {\n" . self::indent(self::build($try)) . "\n} catch ({$catch}) {\n"
+            . self::indent(self::build($catchBody)) . "\n}";
+        if ($finally !== null) $code .= " finally {\n" . self::indent(self::build($finally)) . "\n}";
+        return $code;
+    }
+
+    public static function classDef(string $name, array $methods, ?string $extends = null): string {
+        self::assertIdentifier($name);
+        $header = "class {$name}";
+        if ($extends !== null && $extends !== '') {
+            self::assertCallable($extends);
+            $header .= " extends {$extends}";
+        }
+        $compiled = [];
+        foreach ($methods as $methodName => $definition) {
+            if (is_int($methodName)) {
+                $methodName = (string) ($definition['name'] ?? '');
+            }
+            self::assertMethodName((string) $methodName);
+            $definition = is_array($definition) ? $definition : ['body' => $definition];
+            $params = self::parameterList((array) ($definition['params'] ?? []));
+            $prefix = !empty($definition['static']) ? 'static ' : '';
+            if (!empty($definition['async'])) $prefix .= 'async ';
+            $compiled[] = "{$prefix}{$methodName}({$params}) {\n"
+                . self::indent(self::build($definition['body'] ?? [])) . "\n}";
+        }
+        return "{$header} {\n" . self::indent(implode("\n\n", $compiled)) . "\n}";
+    }
+
+    public static function importModule(string $from, ?string $default = null, array $named = []): string {
+        if ($from === '') throw new InvalidArgumentException('JavaScript import source cannot be empty.');
+        $bindings = [];
+        if ($default !== null && $default !== '') {
+            self::assertIdentifier($default);
+            $bindings[] = $default;
+        }
+        if ($named !== []) {
+            $imports = [];
+            foreach ($named as $source => $alias) {
+                if (is_int($source)) $source = $alias;
+                self::assertIdentifier((string) $source);
+                self::assertIdentifier((string) $alias);
+                $imports[] = $source === $alias ? $source : "{$source} as {$alias}";
+            }
+            $bindings[] = '{ ' . implode(', ', $imports) . ' }';
+        }
+        return $bindings === []
+            ? 'import ' . self::encodeValue($from) . ';'
+            : 'import ' . implode(', ', $bindings) . ' from ' . self::encodeValue($from) . ';';
+    }
+
+    public static function exportDefault(mixed $value): string {
+        return 'export default ' . self::asExpression($value) . ';';
+    }
+
+    public static function exportNamed(array $names): string {
+        $compiled = [];
+        foreach ($names as $source => $alias) {
+            if (is_int($source)) $source = $alias;
+            self::assertIdentifier((string) $source);
+            self::assertIdentifier((string) $alias);
+            $compiled[] = $source === $alias ? $source : "{$source} as {$alias}";
+        }
+        return 'export { ' . implode(', ', $compiled) . ' };';
+    }
+
     /**
      * Explicit JS Function Caller
      */
     public static function call(string $name, ...$args): string {
+        self::assertCallable($name);
         $params = array_map([self::class, 'encode'], $args);
         return "{$name}(" . implode(', ', $params) . ");";
     }
@@ -447,18 +863,150 @@ class PHJS {
     /**
      * Wrap JS in Script Tag
      */
-    public static function script(string $js): string {
-        return "<script>\n" . trim($js) . "\n</script>";
+    public static function script(string $js, bool $module = false): string {
+        $type = $module ? ' type="module"' : '';
+        return "<script{$type}>\n" . str_ireplace('</script', '<\/script', trim($js)) . "\n</script>";
     }
 
-    private static function encode($value) {
-        if (is_numeric($value)) return $value;
-        if (is_bool($value)) return $value ? 'true' : 'false';
-        if (is_null($value)) return 'null';
-        if (is_string($value) && (str_starts_with($value, 'function') || str_contains($value, '=>'))) return $value;
-        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    public static function moduleScript(array|string $definition): string {
+        return self::script(is_array($definition) ? self::module($definition) : $definition, true);
     }
-    private static function encodeFunction($arr) { return json_encode($arr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); }
+
+    private static function encode(mixed $value): string {
+        return self::encodeValue($value);
+    }
+
+    private static function encodeFunction(mixed $value): string {
+        return self::encodeValue($value);
+    }
+
+    private static function encodeValue(mixed $value): string {
+        if ($value instanceof PHJSExpression) return $value->code();
+        if ($value === null) return 'null';
+        if (is_bool($value)) return $value ? 'true' : 'false';
+        if (is_int($value)) return (string) $value;
+        if (is_float($value)) {
+            if (is_nan($value)) return 'Number.NaN';
+            if ($value === INF) return 'Number.POSITIVE_INFINITY';
+            if ($value === -INF) return 'Number.NEGATIVE_INFINITY';
+            return json_encode($value, JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR);
+        }
+        if (is_string($value)) {
+            // Backward compatibility for the builder's historical function-string input.
+            if (preg_match('/^\s*(?:async\s+)?function(?:\s*\*)?\b[\s\S]*}\s*$/', $value)
+                || preg_match('/^\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>[\s\S]+$/', $value)) {
+                return trim($value);
+            }
+            return self::jsonString($value);
+        }
+        if ($value instanceof Closure) {
+            throw new InvalidArgumentException(
+                'PHP closures cannot be translated reliably. Use PHJS::arrow(), PHJS::functionDef(), or PHJS::expr().'
+            );
+        }
+        if ($value instanceof DateTimeInterface) return self::jsonString($value->format(DateTimeInterface::ATOM));
+        if ($value instanceof JsonSerializable) return self::encodeValue($value->jsonSerialize());
+        if (is_object($value)) return self::encodeValue(get_object_vars($value));
+        if (is_array($value)) {
+            if (array_is_list($value)) {
+                return '[' . implode(', ', array_map([self::class, 'encodeValue'], $value)) . ']';
+            }
+            $properties = [];
+            foreach ($value as $key => $item) {
+                $properties[] = self::jsonString((string) $key) . ': ' . self::encodeValue($item);
+            }
+            return '{' . implode(', ', $properties) . '}';
+        }
+        throw new InvalidArgumentException('Unsupported PHP value for JavaScript translation: ' . get_debug_type($value));
+    }
+
+    private static function jsonString(string $value): string {
+        return json_encode(
+            $value,
+            JSON_UNESCAPED_UNICODE
+            | JSON_UNESCAPED_SLASHES
+            | JSON_HEX_TAG
+            | JSON_HEX_AMP
+            | JSON_HEX_APOS
+            | JSON_HEX_QUOT
+            | JSON_INVALID_UTF8_SUBSTITUTE
+            | JSON_THROW_ON_ERROR
+        );
+    }
+
+    private static function asExpression(mixed $value): string {
+        if ($value instanceof PHJSExpression) return $value->code();
+        return self::encodeValue($value);
+    }
+
+    private static function declarationNode(string $type, array $definition): string {
+        $name = (string) ($definition['name'] ?? '');
+        self::assertIdentifier($name);
+        if (!array_key_exists('value', $definition)) return "{$type} {$name};";
+        return "{$type} {$name} = " . self::encodeValue($definition['value']) . ';';
+    }
+
+    private static function flowStatement(string $keyword, string $label = ''): string {
+        if ($label !== '') self::assertIdentifier($label);
+        return $keyword . ($label !== '' ? " {$label}" : '') . ';';
+    }
+
+    private static function forClause(mixed $clause): string {
+        if ($clause === null || $clause === '') return '';
+        $compiled = $clause instanceof PHJSExpression
+            ? $clause->code()
+            : (is_array($clause) ? self::build($clause) : trim((string) $clause));
+        return rtrim(trim($compiled), ';');
+    }
+
+    private static function parameterList(array|string $params): string {
+        if (is_string($params)) {
+            $params = trim($params) === '' ? [] : array_map('trim', explode(',', $params));
+        }
+        $compiled = [];
+        foreach ($params as $name => $default) {
+            if (is_int($name)) {
+                $param = (string) $default;
+                $rest = str_starts_with($param, '...');
+                $identifier = $rest ? substr($param, 3) : $param;
+                self::assertIdentifier($identifier);
+                $compiled[] = $rest ? '...' . $identifier : $identifier;
+                continue;
+            }
+            self::assertIdentifier((string) $name);
+            $compiled[] = $name . ' = ' . self::encodeValue($default);
+        }
+        return implode(', ', $compiled);
+    }
+
+    private static function indent(string $code, int $level = 1): string {
+        if ($code === '') return '';
+        $padding = str_repeat('    ', max(0, $level));
+        return $padding . str_replace("\n", "\n{$padding}", rtrim($code));
+    }
+
+    private static function assertIdentifier(string $identifier): void {
+        if (!preg_match('/^[a-zA-Z_$][\w$]*$/', $identifier)) {
+            throw new InvalidArgumentException("Invalid JavaScript identifier: {$identifier}");
+        }
+    }
+
+    private static function assertCallable(string $callable): void {
+        if (!preg_match('/^[a-zA-Z_$][\w$]*(?:(?:\.|\?\.)[a-zA-Z_$][\w$]*)*$/', $callable)) {
+            throw new InvalidArgumentException("Invalid JavaScript callable/member path: {$callable}");
+        }
+    }
+
+    private static function assertAssignable(string $target): void {
+        if (!preg_match('/^[a-zA-Z_$][\w$]*(?:(?:\.|\?\.)[a-zA-Z_$][\w$]*|\[(?:\d+|[\'"][^\'"]+[\'"])\])*$/', $target)) {
+            throw new InvalidArgumentException("Invalid JavaScript assignment target: {$target}");
+        }
+    }
+
+    private static function assertMethodName(string $name): void {
+        if ($name === 'constructor') return;
+        self::assertIdentifier($name);
+    }
 
     // =================================================================
     // PART 3: THE ULTIMATE HYBRID NLP ENGINE (v20 - THE OMNISCIENT)

@@ -12,12 +12,46 @@
 
 
 class PHQR {
-    static function make($data) {
-        $qr = QRCode::getMinimumQRCode($uri, QR_ERROR_CORRECT_LEVEL_L);
+    /**
+     * Generate a memory-safe PNG data URI.
+     * Size is pixels per QR module, not the final image width.
+     */
+    public static function make($data, int $size = 8, int $margin = 4): string {
+        if (!function_exists('imagepng')) {
+            throw new \RuntimeException('PHQR requires the GD extension with PNG support.');
+        }
+
+        if (!is_scalar($data) && !($data instanceof \Stringable)) {
+            throw new \InvalidArgumentException('PHQR data must be a scalar value or Stringable object.');
+        }
+
+        $data = (string) $data;
+        if ($data === '') {
+            throw new \InvalidArgumentException('PHQR data cannot be empty.');
+        }
+
+        if ($size < 1 || $size > 20) {
+            throw new \InvalidArgumentException('PHQR module size must be between 1 and 20 pixels.');
+        }
+        if ($margin < 0 || $margin > 40) {
+            throw new \InvalidArgumentException('PHQR margin must be between 0 and 40 pixels.');
+        }
+
+        $qr = QRCode::getMinimumQRCode($data, QR_ERROR_CORRECT_LEVEL_L);
         ob_start();
-        imagepng($qr->createImage(100, 0, 0));
-        $imageData = ob_get_contents();
-        ob_end_clean();
+        try {
+            $image = $qr->createImage($size, $margin, 0);
+            if ($image === false || !imagepng($image)) {
+                throw new \RuntimeException('Unable to generate the QR PNG image.');
+            }
+            $imageData = (string) ob_get_contents();
+            if (is_object($image) || is_resource($image)) {
+                imagedestroy($image);
+            }
+        } finally {
+            ob_end_clean();
+        }
+
         $base64QR = 'data:image/png;base64,' . base64_encode($imageData);
         return $base64QR;
     }
@@ -510,6 +544,9 @@ class QRCode {
     // also added some simple error checking on parameters
     // updated 2015.07.27 ~ DoktorJ
     function createImage($size = 2, $margin = 2, $fg = 0x000000, $bg = 0xFFFFFF, $bgtrans = false) {
+        if (!function_exists('imagecreatetruecolor')) {
+            throw new \RuntimeException('PHQR image output requires the GD extension.');
+        }
 
         // size/margin EC
         if (!is_numeric($size)) $size = 2;

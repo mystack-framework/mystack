@@ -37,17 +37,31 @@ class PHEV {
     private static $clientPaths = [];
     private static $clientMethods = [];
     private static $handlers = [];
+    private static bool $running = false;
+    private static bool $allowWebWorker = false;
+
+    /** Explicit compatibility switch for hosts that intentionally run a socket loop in a web worker. */
+    public static function allowWebWorker(bool $allow = true): void {
+        self::$allowWebWorker = $allow;
+    }
 
     public static function initialize($path = '/websocket', $address = '0.0.0.0', $port = 8000) {
         self::$address = $address ?? parse_url(PHRO::root())['host'];
         self::$port = $port;
         PHRO::add('WS', $path, function() {
             PHRQ::header('WS', '*', 'application/json; charset=utf-8', []);
-            PHEV::start();
+            $result = PHEV::start();
+            if (PHP_SAPI !== 'cli' && is_string($result)) {
+                echo $result;
+            }
         });
     }
 
     public static function start() {
+        if (PHP_SAPI !== 'cli' && !self::$allowWebWorker) {
+            if (!headers_sent()) http_response_code(503);
+            return 'WebSocket workers must be started from CLI. Call PHEV::allowWebWorker(true) only for a dedicated web worker.';
+        }
         set_time_limit(0);
         if (self::isPortInUse()) {
             echo "WebSocket server is already running on ws://".self::$address.":".self::$port."\n";
@@ -67,6 +81,7 @@ class PHEV {
             die("Failed to listen on socket: " . socket_strerror(socket_last_error(self::$socket)) . "\n");
         }
         echo "WebSocket server started at ws://".self::$address.":".self::$port."\n";
+        self::$running = true;
         self::run();
     }
 
@@ -76,9 +91,10 @@ class PHEV {
     }
     
     public static function stop() {
+        self::$running = false;
         if (self::$socket) {
             foreach (self::$clients as $client) {
-                if (is_resource($client)) {
+                if (self::isSocket($client)) {
                     @socket_shutdown($client, 2);
                     @socket_close($client);
                 }
@@ -87,7 +103,7 @@ class PHEV {
             self::$clientIds = [];
             self::$clientPaths = [];
             self::$clientMethods = [];
-            if (is_resource(self::$socket)) {
+            if (self::isSocket(self::$socket)) {
                 @socket_shutdown(self::$socket, 2);
                 @socket_close(self::$socket);
             }
@@ -96,6 +112,14 @@ class PHEV {
         } else {
             echo "No active WebSocket server to stop.\n";
         }
+    }
+
+    public static function running(): bool {
+        return self::$running;
+    }
+
+    private static function isSocket($socket): bool {
+        return is_resource($socket) || (class_exists('Socket', false) && $socket instanceof \Socket);
     }
 
     public static function clients() {
@@ -142,11 +166,19 @@ class PHEV {
     }
 
     private static function run() {
-        while (true) {
+        while (self::$running && self::isSocket(self::$socket)) {
             $changed = self::$clients;
             $changed[] = self::$socket;
 
-            socket_select($changed, $null, $null, 0);
+            $write = null;
+            $except = null;
+            $selected = @socket_select($changed, $write, $except, 1);
+            if ($selected === false) {
+                if (!self::$running) break;
+                usleep(10000);
+                continue;
+            }
+            if ($selected === 0) continue;
 
             if (in_array(self::$socket, $changed)) {
                 self::handleNewConnection();
@@ -177,6 +209,7 @@ class PHEV {
                 }
             }
         }
+        self::$running = false;
     }    
 
     private static function handleNewConnection() {
@@ -300,18 +333,9 @@ class PHEV {
     }
 
     public static function getHandler($message) {
-        $path = DIR::path('root');
-        if (!$path) {
-            return false;
-        }
-        $fileList = self::listPhpFiles($path);
-        if ($fileList) {
-            $find = self::findFunctionInFiles($fileList, $message);
-            if ($find) {
-                $code = self::extractFunction($find['file'], $find['code']);
-                if ($code) {
-                    return eval("return function(\$clientId, \$clientPath, \$clientMethod) {{$code}};");
-                }
+        foreach (self::$handlers as $pathHandlers) {
+            if (isset($pathHandlers[$message]) && is_callable($pathHandlers[$message])) {
+                return $pathHandlers[$message];
             }
         }
         return false;
@@ -338,17 +362,7 @@ class PHEV {
                 throw new Exception('Invalid JSON: ' . json_last_error_msg());
             }
             echo "Handling message from client $clientId (Path: $clientPath, Method: $clientMethod): $message\n";
-            if ($getHandler && $getHandler != false) {
-                if ($getHandler && is_callable($getHandler)) {
-                    $response = call_user_func($getHandler, $clientId, $clientPath, $clientMethod, $data);
-                    if ($response !== null) {
-                        $responseMessage = self::mask($response);
-                        @socket_write(self::$clientIds[$clientId], $responseMessage, strlen($responseMessage));
-                        echo "Response sent to client $clientId: $response\n";
-                    }
-                    return true;
-                }
-            } elseif (isset($data['action'])) {
+            if (isset($data['action'])) {
                 $action = $data['action'];
                 if (isset(self::$handlers[$clientPath][$action])) {
                     $handler = self::$handlers[$clientPath][$action];
@@ -550,7 +564,7 @@ class PHEV {
      * @param callable $callback A callback function for generating data
      * @param int $interval Interval in milliseconds between each event
      */
-    public static function stream(string $key, int $interval = 10000) {
+    public static function stream(callable $callback, int $interval = 10000) {
         self::initHeaders();
         self::setRetry(self::$retry = $interval);
 
@@ -561,18 +575,21 @@ class PHEV {
                 break;
             }
             try {
-                ob_start();
-                eval($functionCode . ';');
-                $currentData = ob_get_clean();
+                $currentData = $callback();
+                if ($currentData instanceof \Stringable || is_scalar($currentData)) {
+                    $currentData = (string) $currentData;
+                } elseif ($currentData === null) {
+                    $currentData = '';
+                } else {
+                    $currentData = json_encode($currentData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                }
                 self::sendSE($currentData);
             } catch (\Throwable $e) {
                 $currentData = json_encode([
                     'error' => true,
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'trace' => $e->getTraceAsString(),
+                    'message' => class_exists('PHDE', false) && PHDE::isDebug() ? $e->getMessage() : 'Stream callback failed.',
                 ]);
+                self::sendSE($currentData);
             }
             $elapsedTime = (microtime(true) - $startTime) * 1000;
             $sleepTime = max(0, $interval - $elapsedTime);
@@ -593,226 +610,99 @@ class PHEV {
      * @param callable $callback A callback function for generating data
      * @param int $interval Interval in milliseconds between each event
      */
-    public static function streamUInew(string $key, int $interval = 10000) {
-        self::initHeaders();
-        self::setRetry(self::$retry = $interval);
-        $startTime = microtime(true);
-
-        $previousData = '';
-        $contentStore = '';
-
-        $getR = PHRO::routes($key);
-        $short = $getR['short'];
-        $link = $getR['link'];
-        $method = $getR['method'];
-        $file = $getR['callback_details']['file'];
-
-        $phpCode = PHRO::source($short);
-        $lines = explode("\n", $phpCode);
-        $firstLine = $lines[0] ?? null;
-        $lastLine = end($lines);
-
-        // Initialize previous hashes as a static variable to persist across calls
-        static $previousHashes = [];
-        // Define the root directory (modify this as needed)
-        $rootDir = DIR::path('root');
-        // Define target directories and files to skip
-        $targetDirs = ['app', 'component', 'library'];
-        $skipFiles = ['.htaccess', '.env'];
-
-        function scanDirectories($dir, $targetDirs, $skipFiles, &$previousHashes) {
-            if (!is_dir($dir)) {
-                echo "The specified directory does not exist: $dir" . PHP_EOL;
-                return false;
+    private static function projectFingerprint(): string {
+        $hashes = [];
+        foreach (['app', 'component', 'library'] as $directory) {
+            $root = DIR::path($directory);
+            if (!is_dir($root)) {
+                continue;
             }
-            // Open the directory for scanning
-            $items = scandir($dir);
-            $foundChange = false;  // Track if any changes are found
-            foreach ($items as $item) {
-                // Skip current and parent directory entries
-                if ($item === '.' || $item === '..') {
+
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if (!$file->isFile()) {
                     continue;
                 }
-                // Construct the full path
-                $path = $dir . DIRECTORY_SEPARATOR . $item;
-                // If it's a directory and is in the target directories
-                if (is_dir($path) && in_array($item, $targetDirs)) {
-                    // Recursively scan this directory
-                    if (scanDirectories($path, $targetDirs, $skipFiles, $previousHashes)) {
-                        $foundChange = true; // Change was found in the subdirectory
-                    }
-                } elseif (is_file($path) && !in_array($item, $skipFiles)) {
-                    // Calculate the MD5 hash of the file
-                    $hash = md5_file($path);
-                    // Check if the file exists in the previous hashes
-                    if (isset($previousHashes[$path])) {
-                        // If the hash has changed, file has been modified
-                        if ($previousHashes[$path] !== $hash) {
-                            $foundChange = true;
-                        }
-                    } else {
-                        // New file added
-                        $foundChange = true;
-                    }
-                    // Update or store the hash
-                    $previousHashes[$path] = $hash;
-                }
+                $path = $file->getPathname();
+                $hashes[$path] = $file->getMTime() . ':' . $file->getSize();
             }
-            // Check for deleted files
-            foreach ($previousHashes as $storedPath => $hash) {
-                if (!file_exists($storedPath)) {
-                    $foundChange = true;
-                    unset($previousHashes[$storedPath]); // Remove from hash tracking
-                }
-            }
-            return $foundChange; // Return whether a change was found
+        }
+        ksort($hashes);
+        return hash('sha256', json_encode($hashes, JSON_UNESCAPED_SLASHES));
+    }
+
+    public static function streamUInew(string $key, int $interval = 10000) {
+        if ($interval < 100) {
+            throw new \InvalidArgumentException('StreamUI interval must be at least 100 milliseconds.');
         }
 
-        
-
-        function extractFunction($file, $startPattern) {
-            if (!file_exists($file)) {
-                return null;
-            }
-            $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            $functionCode = [];
-            $braceCount = 0;
-            $isCapturing = false;
-            foreach ($lines as $line) {
-                $trimmedLine = trim($line);
-                if (!$isCapturing) {
-                    if (preg_match('/' . preg_quote($startPattern, '/') . '/', $trimmedLine)) {
-                        $isCapturing = true;
-                    }
-                }
-                if ($isCapturing) {
-                    $functionCode[] = $line;
-                    $braceCount += substr_count($line, '{') - substr_count($line, '}');
-                    if ($braceCount === 0) {
-                        break;
-                    }
-                }
-            }
-            if (!$functionCode) {
-                return null;
-            }
-            array_shift($functionCode);
-            array_pop($functionCode);
-            $extractedCode = implode("\n", $functionCode);
-            $cleanedCode = preg_replace('/^\s*\n+/m', '', $extractedCode);
-            return $cleanedCode ?: null;
+        $route = PHRO::routes($key);
+        if (!$route || empty($route['callback']) || !is_callable($route['callback'])) {
+            throw new \InvalidArgumentException("StreamUI route not found or not callable: {$key}");
         }
 
+        self::initHeaders();
+        self::setRetry(self::$retry = $interval);
+        $callback = $route['callback'];
+        $previousFingerprint = self::projectFingerprint();
 
-        function extractScript($link, $method = 'GET') {
-            $urlParts = parse_url($link);
-            if (!isset($urlParts['host'])) {
-                throw new Exception('Invalid URL.');
-            }
-            if (strtoupper($method) !== 'GET') {
-                throw new Exception('Only GET method is supported.');
-            }
-        
-            $localHost = 'localhost';
-            $link = str_replace($urlParts['host'], $localHost, $link);
-            $response = file_get_contents($link);
-            if ($response === false) {
-                throw new Exception('Error occurred while fetching the URL.');
-            }
-        
-            // Normalize malformed <script> tags
-            $response = preg_replace('/<<script>/i', '<script>', $response);
-            $response = preg_replace('/<\/script>\s*<\/script>>/i', '</script>', $response);
-        
-            // Use regex to target scripts containing "//PHJC"
-            preg_match_all('/<script[^>]*>([^<]*\/\/PHJC.*?<\/script>)/si', $response, $matches);
-        
-            if (empty($matches[1])) {
-                throw new Exception('No matching scripts found with identifier //PHJC.');
-            }
-        
-            // Combine the matched scripts into one
-            $resultScripts = implode(PHP_EOL, $matches[1]);
-        
-            // Return the scripts wrapped in a single <script> tag
-            return "<script>" . PHP_EOL . $resultScripts . PHP_EOL . "</script>";
-        }
-
-
-        function replaceScript($html, $scripts) {
-            $pattern = '<noscript>';
-            return preg_replace($pattern, $scripts, $html);
-        }
-
-
-        function cleanPHJCScripts($htmlContent) {
-            // Regex to find improperly nested script tags with "//PHJC"
-            $pattern = '/<script>\s*\/\/PHJC([\s\S]*?)<\/script>\s*<\/script>>/i';
-            
-            // Replace with a correctly formatted script tag
-            $replacement = '<script>//PHJC$1</script>';
-            
-            // Perform the replacement
-            $cleanedContent = preg_replace($pattern, $replacement, $htmlContent);
-
-            $cleanedContent = str_replace("<<script>", "<script>", $cleanedContent);
-            
-            return $cleanedContent;
-        }
-
-
-        // $extractScript = extractScript($link, $method);
-        $functionCode = extractFunction($file, $firstLine);
-        scanDirectories($rootDir, $targetDirs, $skipFiles, $previousHashes);
-
-        while (true) {
-            if (connection_aborted()) {
-                break;
-            }
+        while (!connection_aborted()) {
+            $startedAt = microtime(true);
+            $bufferLevel = ob_get_level();
             try {
-                if (scanDirectories($rootDir, $targetDirs, $skipFiles, $previousHashes)) {
-                    // Change detected, indicate reload
-                    // echo 'reload now' . PHP_EOL;
-                    $functionCode = extractFunction($file, $firstLine);
+                $fingerprint = self::projectFingerprint();
+                if (!hash_equals($previousFingerprint, $fingerprint)) {
+                    $previousFingerprint = $fingerprint;
                     ob_start();
-                    eval($functionCode . ';');
-                    $currentData = ob_get_clean();
-                    // $currentData = replaceScript($currentData, extractScript($link, $method));
-                    // $currentData = cleanPHJCScripts($currentData);
-                    // if ($currentData !== $previousData) {
-                        self::sendSE($currentData);
-                        // $previousData = $currentData;
-                        // $contentStore = $currentData;
-                    // }
+                    $result = $callback([
+                        'path' => $key,
+                        'params' => [],
+                        'data' => [],
+                        'route_details' => $route,
+                    ]);
+                    $currentData = '';
+                    while (ob_get_level() > $bufferLevel) {
+                        $chunk = ob_get_clean();
+                        if ($chunk !== false) {
+                            $currentData = $chunk . $currentData;
+                        }
+                    }
+                    if ($result instanceof \Stringable || is_scalar($result)) {
+                        $currentData .= (string) $result;
+                    } elseif ($result !== null) {
+                        $currentData .= json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    }
+                    self::sendSE($currentData);
                 }
             } catch (\Throwable $e) {
-                $currentData = json_encode([
+                while (ob_get_level() > $bufferLevel) {
+                    ob_end_clean();
+                }
+                self::sendSE(json_encode([
                     'error' => true,
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
+                    'message' => class_exists('PHDE', false) && PHDE::isDebug()
+                        ? $e->getMessage()
+                        : 'StreamUI callback failed.',
+                ]));
             }
-            $elapsedTime = (microtime(true) - $startTime) * 1000;
-            $sleepTime = max(0, $interval - $elapsedTime);
-            // echo ": keep-alive\n\n";
+
             @ob_flush();
             @flush();
-
-            usleep($sleepTime * 1000);
-            $startTime = microtime(true);
+            $elapsed = (microtime(true) - $startedAt) * 1000;
+            usleep((int) max(0, ($interval - $elapsed) * 1000));
         }
     }
 
     public static function streamUI(string $name = '/streamui', int $interval = 10000) {
-        define('STREAMUI', 'false');
+        if (!defined('STREAMUI')) define('STREAMUI', 'false');
         $GLOBALS['STREAMUI'] = 'false';
 
-        define('STREAMUIPATH', $name);
+        if (!defined('STREAMUIPATH')) define('STREAMUIPATH', $name);
         $GLOBALS['STREAMUIPATH'] = $name;
 
-        define('STREAMUIP', '');
+        if (!defined('STREAMUIP')) define('STREAMUIP', '');
         $GLOBALS['STREAMUIP'] = '';
 
         PHRO::get($name.'-lib', function ($data) use ($name) {
@@ -822,7 +712,6 @@ class PHEV {
             }
         });
         PHRO::get($name, function ($data) use ($interval) {
-            define('STREAMUI', 'true');
             $GLOBALS['STREAMUI'] = 'true';
             if (!empty($data['path'])) {
                 self::streamUInew($data['path'], $interval);

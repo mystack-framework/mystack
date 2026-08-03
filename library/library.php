@@ -103,8 +103,20 @@ class DIR
             return $baseDir;
         }
 
-        // The rest of the parts form the subpath.
+        // The rest of the parts form the subpath. Reject traversal and null-byte
+        // input before joining so import keys can never escape their base folder.
         $subPath = implode(DIRECTORY_SEPARATOR, $parts);
+        if (str_contains($subPath, "\0")) {
+            throw new \InvalidArgumentException('Resource paths cannot contain null bytes.');
+        }
+
+        $pathSegments = preg_split('~[\\\\/]+~', $subPath, -1, PREG_SPLIT_NO_EMPTY);
+        foreach ($pathSegments as $segment) {
+            if ($segment === '.' || $segment === '..') {
+                throw new \InvalidArgumentException('Resource path traversal is not allowed.');
+            }
+        }
+        $subPath = implode(DIRECTORY_SEPARATOR, $pathSegments);
 
         $fullPath = rtrim($baseDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $subPath;
 
@@ -646,8 +658,19 @@ class Importer
                 if ($action === 'require') {
                     $path = DIR::path($fullKey);
                     $real_path = realpath($path);
+                    $base_path = realpath(DIR::path($baseKey));
 
-                    if ($real_path && !isset($imported_php_files[$real_path])) {
+                    if ($real_path === false && !pathinfo($path, PATHINFO_EXTENSION)) {
+                        $path .= '.php';
+                        $real_path = realpath($path);
+                    }
+
+                    $inside_base = $real_path !== false
+                        && $base_path !== false
+                        && ($real_path === $base_path
+                            || str_starts_with($real_path, rtrim($base_path, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR));
+
+                    if ($inside_base && !isset($imported_php_files[$real_path])) {
                         $imported_php_files[$real_path] = true;
                         (function ($__file_path, $__data) {
                             extract($__data, EXTR_SKIP);
@@ -656,22 +679,7 @@ class Importer
 
                         $results[] = true;
                     } else {
-                        if (!pathinfo($path, PATHINFO_EXTENSION)) {
-                            $path .= '.php';
-                            if (file_exists($path)) {
-                                $imported_php_files[$real_path] = true;
-                                (function ($__file_path, $__data) {
-                                    extract($__data, EXTR_SKIP);
-                                    require $__file_path;
-                                })($real_path, $final_data_to_pass);
-
-                                $results[] = true;
-                            } else {
-                                $results[] = false;
-                            }
-                        } else {
-                            $results[] = false;
-                        }
+                        $results[] = $inside_base && isset($imported_php_files[$real_path]);
                     }
                 } elseif ($action === 'path') {
                     $results[] = DIR::path($fullKey);
@@ -762,4 +770,6 @@ require_once(DIR::path('library:PHAI'));
 require_once(DIR::path('library:PHAP'));
 require_once(DIR::path('library:PHUI'));
 require_once(DIR::path('library:PHPA'));
+require_once(DIR::path('library:PHFY'));
+require_once(DIR::path('library:PHMO'));
 ?>

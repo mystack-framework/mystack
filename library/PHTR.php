@@ -247,16 +247,45 @@ class PHTR {
         }
 
         $url = self::buildUrl($serverName, $text, $sourceLang, $targetLang);
+        if (!is_string($url) || $url === '') {
+            return false;
+        }
 
-        $response = @file_get_contents($url);
+        $options = [
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 5,
+                'ignore_errors' => true,
+                'header' => "Accept: application/json\r\nUser-Agent: MyStack-PHTR/1.0\r\n",
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+            ],
+        ];
+        $context = stream_context_create($options);
+        $response = @file_get_contents($url, false, $context);
         if ($response === false) {
+            return false;
+        }
+        $status = 0;
+        if (!empty($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $match)) {
+            $status = (int) $match[1];
+        }
+        if ($status < 200 || $status >= 300) {
             return false;
         }
 
         $translatedText = self::parseResponse($response, $serverName);
+        if (!is_string($translatedText) || $translatedText === '') {
+            return false;
+        }
         self::$translatedCache[$targetLang][$text] = $translatedText;
+        if (count(self::$translatedCache[$targetLang]) > 500) {
+            array_shift(self::$translatedCache[$targetLang]);
+        }
 
-        return $translatedText ?? $text;
+        return $translatedText;
     }
 
     /**
@@ -283,17 +312,17 @@ class PHTR {
             case 'mymemory':
                 return str_replace(['{source}', '{target}', '{text}'], [$sourceLang, $targetLang, urlencode($text)], self::$servers[$serverName]);
             
-            case 'reverso':
-                return self::$servers[$serverName];
+                        case 'reverso':
+                return null; // Requires POST/Auth
             
             case 'yantra':
                 return self::$servers[$serverName] . '?source=' . $sourceLang . '&target=' . $targetLang . '&text=' . urlencode($text);
             
             case 'deepl':
-                return self::$servers[$serverName] . '?auth_key=YOUR_DEEPL_API_KEY&text=' . urlencode($text) . '&source_lang=' . $sourceLang . '&target_lang=' . $targetLang;
+                return null; // DeepL requires an API key. Re-implement when auth logic is added.
             
             case 'papago':
-                return self::$servers[$serverName];
+                return null; // Requires POST/Auth headers
             
             case 'argosopentech':
                 return self::$servers[$serverName] . '?source=' . $sourceLang . '&target=' . $targetLang . '&q=' . urlencode($text);
@@ -302,7 +331,7 @@ class PHTR {
                 return self::$servers[$serverName] . '?kw=' . urlencode($text);
             
             case 'youdao':
-                return self::$servers[$serverName] . '?doctype=json&type=AUTO&i=' . urlencode($text);
+                return null; // The configured endpoint is plain HTTP and is intentionally disabled.
             
             default:
                 return null;

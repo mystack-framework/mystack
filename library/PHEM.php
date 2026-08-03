@@ -189,6 +189,10 @@ class PHEM {
      * @return array Retrieved emails.
      */
     public static function imapGet($filter, $limit) {
+        if (!function_exists('imap_open')) {
+            self::$log[] = 'IMAP extension is not available.';
+            return [];
+        }
         $inbox = @imap_open(self::$imapServer, self::$imapUsername, self::$imapPassword);
         if (!$inbox) {
             self::$log[] = 'Connection error: ' . imap_last_error();
@@ -235,6 +239,10 @@ class PHEM {
      * @return array Retrieved emails.
      */
     public static function popGet($filter, $limit) {
+        if (!function_exists('imap_open')) {
+            self::$log[] = 'IMAP extension is not available.';
+            return [];
+        }
         $inbox = @imap_open(self::$popServer, self::$popUsername, self::$popPassword);
         if (!$inbox) {
             self::$log[] = 'Connection error: ' . imap_last_error();
@@ -369,11 +377,22 @@ class PHEM {
      */
     public static function smtpSend($from, $name, $to, $cc, $bcc, $subject, $message) {
         try {
+            self::assertHeaderSafe((string) $name, 'sender name');
+            self::assertHeaderSafe((string) $subject, 'subject');
+            $fromEmail = self::validateEmail((string) $from);
+            $recipients = array_values(array_unique(array_merge(
+                self::extractEmails($to),
+                self::extractEmails($cc),
+                self::extractEmails($bcc)
+            )));
+            if ($recipients === []) {
+                throw new \InvalidArgumentException('At least one valid recipient address is required.');
+            }
+
             $headers = self::prepareHeaders($from, $name, $to, $cc, $bcc, $subject, $message);
             $user64 = base64_encode(self::$smtpUsername);
             $pass64 = base64_encode(self::$smtpPassword);
-            $mailfrom = '<' . $from . '>';
-            $mailto = '<' . $to . '>';
+            $mailfrom = '<' . $fromEmail . '>';
 
             self::$socket = @fsockopen(self::$smtpServer, self::$smtpPort, $errno, $errstr, 30);
             if (!self::$socket) {
@@ -388,19 +407,28 @@ class PHEM {
 
             if (self::$smtpSecure == 'tls') {
                 self::logreq('STARTTLS', '220');
-                stream_socket_enable_crypto(self::$socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+                stream_context_set_option(self::$socket, 'ssl', 'verify_peer', true);
+                stream_context_set_option(self::$socket, 'ssl', 'verify_peer_name', true);
+                stream_context_set_option(self::$socket, 'ssl', 'peer_name', self::$smtpServer);
+                if (stream_socket_enable_crypto(self::$socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) !== true) {
+                    throw new \RuntimeException('Unable to establish a verified TLS connection to the SMTP server.');
+                }
                 self::logreq('EHLO ' . self::$local, '250');
             }
 
             self::logreq('AUTH LOGIN', '334');
-            self::logreq($user64, '334');
-            self::logreq($pass64, '235');
+            self::$log[] = '[SMTP username redacted]';
+            self::request($user64, '334');
+            self::$log[] = '[SMTP password redacted]';
+            self::request($pass64, '235');
 
             self::logreq('MAIL FROM: ' . $mailfrom, '250');
-            self::logreq('RCPT TO: ' . $mailto, '250');
+            foreach ($recipients as $recipient) {
+                self::logreq('RCPT TO: <' . $recipient . '>', '250');
+            }
 
             self::logreq('DATA', '354');
-            self::$log[] = htmlspecialchars($headers);
+            self::$log[] = '[SMTP message body redacted; bytes=' . strlen($headers) . ']';
             self::request($headers, '250');
 
             self::logreq('QUIT', '221');
@@ -411,7 +439,10 @@ class PHEM {
                 'message' => 'Email sent successfully'
             ];
     
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
+            if (is_resource(self::$socket)) {
+                @fclose(self::$socket);
+            }
             return [
                 'status' => false,
                 'message' => 'Failed to send email: ' . $e->getMessage(),
@@ -451,10 +482,9 @@ class PHEM {
     private static function prepareHeaders($from, $name, $to, $cc, $bcc, $subject, $message) {
         $headers = array();
         $headers[] = 'Date: ' . date('r');
-        $headers[] = 'To: ' . self::formatAddress($to);
+        $headers[] = 'To: ' . self::formatAddressList($to);
         $headers[] = 'From: ' . self::formatAddress(array($from, $name));
-        if (!empty($cc)) $headers[] = 'Cc: ' . self::formatAddress($cc);
-        if (!empty($bcc)) $headers[] = 'Bcc: ' . self::formatAddress($bcc);
+        if (!empty($cc)) $headers[] = 'Cc: ' . self::formatAddressList($cc);
         $headers[] = 'Subject: ' . '=?UTF-8?B?' . base64_encode($subject) . '?=';
         $headers[] = 'Message-ID: ' . self::generateMessageID();
         $headers[] = 'X-Mailer: ' . 'PHP/' . phpversion();
@@ -466,7 +496,8 @@ class PHEM {
         }
         $headers[] = 'Content-Transfer-Encoding: 8bit';
         $headers[] = '';
-        $headers[] = $message;
+        $message = preg_replace('/(?m)^\./', '..', str_replace(["\r\n", "\r"], "\n", (string) $message));
+        $headers[] = str_replace("\n", NL, $message);
         $headers[] = '.';
 
         return implode(NL, $headers);
@@ -509,17 +540,24 @@ class PHEM {
      */
     private static function response($code) {
         stream_set_timeout(self::$socket, 30);
-        $result = fread(self::$socket, 768);
-        $meta = stream_get_meta_data(self::$socket);
-        if ($meta['timed_out'] === true) {
-            fclose(self::$socket);
-            self::$log[] = $meta;
-            throw new Exception('Was a timeout in Server response');
+        $result = '';
+        while (($line = fgets(self::$socket, 4096)) !== false) {
+            $result .= $line;
+            if (preg_match('/^(\d{3})([ -])/', $line, $match) && $match[2] === ' ') {
+                break;
+            }
+            if (strlen($result) > 65536) {
+                throw new \RuntimeException('SMTP response exceeded the safe size limit.');
+            }
         }
+        $meta = stream_get_meta_data(self::$socket);
+        if (($meta['timed_out'] ?? false) === true) {
+            throw new \RuntimeException('SMTP server response timed out.');
+        }
+        if ($result === '') throw new \RuntimeException('SMTP server closed the connection unexpectedly.');
         self::$log[] = $result;
-        if (substr($result, 0, 3) == $code) return;
-        fclose(self::$socket);
-        throw new Exception('SMTP Server response Error');
+        if (substr($result, 0, 3) === (string) $code) return;
+        throw new \RuntimeException('SMTP server returned an unexpected response code.');
     }
 
     /**
@@ -544,6 +582,52 @@ class PHEM {
         return '';
     }
 
+    private static function assertHeaderSafe(string $value, string $field): void {
+        if (preg_match('/[\r\n]/', $value)) {
+            throw new \InvalidArgumentException("Invalid {$field}: line breaks are not allowed.");
+        }
+    }
+
+    private static function validateEmail(string $email): string {
+        self::assertHeaderSafe($email, 'email address');
+        $email = trim($email, " \t\n\r\0\x0B<>");
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new \InvalidArgumentException('Invalid email address.');
+        }
+        return $email;
+    }
+
+    private static function extractEmails($address): array {
+        if ($address === null || $address === '') return [];
+        if (is_string($address)) {
+            $emails = [];
+            foreach (preg_split('/[,;]+/', $address) ?: [] as $part) {
+                $part = trim($part);
+                if ($part === '') continue;
+                if (preg_match('/<([^<>]+)>/', $part, $match)) $part = $match[1];
+                $emails[] = self::validateEmail($part);
+            }
+            return $emails;
+        }
+        if (!is_array($address)) {
+            throw new \InvalidArgumentException('Recipient address must be a string or array.');
+        }
+        if (isset($address[0]) && is_string($address[0]) && str_contains($address[0], '@')
+            && (!isset($address[1]) || !is_string($address[1]) || !str_contains($address[1], '@'))) {
+            return [self::validateEmail($address[0])];
+        }
+        $emails = [];
+        foreach ($address as $item) $emails = array_merge($emails, self::extractEmails($item));
+        return $emails;
+    }
+
+    private static function formatAddressList($addresses): string {
+        return implode(', ', array_map(
+            static fn(string $email): string => '<' . $email . '>',
+            self::extractEmails($addresses)
+        ));
+    }
+
     /**
      * Generate a unique Message-ID.
      *
@@ -566,7 +650,8 @@ class PHEM {
     public static function showLog() {
         echo '<pre>';
         echo '<b>SMTP Mail Transaction Log</b><br>';
-        print_r(self::$log);
+        echo htmlspecialchars(print_r(self::$log, true), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        echo '</pre>';
     }
 }
 

@@ -169,7 +169,7 @@ class PHAI
             }
             
             $token = trim(preg_replace("/^bearer\s+/i", "", (string)$auth));
-            return ($token === (string)$apiKey);
+            return hash_equals((string) $apiKey, $token);
         };
 
         // --- ২. Next-Gen Universal Handler (Self-Healing Request/Response Translator) ---
@@ -417,7 +417,8 @@ class PHAI
                 }
             } catch (\Throwable $e) {
                 http_response_code(500);
-                print json_encode(["error" => ["message" => $e->getMessage()]]);
+                $debug = class_exists('PHDE') && method_exists('PHDE', 'isDebug') && PHDE::isDebug();
+                print json_encode(["error" => ["message" => $debug ? $e->getMessage() : 'Internal server error']]);
             }
         };
 
@@ -496,7 +497,7 @@ class PHAI
                     }
 
                     $token = trim(preg_replace("/^bearer\s+/i", "", (string)$auth));
-                    if ($token !== (string)$apiKey) {
+                    if (!hash_equals((string) $apiKey, $token)) {
                         http_response_code(401);
                         print json_encode(["error" => [
                             "message" => "Invalid API Key",
@@ -519,7 +520,9 @@ class PHAI
                 } catch (\Throwable $e) {
                     http_response_code(500);
                     print json_encode(["error" => [
-                        "message" => $e->getMessage(),
+                        "message" => (class_exists('PHDE') && method_exists('PHDE', 'isDebug') && PHDE::isDebug())
+                            ? $e->getMessage()
+                            : 'Internal server error',
                         "type" => "api_error",
                         "param" => null,
                         "code" => "internal_server_error"
@@ -1086,9 +1089,11 @@ class PHAI
             "headers" => [],        
             "timeout" => 30,        
             "proxy" => null,        
-            "verify_ssl" => false,  
+            "verify_ssl" => true,
             "retry" => 0,           
-            "persistent" => true    
+            "persistent" => true,
+            "allow_private" => false,
+            "allowed_hosts" => [],
         ], $options);
 
         $requestId = uniqid("phai_bridge_", true);
@@ -1107,6 +1112,9 @@ class PHAI
             $attempt++;
 
             if (preg_match("/^https?:\/\//i", $target)) {
+                if (!self::isSafeRemoteUrl($target, (bool) $config['allow_private'], (array) $config['allowed_hosts'])) {
+                    return ['error' => ['code' => -32602, 'message' => 'Unsafe or unsupported bridge target.']];
+                }
 
                 $httpHeaders = ["Content-Type: application/json", "Accept: application/json"];
 
@@ -1116,6 +1124,9 @@ class PHAI
                 }
 
                 foreach ($config["headers"] as $k => $v) {
+                    if (preg_match('/[\r\n]/', (string) $k . (string) $v)) {
+                        return ['error' => ['code' => -32602, 'message' => 'Invalid bridge header.']];
+                    }
                     $httpHeaders[] = is_int($k) ? $v : "{$k}: {$v}";
                 }
 
@@ -1127,9 +1138,9 @@ class PHAI
                     CURLOPT_HTTPHEADER => $httpHeaders,
                     CURLOPT_TIMEOUT => $config["timeout"],
                     CURLOPT_CONNECTTIMEOUT => 10,
-                    CURLOPT_SSL_VERIFYPEER => $config["verify_ssl"],
-                    CURLOPT_SSL_VERIFYHOST => $config["verify_ssl"] ? 2 : 0,
-                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2,
+                    CURLOPT_FOLLOWLOCATION => false,
                 ]);
 
                 if (!empty($config["proxy"])) {
@@ -1139,7 +1150,7 @@ class PHAI
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 $err = curl_error($ch);
-                if (is_resource($ch)) { curl_close($ch); }
+                curl_close($ch);
 
                 if ($err) {
                     $lastError = ["error" => ["code" => -32000, "message" => "cURL Error: $err"]];
@@ -1375,17 +1386,22 @@ class PHAI_AI
             try {
                 $config = self::getProviderConfig($provider, $apiKey, $options);
                 $payload = self::buildUniversalPayload($provider, $messages, $options);
-                $ssl_verify = !(defined("DEBUG_MODE") && DEBUG_MODE === true);
                 $ch = curl_init($config["url"]);
                 curl_setopt_array($ch, [
                     CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
                     CURLOPT_POSTFIELDS => json_encode($payload), CURLOPT_HTTPHEADER => $config["headers"],
                     CURLOPT_TIMEOUT => $options["timeout"] ?? 15, 
-                    CURLOPT_SSL_VERIFYPEER => $ssl_verify,
-                    CURLOPT_SSL_VERIFYHOST => $ssl_verify ? 2 : 0
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2
                 ]);
-                $response = curl_exec($ch); $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE); if (is_resource($ch)) { curl_close($ch); }
+                $response = curl_exec($ch);
+                $curlError = curl_error($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
 
+                if ($response === false || $curlError !== '') {
+                    throw new \RuntimeException("[$provider] Transport error: " . $curlError);
+                }
                 if ($httpCode >= 400) {
                     $lastError = "[$provider] Model '$model' Error ($httpCode): " . strip_tags($response);
                     if ($httpCode === 429) continue; 
@@ -1448,9 +1464,75 @@ class PHAI_AI
         return ["model" => $model, "messages" => $msg, "temperature" => $opt["temperature"] ?? 0.7, "max_tokens" => $opt["max_tokens"] ?? 2048];
     }
 
-    private static function getBase64($url) { 
-        if (str_contains($url, "base64,")) return explode("base64,", $url)[1];
-        return base64_encode(@file_get_contents($url) ?: "");
+    private static function getBase64($url) {
+        $url = trim((string) $url);
+        if (preg_match('#^data:image/[a-z0-9.+-]+;base64,([a-z0-9+/=\r\n]+)$#i', $url, $match)) {
+            $decoded = base64_decode($match[1], true);
+            return $decoded !== false && strlen($decoded) <= 10485760 ? base64_encode($decoded) : '';
+        }
+        if (!self::isSafeRemoteUrl($url, false, [])) return '';
+        if (!function_exists('curl_init')) return '';
+
+        $ch = curl_init($url);
+        if ($ch === false) return '';
+        $body = '';
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_USERAGENT => 'MyStack-PHAI/1.0',
+            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body): int {
+                if (strlen($body) + strlen($chunk) > 10485760) return 0;
+                $body .= $chunk;
+                return strlen($chunk);
+            },
+        ]);
+        $ok = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $type = strtolower((string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE));
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($ok === false || $error !== '' || $status < 200 || $status >= 300 || !str_starts_with($type, 'image/')) return '';
+        return base64_encode($body);
+    }
+
+    private static function isSafeRemoteUrl(string $url, bool $allowPrivate = false, array $allowedHosts = []): bool
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts) || strtolower((string) ($parts['scheme'] ?? '')) !== 'https') return false;
+        if (isset($parts['user']) || isset($parts['pass'])) return false;
+        $host = strtolower(rtrim((string) ($parts['host'] ?? ''), '.'));
+        if ($host === '' || ((int) ($parts['port'] ?? 443)) !== 443) return false;
+
+        $allowedHosts = array_values(array_filter(array_map(
+            static fn($item) => strtolower(rtrim(trim((string) $item), '.')),
+            $allowedHosts
+        )));
+        if ($allowedHosts && !in_array($host, $allowedHosts, true)) return false;
+        if ($allowPrivate) return true;
+
+        $addresses = [];
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            $addresses[] = $host;
+        } else {
+            foreach ((array) @dns_get_record($host, DNS_A | DNS_AAAA) as $record) {
+                $address = $record['ip'] ?? $record['ipv6'] ?? null;
+                if (is_string($address)) $addresses[] = $address;
+            }
+            if (!$addresses) {
+                $addresses = (array) @gethostbynamel($host);
+            }
+        }
+        if (!$addresses) return false;
+        foreach (array_unique($addresses) as $address) {
+            if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static function getProviderConfig($p, $key, $opt) {

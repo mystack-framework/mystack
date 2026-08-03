@@ -23,6 +23,14 @@
  * 
  * // Render a complex, nested pre-built UI block
  * echo PHUI::ui('section:hero', ['title' => 'Welcome to MyStack', 'subtitle' => 'The Future of PHP']);
+ *
+ * // Semantic kit API with Tailwind, PHJS/app.js and HTMX integration
+ * echo PHUI::element('button:primary', [
+ *     'slot' => 'Save',
+ *     'class' => 'w-full shadow-lg',
+ *     'phjs' => ['click' => 'toast "Saved"'],
+ *     'htmx' => ['post' => '/save', 'target' => '#result'],
+ * ]);
  * ```
  */
 
@@ -37,13 +45,162 @@ class PHUI
     private static int $maxRecursionDepth = 32; // রিকার্সন ক্র্যাশ গার্ড
 
     public static function ui(string $slug, array $data = []): string { return self::render($slug, $data); }
-    public static function exists(string $slug): bool { if (!self::$booted) self::boot(); return isset(self::$registry[$slug]); }
+    public static function element(string $slug, array $data = []): string { return self::renderType('element', $slug, $data); }
+    public static function section(string $slug, array $data = []): string { return self::renderType('section', $slug, $data); }
+    public static function layout(string $slug, array $data = []): string { return self::renderType('layout', $slug, $data); }
+    public static function page(string $slug, array $data = []): string { return self::renderType('page', $slug, $data); }
+
+    public static function exists(string $slug): bool
+    {
+        if (!self::$booted) self::boot();
+        return self::resolveSlug($slug) !== null;
+    }
+
+    public static function register(string $slug, string|callable $template, array $meta = [], bool $replace = false): bool
+    {
+        self::boot();
+        $slug = self::normalizeSlug($slug);
+        if ($slug === '' || (!$replace && isset(self::$registry[$slug]))) {
+            return false;
+        }
+        self::$registry[$slug] = array_merge($meta, [
+            'title' => (string) ($meta['title'] ?? ucwords(str_replace([':', '-', '_'], ' ', $slug))),
+            is_callable($template) ? 'renderer' : 'template' => $template,
+        ]);
+        return true;
+    }
+
+    public static function registerMany(array $components, bool $replace = false): int
+    {
+        $registered = 0;
+        foreach ($components as $slug => $definition) {
+            if (is_string($definition) || is_callable($definition)) {
+                $registered += self::register((string) $slug, $definition, [], $replace) ? 1 : 0;
+                continue;
+            }
+            if (!is_array($definition)) continue;
+            $template = $definition['renderer'] ?? $definition['template'] ?? null;
+            if (!is_string($template) && !is_callable($template)) continue;
+            unset($definition['renderer'], $definition['template']);
+            $registered += self::register((string) $slug, $template, $definition, $replace) ? 1 : 0;
+        }
+        return $registered;
+    }
+
+    public static function alias(string $alias, string $target, bool $replace = false): bool
+    {
+        self::boot();
+        $alias = self::normalizeSlug($alias);
+        $resolvedTarget = self::resolveSlug($target);
+        if ($alias === '' || $resolvedTarget === null || (!$replace && isset(self::$registry[$alias]))) {
+            return false;
+        }
+        self::$registry[$alias] = self::$registry[$resolvedTarget];
+        self::$registry[$alias]['alias_of'] = $resolvedTarget;
+        return true;
+    }
+
+    public static function search(string $query = '', ?string $group = null, int $limit = 50): array
+    {
+        self::boot();
+        $query = strtolower(trim($query));
+        $group = $group !== null ? strtolower(trim($group, " \t\n\r\0\x0B:")) : null;
+        $result = [];
+        foreach (self::$registry as $slug => $meta) {
+            if ($group !== null && !str_starts_with(strtolower($slug), $group . ':')) continue;
+            $haystack = strtolower($slug . ' ' . (string) ($meta['title'] ?? '') . ' ' . (string) ($meta['description'] ?? ''));
+            if ($query !== '' && !str_contains($haystack, $query)) continue;
+            $result[$slug] = $meta;
+            if (count($result) >= max(1, min($limit, 500))) break;
+        }
+        return $result;
+    }
+
+    public static function categories(): array
+    {
+        self::boot();
+        $categories = [];
+        foreach (array_keys(self::$registry) as $slug) {
+            $category = explode(':', $slug, 2)[0];
+            $categories[$category] = ($categories[$category] ?? 0) + 1;
+        }
+        arsort($categories);
+        return $categories;
+    }
+
+    public static function count(): int
+    {
+        self::boot();
+        return count(self::$registry);
+    }
+
+    public static function attributes(array|string|null $attributes): string
+    {
+        if ($attributes === null) return '';
+        if (is_string($attributes)) return trim(self::sanitizeDynamicHtml($attributes));
+        $rendered = [];
+        foreach ($attributes as $name => $value) {
+            if (is_int($name) && is_string($value)) {
+                $rendered[] = trim($value);
+                continue;
+            }
+            $name = strtolower(trim((string) $name));
+            if ($name === '' || !preg_match('/^[a-z_:][a-z0-9_.:-]*$/i', $name) || $value === false || $value === null) continue;
+            if ($value === true) {
+                $rendered[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
+                continue;
+            }
+            if (is_array($value) || is_object($value)) {
+                $value = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            }
+            $rendered[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '="' .
+                htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8') . '"';
+        }
+        return implode(' ', array_filter($rendered));
+    }
+
+    /**
+     * Inspect dynamic component content without changing the component template.
+     * PHUI intentionally supports nested HTML, so the guard targets executable
+     * payloads instead of escaping all markup and breaking existing components.
+     */
+    public static function check(string $value): array
+    {
+        $sanitized = self::sanitizeDynamicHtml($value);
+        return [
+            'status' => hash_equals($value, $sanitized),
+            'safe' => hash_equals($value, $sanitized),
+            'changed' => !hash_equals($value, $sanitized),
+            'data' => $sanitized,
+        ];
+    }
+
+    private static function sanitizeDynamicHtml(string $value): string
+    {
+        if ($value === '' || (!str_contains($value, '<') && !preg_match('/(?:javascript|vbscript|data\s*:\s*text\/html)\s*:/i', $value))) {
+            return $value;
+        }
+
+        $patterns = [
+            '/<\s*(script|iframe|object|embed|base)\b[^>]*>.*?<\s*\/\s*\1\s*>/is' => '',
+            '/<\s*(script|iframe|object|embed|base)\b[^>]*\/?\s*>/is' => '',
+            '/<\s*meta\b[^>]*http-equiv\s*=\s*(["\']?)\s*(?:refresh|content-security-policy)\s*\1[^>]*>/is' => '',
+            '/\s+on[a-z0-9_-]+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i' => '',
+            '/\s+srcdoc\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i' => '',
+            '/\s+(href|src|action|formaction|xlink:href)\s*=\s*(["\'])\s*(?:javascript|vbscript|data\s*:\s*text\/html)\s*:[^"\']*\2/i' => ' $1="#"',
+            '/\s+style\s*=\s*(["\'])[^"\']*(?:expression\s*\(|url\s*\(\s*["\']?\s*javascript\s*:)[^"\']*\1/i' => '',
+        ];
+
+        return (string) preg_replace(array_keys($patterns), array_values($patterns), $value);
+    }
 
     public static function render(string $slug, array $data = []): string
     {
         if (!self::$booted) self::boot();
+        $requestedSlug = $slug;
+        $slug = self::resolveSlug($slug) ?? $slug;
         $item = self::$registry[$slug] ?? null;
-        if (!$item) return "<!-- PHUI: Item '$slug' not found -->";
+        if (!$item) return "<!-- PHUI: Item '$requestedSlug' not found -->";
 
         // রিকার্সন ডেথ-লুপ গার্ড
         if (isset(self::$recursionStack[$slug])) {
@@ -55,7 +212,8 @@ class PHUI
 
         self::$recursionStack[$slug] = true;
 
-        $usedKeys = ['class', 'style', 'attr', 'style_attr', 'attr_str', 'slot'];
+        $data = self::prepareRuntimeData($slug, $data);
+        $usedKeys = ['class', 'style', 'attr', 'attrs', 'style_attr', 'attr_str', 'slot', 'text', 'tw', 'css', 'phjs', 'on', 'htmx', 'state'];
         if (isset($data['class']) && is_array($data['class'])) {
             $data['class'] = implode(' ', array_filter($data['class']));
         }
@@ -77,10 +235,21 @@ class PHUI
             return !str_contains($val, '<') && str_contains($val, ':') && preg_match('/^[a-z0-9_-]+:[a-z0-9:-]+$/i', $val);
         };
 
-                $template = $item['template'];
+        if (isset($item['renderer']) && is_callable($item['renderer'])) {
+            try {
+                $html = (string) call_user_func($item['renderer'], $data, $slug);
+                self::trackTailwind($html);
+                return $html;
+            } finally {
+                unset(self::$recursionStack[$slug]);
+            }
+        }
+
+        $template = (string) ($item['template'] ?? '');
 
         // Advanced Nested Array Resolver with Aliases
         foreach ($data as $dKey => &$dValue) {
+            if (in_array($dKey, ['attr', 'attrs'], true)) continue;
             if (is_array($dValue) && strpos($template, "{{" . $dKey . "}}") !== false) {
                 $isAssociative = array_keys($dValue) !== range(0, count($dValue) - 1);
                 $renderedStr = '';
@@ -136,6 +305,7 @@ class PHUI
 
         // নিরাপদ সাধারণ অ্যারে রেফারেন্স হ্যান্ডলিং (আগের লজিক)
         foreach ($data as $key => &$value) {
+            if (in_array($key, ['attr', 'attrs'], true)) continue;
             if (is_array($value)) {
                 $joined = '';
                 foreach ($value as $val) {
@@ -157,16 +327,16 @@ class PHUI
             $usedKeys[] = $key;
             if ($key === 'attr' || $key === 'attr_str') return 'attr_placeholder';
             if ($key === 'style_attr') return $data['style_attr'] ?? '';
-            return (isset($data[$key]) ? (string)$data[$key] : $default);
+            return self::sanitizeDynamicHtml(isset($data[$key]) ? (string) $data[$key] : $default);
         }, $template);
 
         // অতিরিক্ত অ্যাট্রিবিউট প্রসেসিং
         $extraAttrs = [];
         foreach ($data as $k => $v) {
-            if (in_array($k, $usedKeys) || is_array($v) || is_object($v)) continue;
-            $extraAttrs[] = "$k=\"" . htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8') . "\"";
+            if (in_array($k, $usedKeys, true) || str_starts_with((string) $k, '_')) continue;
+            $extraAttrs[$k] = $v;
         }
-        $attrStr = implode(' ', $extraAttrs);
+        $attrStr = trim(self::attributes($data['attr'] ?? null) . ' ' . self::attributes($extraAttrs));
 
         // রেজেক্স ইমপ্রুভমেন্ট (যেকোনো স্পেস বা নিউ-লাইন ট্রিমিং হ্যান্ডেল করবে)
         if (str_contains($html, 'attr_placeholder')) {
@@ -176,11 +346,125 @@ class PHUI
         }
 
         if (str_contains($html, '@slot')) {
-            $html = str_replace('@slot', (string)($data['slot'] ?? ''), $html);
+            $html = str_replace('@slot', self::sanitizeDynamicHtml((string) ($data['slot'] ?? '')), $html);
         }
 
         unset(self::$recursionStack[$slug]); // পপ স্ট্যাক
+        self::trackTailwind($html);
         return $html;
+    }
+
+    private static function renderType(string $type, string $slug, array $data): string
+    {
+        $slug = self::normalizeSlug($slug);
+        $candidates = match ($type) {
+            'section' => [$slug, "section:$slug", "sect:$slug", "ui:section-$slug"],
+            'layout' => [$slug, "layout:$slug", "shell:$slug", "ui:layout-$slug"],
+            'page' => [$slug, "page:$slug", "section:$slug", "ui:page-$slug"],
+            default => [$slug, "html:$slug", "ui:$slug"],
+        };
+        if ($type === 'element' && str_starts_with($slug, 'button:')) {
+            $variant = substr($slug, 7);
+            array_splice($candidates, 1, 0, ["btn:$variant", "ui:button-$variant"]);
+        }
+        foreach (array_values(array_unique($candidates)) as $candidate) {
+            if (self::exists($candidate)) return self::render($candidate, $data);
+        }
+        return "<!-- PHUI: {$type} '$slug' not found -->";
+    }
+
+    private static function prepareRuntimeData(string $slug, array $data): array
+    {
+        if (!array_key_exists('slot', $data) && array_key_exists('text', $data)) {
+            $data['slot'] = $data['text'];
+        }
+        $classes = [];
+        foreach (['class', 'tw', 'css'] as $classKey) {
+            if (!isset($data[$classKey])) continue;
+            $value = $data[$classKey];
+            $classes[] = is_array($value) ? implode(' ', array_filter($value, 'is_scalar')) : (string) $value;
+        }
+        $data['class'] = trim(implode(' ', array_filter($classes)));
+
+        $attributes = [];
+        foreach (['attr', 'attrs'] as $key) {
+            if (!isset($data[$key])) continue;
+            if (is_array($data[$key])) {
+                $attributes = array_merge($attributes, $data[$key]);
+            } elseif (is_string($data[$key]) && trim($data[$key]) !== '') {
+                $attributes[] = trim($data[$key]);
+            }
+        }
+        $attributes['data-phui'] = $attributes['data-phui'] ?? $slug;
+
+        if (isset($data['state']) && is_array($data['state'])) {
+            $attributes['x-data'] = json_encode(
+                $data['state'],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            );
+        }
+        if (isset($data['on']) && is_array($data['on'])) {
+            foreach ($data['on'] as $event => $expression) {
+                if (preg_match('/^[a-z][a-z0-9_.:-]*$/i', (string) $event) && is_scalar($expression)) {
+                    $attributes['x-on:' . strtolower((string) $event)] = (string) $expression;
+                }
+            }
+        }
+        if (isset($data['phjs'])) {
+            $interactions = is_array($data['phjs']) ? $data['phjs'] : ['click' => $data['phjs']];
+            foreach ($interactions as $event => $instruction) {
+                if (!preg_match('/^[a-z][a-z0-9_.:-]*$/i', (string) $event) || !is_scalar($instruction)) continue;
+                $attributes['x-on:' . strtolower((string) $event)] =
+                    class_exists('PHJS') && is_callable(['PHJS', 'gen'])
+                        ? PHJS::gen((string) $instruction)
+                        : (string) $instruction;
+            }
+        }
+        if (isset($data['htmx']) && is_array($data['htmx'])) {
+            $htmxMap = [
+                'get' => 'hx-get', 'post' => 'hx-post', 'put' => 'hx-put',
+                'patch' => 'hx-patch', 'delete' => 'hx-delete', 'target' => 'hx-target',
+                'trigger' => 'hx-trigger', 'swap' => 'hx-swap', 'select' => 'hx-select',
+                'indicator' => 'hx-indicator', 'push-url' => 'hx-push-url',
+            ];
+            foreach ($data['htmx'] as $name => $value) {
+                $attribute = $htmxMap[strtolower((string) $name)] ?? null;
+                if ($attribute !== null && (is_scalar($value) || $value === null)) {
+                    $attributes[$attribute] = $value;
+                }
+            }
+        }
+
+        $data['attr'] = $attributes;
+        unset($data['attrs'], $data['tw'], $data['css'], $data['phjs'], $data['on'], $data['htmx'], $data['state']);
+        return $data;
+    }
+
+    private static function normalizeSlug(string $slug): string
+    {
+        $slug = strtolower(trim($slug));
+        return preg_match('/^[a-z0-9][a-z0-9:_-]{0,159}$/', $slug) ? $slug : '';
+    }
+
+    private static function resolveSlug(string $slug): ?string
+    {
+        $slug = self::normalizeSlug($slug);
+        if ($slug === '') return null;
+        if (isset(self::$registry[$slug])) return $slug;
+        $alternate = str_replace('.', ':', $slug);
+        if (isset(self::$registry[$alternate])) return $alternate;
+        if (str_starts_with($slug, 'button:')) {
+            $buttonAlias = 'btn:' . substr($slug, 7);
+            if (isset(self::$registry[$buttonAlias])) return $buttonAlias;
+        }
+        return null;
+    }
+
+    private static function trackTailwind(string $html): void
+    {
+        if ($html !== '' && class_exists('PHCS') && is_callable(['PHCS', 'HTML'])) {
+            PHCS::HTML($html);
+        }
     }
 
     public static function boot(): void { if (!self::$booted) { self::$booted = true; self::loadSemanticRegistry(); } }
@@ -212,6 +496,26 @@ class PHUI
             'alert:destructive' => ['title' => 'Destructive Alert', 'template' => '<div class="relative w-full rounded-lg border border-destructive/50 text-destructive dark:border-destructive bg-background p-4 {{class}}" {{style_attr}} {{attr}}><h5 class="mb-1 font-medium leading-none tracking-tight">{{title}}</h5><div class="text-sm opacity-90">{{desc}}</div></div>'],
 
             'article' => ['title' => 'Article', 'template' => '<article class="{{class}}" {{style_attr}} {{attr}}>@slot</article>'],
+
+            'auth:oauth-buttons' => ['title' => 'OAuth Provider Button Grid', 'template' => '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 {{class}}" role="group" aria-label="{{label|Continue with another account}}" {{style_attr}} {{attr}}>@slot</div>'],
+
+            'auth:oauth-provider-button' => ['title' => 'OAuth Provider Button', 'template' => '<a class="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 {{class}}" {{style_attr}} {{attr}}><span class="flex h-5 w-5 items-center justify-center" aria-hidden="true">{{icon}}</span><span>{{label|Continue}}</span></a>'],
+
+            'auth:oauth-callback' => ['title' => 'OAuth Callback Status', 'template' => '<div class="mx-auto flex max-w-md flex-col items-center gap-4 rounded-2xl border border-border bg-card p-8 text-center shadow-sm {{class}}" role="status" aria-live="polite" {{style_attr}} {{attr}}><div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">{{icon|&#8635;}}</div><h2 class="text-xl font-bold text-foreground">{{title|Completing sign in}}</h2><p class="text-sm text-muted-foreground">{{message|Please wait while your account is verified.}}</p></div>'],
+
+            'auth:account-linking' => ['title' => 'Linked Accounts Panel', 'template' => '<section class="rounded-2xl border border-border bg-card p-6 shadow-sm {{class}}" {{style_attr}} {{attr}}><div class="mb-5"><h2 class="text-lg font-bold text-foreground">{{title|Linked accounts}}</h2><p class="mt-1 text-sm text-muted-foreground">{{description|Manage the external accounts connected to your profile.}}</p></div><div class="divide-y divide-border">@slot</div></section>'],
+
+            'auth:2fa-setup' => ['title' => 'Authenticator Setup Panel', 'template' => '<section class="mx-auto max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-sm sm:p-8 {{class}}" {{style_attr}} {{attr}}><div class="mb-6"><span class="inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">{{step|Security setup}}</span><h2 class="mt-3 text-2xl font-bold text-foreground">{{title|Set up an authenticator app}}</h2><p class="mt-2 text-sm text-muted-foreground">{{description|Scan the QR code, then enter the current code from your authenticator app.}}</p></div><div class="grid gap-6 md:grid-cols-[auto_1fr]"><div class="flex min-h-48 min-w-48 items-center justify-center rounded-2xl border border-border bg-white p-3">{{qr}}</div><div class="space-y-4"><div><p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manual setup key</p><code class="mt-2 block break-all rounded-lg bg-muted p-3 font-mono text-sm text-foreground">{{secret}}</code></div>@slot</div></div></section>'],
+
+            'auth:2fa-verify' => ['title' => 'Authenticator Code Verification', 'template' => '<form class="mx-auto max-w-md rounded-3xl border border-border bg-card p-6 shadow-sm sm:p-8 {{class}}" {{style_attr}} {{attr}}><div class="text-center"><div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-xl text-primary" aria-hidden="true">&#128274;</div><h2 class="mt-4 text-2xl font-bold text-foreground">{{title|Two-factor authentication}}</h2><p class="mt-2 text-sm text-muted-foreground">{{description|Enter the code from your authenticator app.}}</p></div><div class="mt-6 flex justify-center gap-2" data-2fa-input role="group" aria-label="Authenticator code"><input data-2fa-digit inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1" class="h-12 w-10 rounded-lg border border-input bg-background text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-ring"><input data-2fa-digit inputmode="numeric" maxlength="1" aria-label="Digit 2" class="h-12 w-10 rounded-lg border border-input bg-background text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-ring"><input data-2fa-digit inputmode="numeric" maxlength="1" aria-label="Digit 3" class="h-12 w-10 rounded-lg border border-input bg-background text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-ring"><input data-2fa-digit inputmode="numeric" maxlength="1" aria-label="Digit 4" class="h-12 w-10 rounded-lg border border-input bg-background text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-ring"><input data-2fa-digit inputmode="numeric" maxlength="1" aria-label="Digit 5" class="h-12 w-10 rounded-lg border border-input bg-background text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-ring"><input data-2fa-digit inputmode="numeric" maxlength="1" aria-label="Digit 6" class="h-12 w-10 rounded-lg border border-input bg-background text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-ring"></div><div class="mt-6">@slot</div></form>'],
+
+            'auth:recovery-codes' => ['title' => 'Authenticator Recovery Codes', 'template' => '<section class="rounded-2xl border border-warning/40 bg-warning/5 p-6 {{class}}" {{style_attr}} {{attr}}><div class="flex items-start gap-3"><span class="text-warning" aria-hidden="true">&#9888;</span><div><h3 class="font-bold text-foreground">{{title|Save your recovery codes}}</h3><p class="mt-1 text-sm text-muted-foreground">{{description|Each code works once. Store them somewhere safe and private.}}</p></div></div><div class="mt-5 grid grid-cols-1 gap-2 rounded-xl border border-border bg-background p-4 font-mono text-sm sm:grid-cols-2">@slot</div><div class="mt-4 flex flex-wrap gap-3">{{actions}}</div></section>'],
+
+            'auth:recovery-input' => ['title' => 'Recovery Code Input', 'template' => '<div class="space-y-2 {{class}}" {{style_attr}} {{attr}}><label class="text-sm font-semibold text-foreground">{{label|Recovery code}}</label><input type="text" name="{{name|code}}" inputmode="text" autocomplete="one-time-code" spellcheck="false" placeholder="XXXXX-XXXXX" class="h-12 w-full rounded-xl border border-input bg-background px-4 font-mono uppercase tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-ring"><p class="text-xs text-muted-foreground">{{help|Use one of the single-use codes saved during setup.}}</p></div>'],
+
+            'auth:2fa-status' => ['title' => 'Authenticator Status Card', 'template' => '<div class="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:flex-row sm:items-center sm:justify-between {{class}}" {{style_attr}} {{attr}}><div class="flex items-center gap-4"><span class="flex h-11 w-11 items-center justify-center rounded-full bg-{{tone|primary}}/10 text-{{tone|primary}}" aria-hidden="true">{{icon|&#128737;}}</span><div><h3 class="font-bold text-foreground">{{title|Authenticator app}}</h3><p class="text-sm text-muted-foreground">{{status|Not configured}}</p></div></div><div>{{action}}</div></div>'],
+
+            'auth:2fa-disable' => ['title' => 'Disable Authenticator Confirmation', 'template' => '<section class="rounded-2xl border border-destructive/40 bg-destructive/5 p-6 {{class}}" {{style_attr}} {{attr}}><h3 class="font-bold text-destructive">{{title|Disable two-factor authentication?}}</h3><p class="mt-2 text-sm text-muted-foreground">{{description|Your account will have less protection. Confirm with a current code before continuing.}}</p><div class="mt-5">@slot</div></section>'],
 
             'aside' => ['title' => 'Aside', 'template' => '<aside class="{{class}}" {{style_attr}} {{attr}}>@slot</aside>'],
 
@@ -382,6 +686,50 @@ class PHUI
             'form:multi-select' => ['title' => 'Multi-select Component', 'template' => "<div class=\"space-y-2 {{class}}\"><label class=\"text-sm font-semibold ml-1\">{{label}}</label><div class=\"min-h-[3rem] w-full p-2 border rounded-xl bg-background flex flex-wrap gap-2 $int\">@slot<input class=\"flex-1 bg-transparent border-0 outline-none px-2 min-w-[100px] text-sm\"></div></div>"],
 
             'form:payment' => ['title' => 'Payment Form Wrapper', 'template' => "<div class=\"p-8 border rounded-3xl bg-card space-y-8 $int {{class}}\" {{style_attr}} {{attr}}><h3 class=\"text-xl font-black uppercase tracking-widest\">Payment</h3>@slot</div>"],
+
+            'payment:gateway-selector' => ['title' => 'Payment Gateway Selector', 'template' => '<fieldset class="rounded-2xl border border-border bg-card p-6 {{class}}" {{style_attr}} {{attr}}><legend class="px-2 text-base font-bold text-foreground">{{title|Choose a payment method}}</legend><p class="mb-4 text-sm text-muted-foreground">{{description|You will continue through the selected provider securely.}}</p><div class="grid grid-cols-1 gap-3 sm:grid-cols-2">@slot</div></fieldset>'],
+
+            'payment:gateway-option' => ['title' => 'Payment Gateway Option', 'template' => '<button type="button" class="group flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-background p-4 text-left transition hover:border-primary/50 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 {{class}}" {{style_attr}} {{attr}}><span class="flex h-9 w-12 items-center justify-center rounded-lg bg-white p-1" aria-hidden="true">{{logo}}</span><span class="min-w-0 flex-1"><span class="block font-semibold text-foreground">{{label|Payment provider}}</span><span class="block truncate text-xs text-muted-foreground">{{description|Secure hosted checkout}}</span></span><span class="text-muted-foreground" aria-hidden="true">&#8250;</span></button>'],
+
+            'payment:checkout-summary' => ['title' => 'Secure Checkout Summary', 'template' => '<aside class="rounded-3xl border border-border bg-card p-6 shadow-sm {{class}}" {{style_attr}} {{attr}}><div class="flex items-center justify-between"><h2 class="text-xl font-bold text-foreground">{{title|Order summary}}</h2><span class="rounded-full bg-success/10 px-3 py-1 text-xs font-semibold text-success">{{badge|Secure}}</span></div><div class="mt-6 divide-y divide-border">{{items}}</div><div class="mt-6 space-y-3 border-t border-border pt-5">{{totals}}</div><div class="mt-6">@slot</div></aside>'],
+
+            'payment:processing' => ['title' => 'Payment Processing State', 'template' => '<div class="mx-auto flex max-w-md flex-col items-center rounded-3xl border border-border bg-card p-8 text-center shadow-sm {{class}}" role="status" aria-live="polite" {{style_attr}} {{attr}}><svg class="h-10 w-10 animate-spin text-primary" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg><h2 class="mt-5 text-xl font-bold text-foreground">{{title|Processing payment}}</h2><p class="mt-2 text-sm text-muted-foreground">{{message|Do not close or refresh this page.}}</p></div>'],
+
+            'payment:status' => ['title' => 'Payment Status Card', 'template' => '<div class="flex items-start gap-4 rounded-2xl border border-border bg-card p-6 {{class}}" role="status" aria-live="polite" {{style_attr}} {{attr}}><span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-{{tone|primary}}/10 text-{{tone|primary}}" aria-hidden="true">{{icon|&#8230;}}</span><div class="min-w-0 flex-1"><h3 class="font-bold text-foreground">{{title|Payment status}}</h3><p class="mt-1 text-sm text-muted-foreground">{{message}}</p><p class="mt-2 truncate font-mono text-xs text-muted-foreground">{{reference}}</p></div>{{action}}</div>'],
+
+            'payment:success' => ['title' => 'Payment Success Result', 'template' => '<section class="mx-auto max-w-lg rounded-3xl border border-success/30 bg-success/5 p-8 text-center {{class}}" {{style_attr}} {{attr}}><div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success text-2xl text-white" aria-hidden="true">&#10003;</div><h2 class="mt-5 text-2xl font-bold text-foreground">{{title|Payment successful}}</h2><p class="mt-2 text-sm text-muted-foreground">{{message|Your payment was confirmed successfully.}}</p><div class="mt-6 rounded-xl border border-success/20 bg-background p-4 text-left">{{details}}</div><div class="mt-6">@slot</div></section>'],
+
+            'payment:failed' => ['title' => 'Payment Failure Result', 'template' => '<section class="mx-auto max-w-lg rounded-3xl border border-destructive/30 bg-destructive/5 p-8 text-center {{class}}" role="alert" {{style_attr}} {{attr}}><div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-destructive text-2xl text-white" aria-hidden="true">&#10005;</div><h2 class="mt-5 text-2xl font-bold text-foreground">{{title|Payment was not completed}}</h2><p class="mt-2 text-sm text-muted-foreground">{{message|No confirmed charge was recorded. You can safely try again.}}</p><div class="mt-6">@slot</div></section>'],
+
+            'payment:receipt' => ['title' => 'Payment Receipt', 'template' => '<article class="mx-auto max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-sm sm:p-8 {{class}}" {{style_attr}} {{attr}}><header class="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between"><div><p class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{{label|Payment receipt}}</p><h2 class="mt-1 text-2xl font-bold text-foreground">{{merchant}}</h2></div><div class="text-left sm:text-right"><p class="font-mono text-sm text-foreground">{{reference}}</p><p class="text-xs text-muted-foreground">{{date}}</p></div></header><div class="py-6">{{details}}</div><footer class="flex items-center justify-between border-t border-border pt-5 text-lg font-bold"><span>{{total_label|Total paid}}</span><span>{{total}}</span></footer></article>'],
+
+            'payment:refund-status' => ['title' => 'Payment Refund Status', 'template' => '<div class="rounded-2xl border border-warning/30 bg-warning/5 p-5 {{class}}" {{style_attr}} {{attr}}><div class="flex items-center justify-between gap-4"><div><h3 class="font-bold text-foreground">{{title|Refund status}}</h3><p class="mt-1 text-sm text-muted-foreground">{{message}}</p></div><span class="rounded-full border border-warning/30 bg-background px-3 py-1 text-xs font-semibold text-warning">{{status|Pending}}</span></div><div class="mt-4">@slot</div></div>'],
+
+            'payment:masked-method' => ['title' => 'Masked Payment Method', 'template' => '<div class="flex items-center gap-4 rounded-xl border border-border bg-background p-4 {{class}}" {{style_attr}} {{attr}}><span class="flex h-10 w-14 items-center justify-center rounded-lg bg-muted">{{logo}}</span><div class="min-w-0 flex-1"><p class="font-semibold text-foreground">{{brand|Payment method}} <span class="font-mono">{{masked|&#8226;&#8226;&#8226;&#8226;}}</span></p><p class="text-xs text-muted-foreground">{{description}}</p></div><div>{{action}}</div></div>'],
+
+            'courier:selector' => ['title' => 'Courier Provider Selector', 'template' => '<fieldset class="rounded-2xl border border-border bg-card p-5 sm:p-6 {{class}}" {{style_attr}} {{attr}}><legend class="px-2 text-base font-bold text-foreground">{{title|Choose a courier}}</legend><p class="mb-4 text-sm text-muted-foreground">{{description|Select an available delivery service.}}</p><div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" role="radiogroup">@slot</div></fieldset>'],
+
+            'courier:option' => ['title' => 'Courier Provider Option', 'template' => '<label class="group flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border border-border bg-background p-4 transition hover:border-primary/50 hover:bg-muted has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/20 {{class}}" {{style_attr}} {{attr}}><input class="sr-only" type="radio" name="{{name|courier}}" value="{{value}}"><span class="flex h-10 w-12 shrink-0 items-center justify-center rounded-lg bg-white p-1">{{logo|&#128666;}}</span><span class="min-w-0 flex-1"><strong class="block text-sm text-foreground">{{label|Courier}}</strong><span class="block truncate text-xs text-muted-foreground">{{description}}</span></span><span aria-hidden="true" class="text-primary opacity-0 group-has-[:checked]:opacity-100">&#10003;</span></label>'],
+
+            'courier:tracking-form' => ['title' => 'Courier Tracking Form', 'template' => '<form data-ph-courier-track action="{{action|/courier/track}}" method="post" class="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6 {{class}}" {{style_attr}} {{attr}}><div class="flex flex-col gap-2"><label for="{{id|courier-tracking}}" class="font-semibold text-foreground">{{label|Track your shipment}}</label><p class="text-sm text-muted-foreground">{{description|Enter the tracking or consignment number supplied by the courier.}}</p></div><div class="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"><input id="{{id|courier-tracking}}" name="tracking_id" required maxlength="160" autocomplete="off" spellcheck="false" placeholder="{{placeholder|Tracking number}}" class="h-12 min-w-0 rounded-xl border border-input bg-background px-4 font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-ring"><button type="submit" class="h-12 rounded-xl bg-primary px-6 font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60">{{button|Track}}</button></div><div data-ph-courier-result class="mt-5" aria-live="polite" aria-atomic="false">@slot</div></form>'],
+
+            'courier:tracking-result' => ['title' => 'Courier Tracking Result', 'template' => '<section class="rounded-2xl border border-border bg-card p-5 {{class}}" role="status" aria-live="polite" {{style_attr}} {{attr}}><div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div class="min-w-0"><p class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{{courier|Courier}}</p><h2 class="mt-1 truncate font-mono text-lg font-bold text-foreground">{{tracking_id}}</h2></div><span class="inline-flex w-fit rounded-full bg-{{tone|primary}}/10 px-3 py-1 text-xs font-semibold text-{{tone|primary}}">{{status|Processing}}</span></div><p class="mt-4 text-sm text-muted-foreground">{{message}}</p><div class="mt-5">@slot</div></section>'],
+
+            'courier:timeline' => ['title' => 'Courier Tracking Timeline', 'template' => '<ol class="relative ml-2 space-y-6 border-l border-border pl-6 {{class}}" aria-label="{{label|Shipment progress}}" {{style_attr}} {{attr}}>@slot</ol>'],
+
+            'courier:timeline-event' => ['title' => 'Courier Tracking Timeline Event', 'template' => '<li class="relative {{class}}" {{style_attr}} {{attr}}><span class="absolute -left-[1.9rem] top-1 flex h-3 w-3 rounded-full bg-{{tone|primary}} ring-4 ring-background" aria-hidden="true"></span><div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between"><strong class="text-sm text-foreground">{{title|Shipment updated}}</strong><time datetime="{{datetime}}" class="text-xs text-muted-foreground">{{date}}</time></div><p class="mt-1 text-sm text-muted-foreground">{{description}}</p><p class="mt-1 text-xs text-muted-foreground">{{location}}</p></li>'],
+
+            'courier:shipment-card' => ['title' => 'Courier Shipment Card', 'template' => '<article class="rounded-2xl border border-border bg-card p-5 shadow-sm {{class}}" {{style_attr}} {{attr}}><header class="flex items-start justify-between gap-4"><div class="min-w-0"><p class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{courier|Courier}}</p><h3 class="mt-1 truncate font-mono font-bold text-foreground">{{tracking_id}}</h3></div><span class="rounded-full bg-{{tone|primary}}/10 px-3 py-1 text-xs font-semibold text-{{tone|primary}}">{{status}}</span></header><div class="mt-5 grid grid-cols-2 gap-4 text-sm"><div><span class="block text-xs text-muted-foreground">{{from_label|From}}</span><strong class="text-foreground">{{from}}</strong></div><div><span class="block text-xs text-muted-foreground">{{to_label|To}}</span><strong class="text-foreground">{{to}}</strong></div><div><span class="block text-xs text-muted-foreground">{{eta_label|Estimated delivery}}</span><strong class="text-foreground">{{eta}}</strong></div><div><span class="block text-xs text-muted-foreground">{{service_label|Service}}</span><strong class="text-foreground">{{service}}</strong></div></div><footer class="mt-5 border-t border-border pt-4">@slot</footer></article>'],
+
+            'courier:rate-card' => ['title' => 'Courier Rate Option', 'template' => '<label class="flex cursor-pointer flex-col rounded-2xl border border-border bg-card p-5 transition hover:border-primary/50 has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/20 {{class}}" {{style_attr}} {{attr}}><div class="flex items-start justify-between gap-4"><div><input class="sr-only" type="radio" name="{{name|shipping_rate}}" value="{{value}}"><h3 class="font-bold text-foreground">{{service|Delivery service}}</h3><p class="mt-1 text-sm text-muted-foreground">{{courier}}</p></div><strong class="text-lg text-foreground">{{price}}</strong></div><div class="mt-4 flex items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground"><span>{{eta}}</span><span>{{note}}</span></div></label>'],
+
+            'courier:address-form' => ['title' => 'Courier Address Form', 'template' => '<fieldset data-ph-courier-address class="rounded-2xl border border-border bg-card p-5 sm:p-6 {{class}}" {{style_attr}} {{attr}}><legend class="px-2 font-bold text-foreground">{{title|Delivery address}}</legend><div class="grid gap-4 sm:grid-cols-2">{{identity}}</div><div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{{locations}}</div><div class="mt-4">{{address}}</div><div class="mt-5">@slot</div></fieldset>'],
+
+            'courier:label-preview' => ['title' => 'Courier Label Preview', 'template' => '<figure class="overflow-hidden rounded-2xl border border-border bg-card {{class}}" {{style_attr}} {{attr}}><div class="flex min-h-64 items-center justify-center bg-muted/40 p-4">{{label}}</div><figcaption class="flex flex-col gap-3 border-t border-border p-4 sm:flex-row sm:items-center sm:justify-between"><div><strong class="block text-foreground">{{title|Shipping label}}</strong><span class="font-mono text-xs text-muted-foreground">{{tracking_id}}</span></div><div class="flex gap-2">@slot</div></figcaption></figure>'],
+
+            'courier:pickup-card' => ['title' => 'Courier Pickup Summary', 'template' => '<section class="rounded-2xl border border-border bg-card p-5 {{class}}" {{style_attr}} {{attr}}><div class="flex items-start gap-4"><span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary" aria-hidden="true">&#128666;</span><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold text-foreground">{{title|Pickup scheduled}}</h3><span class="rounded-full bg-{{tone|primary}}/10 px-3 py-1 text-xs font-semibold text-{{tone|primary}}">{{status}}</span></div><p class="mt-1 text-sm text-muted-foreground">{{date}}</p><p class="mt-2 text-sm text-foreground">{{address}}</p><p class="mt-2 font-mono text-xs text-muted-foreground">{{reference}}</p></div></div><div class="mt-5 border-t border-border pt-4">@slot</div></section>'],
+
+            'courier:error' => ['title' => 'Courier Error State', 'template' => '<div class="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm {{class}}" role="alert" {{style_attr}} {{attr}}><strong class="text-destructive">{{title|Courier request failed}}</strong><p class="mt-1 text-muted-foreground">{{message|Please verify the tracking number and try again.}}</p></div>'],
 
             'form:radio' => ['title' => 'Form Radio Button', 'template' => '<div class="flex items-center space-x-2 {{class}}" {{style_attr}} {{attr}}><input type="radio" name="{{name}}" value="{{value}}" id="{{id}}" class="aspect-square h-4 w-4 rounded-full border border-primary text-primary ring-offset-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"><label for="{{id}}" class="text-sm font-medium leading-none text-foreground">{{label}}</label></div>'],
 

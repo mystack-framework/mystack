@@ -159,10 +159,10 @@ MyStack `PHCS` ব্যবহার করে অন-দ্য-ফ্লাই 
 ### সাধারণ কনফিগারেশন
 ```php
 // Stripe কনফিগারেশন
-PHPA::stripe()->setKeys('pk_test_123', 'sk_test_123');
+$stripe = PHPA::stripe()->setKeys('sk_test_123');
 
 // চার্জ করা
-$response = PHPA::stripe()->charge(50.00, 'USD', 'ORDER_001');
+$response = $stripe->charge(50.00, 'USD', 'ORDER_001');
 
 if ($response['success']) {
     echo "Payment successful! Transaction ID: " . $response['transaction_id'];

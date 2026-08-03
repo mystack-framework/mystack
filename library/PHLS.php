@@ -18,6 +18,11 @@ class PHLS
     private static string $file = '.env';
     private static array $stmt_cache = [];
     private static bool $shutdown_registered = false;
+    private static bool $lock_warning_logged = false;
+    private static bool $recovery_attempted = false;
+    private const MAX_FILE_BYTES = 52428800; // 50 MB soft safety limit
+    private const BUSY_TIMEOUT_MS = 5000;
+    private const TRANSACTION_ATTEMPTS = 8;
 
     /**
      * Establishes a connection to the SQLite database and ensures the schema is up to date.
@@ -33,28 +38,25 @@ class PHLS
                     \PDO::ATTR_PERSISTENT => false // Ensure connections close properly
                 ];
 
-                // Use absolute path if possible, otherwise use relative
-                $db_path = __DIR__ . '/../' . self::$file;
-                // Fallback if .env is in the same directory (adjust based on your structure)
-                if (!file_exists(dirname($db_path)))
-                    $db_path = self::$file;
+                $db_path = self::storagePath();
+                $db_directory = dirname($db_path);
+                if (!is_dir($db_directory) && !@mkdir($db_directory, 0750, true) && !is_dir($db_directory)) {
+                    throw new \RuntimeException("PHLS storage directory could not be created.");
+                }
 
                 self::$pdo = new \PDO('sqlite:' . $db_path, null, null, $options);
-
-                // PERFORMANCE & CONCURRENCY SETTINGS
-                self::$pdo->exec('PRAGMA journal_mode = WAL;');
-                self::$pdo->exec('PRAGMA synchronous = NORMAL;');
-                self::$pdo->exec('PRAGMA busy_timeout = 1000;'); // Set SQLite internal timeout to 1s
-
-                // Create Tables
-                self::$pdo->exec("CREATE TABLE IF NOT EXISTS storage (key TEXT PRIMARY KEY, value TEXT NOT NULL, expiration INTEGER)");
-                self::$pdo->exec("CREATE TABLE IF NOT EXISTS storage_tags (tag TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY (tag, key))");
-
-                $fileSize = filesize($db_path);
-                clearstatcache();
-                if ($fileSize !== false && $fileSize > 10485760) { // 10MB
-                    self::removeAll();
+                if (is_file($db_path) && PHP_OS_FAMILY !== 'Windows') {
+                    @chmod($db_path, 0600);
                 }
+
+                // Apply the wait policy before any PRAGMA or schema inspection.
+                self::$pdo->exec('PRAGMA busy_timeout = ' . self::BUSY_TIMEOUT_MS . ';');
+                self::initializeStorage($db_path);
+                self::$pdo->exec('PRAGMA synchronous = NORMAL;');
+                self::$pdo->exec('PRAGMA wal_autocheckpoint = 1000;');
+                self::$pdo->exec('PRAGMA temp_store = MEMORY;');
+
+                self::enforceSizeLimit($db_path);
 
                 if (rand(1, 100) <= 5)
                     self::autoCleanup();
@@ -64,8 +66,58 @@ class PHLS
                     self::$shutdown_registered = true;
                 }
             } catch (\PDOException $e) {
+                if (self::isCorruptionException($e) && !self::$recovery_attempted && self::recoverCorruptStorage($db_path)) {
+                    self::$recovery_attempted = true;
+                    self::connect();
+                    return;
+                }
                 // If the file is not writable, this throws a clear error
                 throw new \RuntimeException("PHLS SQLite connection failed: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Serializes first-connection WAL/schema setup across PHP workers.
+     * Existing databases are inspected read-only and do not repeat DDL writes.
+     */
+    private static function initializeStorage(string $db_path): void
+    {
+        $lock_path = $db_path . '.init.lock';
+        $lock_handle = @fopen($lock_path, 'c');
+        if ($lock_handle === false) {
+            throw new \RuntimeException('PHLS initialization lock could not be opened.');
+        }
+
+        try {
+            if (!flock($lock_handle, LOCK_EX)) {
+                throw new \RuntimeException('PHLS initialization lock could not be acquired.');
+            }
+
+            $journal_mode = strtolower((string) self::$pdo->query('PRAGMA journal_mode')->fetchColumn());
+            if ($journal_mode !== 'wal') {
+                self::$pdo->exec('PRAGMA journal_mode = WAL;');
+            }
+
+            $tables = self::$pdo
+                ->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('storage', 'storage_tags')")
+                ->fetchAll(\PDO::FETCH_COLUMN);
+
+            if (!in_array('storage', $tables, true)) {
+                self::$pdo->exec(
+                    "CREATE TABLE storage (key TEXT PRIMARY KEY, value TEXT NOT NULL, expiration INTEGER)"
+                );
+            }
+            if (!in_array('storage_tags', $tables, true)) {
+                self::$pdo->exec(
+                    "CREATE TABLE storage_tags (tag TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY (tag, key))"
+                );
+            }
+        } finally {
+            @flock($lock_handle, LOCK_UN);
+            @fclose($lock_handle);
+            if (is_file($lock_path)) {
+                @chmod($lock_path, 0600);
             }
         }
     }
@@ -93,6 +145,285 @@ class PHLS
     }
 
     /**
+     * Returns a portable absolute storage path for relative, Unix, Windows and UNC paths.
+     */
+    private static function storagePath(): string
+    {
+        $path = trim(self::$file);
+        if ($path === '') {
+            $path = '.env';
+        }
+
+        $is_absolute = str_starts_with($path, '/')
+            || str_starts_with($path, '\\\\')
+            || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
+
+        if ($is_absolute) {
+            return $path;
+        }
+
+        return dirname(__DIR__) . DIRECTORY_SEPARATOR . ltrim($path, '/\\');
+    }
+
+    /**
+     * Checks storage availability and optionally verifies an actual write/read/delete cycle.
+     * No existing application value is changed.
+     */
+    public static function checker(bool $write_test = false): array
+    {
+        $probe_key = 'phls:checker:' . bin2hex(random_bytes(8));
+        $probe_value = ['nonce' => bin2hex(random_bytes(16)), 'time' => time()];
+
+        try {
+            self::connect();
+            $path = self::storagePath();
+            clearstatcache(true, $path);
+            $quick_check = (string) self::$pdo->query('PRAGMA quick_check')->fetchColumn();
+            $journal_mode = (string) self::$pdo->query('PRAGMA journal_mode')->fetchColumn();
+            $write_ok = null;
+
+            if ($write_test) {
+                $write_ok = self::_add($probe_key, $probe_value, 1, ['phls-checker']);
+                $write_ok = $write_ok && self::get($probe_key) === $probe_value;
+                self::remove($probe_key);
+            }
+
+            $exists = is_file($path);
+            $readable = $exists && is_readable($path);
+            $writable = $exists ? is_writable($path) : is_writable(dirname($path));
+            if ($exists && (!$readable || !$writable)) {
+                $readHandle = @fopen($path, 'rb');
+                if ($readHandle !== false) {
+                    $readable = true;
+                    @fclose($readHandle);
+                }
+                $writeHandle = @fopen($path, 'ab');
+                if ($writeHandle !== false) {
+                    $writable = true;
+                    @fclose($writeHandle);
+                }
+            }
+            $size = $exists ? (int) (@filesize($path) ?: 0) : 0;
+
+            return [
+                'status' => $quick_check === 'ok' && $writable && ($write_ok !== false),
+                'driver' => 'sqlite',
+                'scope' => 'single-host',
+                'shared_state' => false,
+                'file' => $path,
+                'exists' => $exists,
+                'readable' => $readable,
+                'writable' => $writable,
+                'integrity' => $quick_check,
+                'journal_mode' => $journal_mode,
+                'size' => $size,
+                'limit' => self::MAX_FILE_BYTES,
+                'write_test' => $write_ok,
+            ];
+        } catch (\Throwable $e) {
+            try {
+                if (self::$pdo !== null) {
+                    self::remove($probe_key);
+                }
+            } catch (\Throwable $ignored) {
+            }
+
+            return [
+                'status' => false,
+                'driver' => 'sqlite',
+                'scope' => 'single-host',
+                'shared_state' => false,
+                'file' => self::storagePath(),
+                'error' => $e->getMessage(),
+                'write_test' => false,
+            ];
+        }
+    }
+
+    /**
+     * Cleans expired values when the storage reaches its soft limit.
+     * Persistent values are never deleted automatically.
+     */
+    private static function enforceSizeLimit(string $path): void
+    {
+        clearstatcache(true, $path);
+        $file_size = @filesize($path);
+        if ($file_size === false || $file_size <= self::MAX_FILE_BYTES) {
+            return;
+        }
+
+        self::autoCleanup();
+        try {
+            self::$pdo->exec('PRAGMA wal_checkpoint(PASSIVE)');
+        } catch (\PDOException $ignored) {
+        }
+
+        clearstatcache(true, $path);
+        $file_size = @filesize($path);
+        if ($file_size !== false && $file_size > self::MAX_FILE_BYTES) {
+            error_log('PHLS storage exceeded the 50 MB soft limit; persistent data was preserved.');
+        }
+    }
+
+    /**
+     * Runs a read-modify-write operation under one SQLite IMMEDIATE transaction.
+     * Concurrent writers wait briefly and retry instead of losing updates.
+     */
+    private static function immediateTransaction(callable $callback, bool $fail_soft = false)
+    {
+        self::connect();
+        $attempts = 0;
+
+        while ($attempts < self::TRANSACTION_ATTEMPTS) {
+            self::connect();
+            $transaction_open = false;
+            try {
+                self::$pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+                $transaction_open = true;
+                $result = $callback(self::$pdo);
+                self::$pdo->exec('COMMIT');
+                $transaction_open = false;
+                return $result;
+            } catch (\Throwable $e) {
+                if ($transaction_open) {
+                    try {
+                        self::$pdo->exec('ROLLBACK');
+                    } catch (\PDOException $ignored) {
+                    }
+                }
+
+                if (self::isCorruptionException($e) && !self::$recovery_attempted) {
+                    self::$recovery_attempted = true;
+                    $recovered = self::recoverCorruptStorage(self::storagePath());
+                    if (!$recovered) self::disconnect();
+                    $attempts++;
+                    continue;
+                }
+
+                if (!self::isLockException($e)) {
+                    throw $e;
+                }
+
+                $attempts++;
+                if ($attempts < self::TRANSACTION_ATTEMPTS) {
+                    $wait_us = min(500000, 15000 * (1 << min($attempts, 5)));
+                    usleep($wait_us + random_int(5000, 50000));
+                }
+            }
+        }
+
+        if ($fail_soft) {
+            self::reportLockContention();
+            return false;
+        }
+
+        throw new \RuntimeException('PHLS storage remained locked after retrying.');
+    }
+
+    /**
+     * Detects SQLite lock/busy errors without hiding unrelated HY000 failures.
+     */
+    private static function isLockException(\Throwable $error): bool
+    {
+        if (!$error instanceof \PDOException) {
+            return false;
+        }
+
+        $message = strtolower($error->getMessage());
+        if (str_contains($message, 'locked') || str_contains($message, 'busy')) {
+            return true;
+        }
+
+        $driver_code = $error->errorInfo[1] ?? null;
+        return in_array((int) $driver_code, [5, 6, 261, 262, 517, 518], true)
+            || in_array((string) $error->getCode(), ['5', '6'], true);
+    }
+
+    private static function isCorruptionException(\Throwable $error): bool
+    {
+        if (!$error instanceof \PDOException) return false;
+        $message = strtolower($error->getMessage());
+        $driverCode = (int) ($error->errorInfo[1] ?? 0);
+        return str_contains($message, 'database disk image is malformed')
+            || str_contains($message, 'database schema is malformed')
+            || str_contains($message, 'not a database')
+            || in_array($driverCode, [11, 26], true);
+    }
+
+    /** Salvages readable rows, removes the corrupt store, and recreates it cleanly. */
+    private static function recoverCorruptStorage(string $path): bool
+    {
+        self::$pdo = null;
+        self::$stmt_cache = [];
+        if (!is_file($path)) return false;
+
+        $storageRows = [];
+        $tagRows = [];
+        try {
+            $source = new \PDO('sqlite:' . $path, null, null, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                \PDO::ATTR_TIMEOUT => 3,
+            ]);
+            foreach ($source->query('SELECT key, value, expiration FROM storage') as $row) {
+                if (is_string($row['key'] ?? null) && $row['key'] !== '' && is_string($row['value'] ?? null)) {
+                    $storageRows[] = [$row['key'], $row['value'], $row['expiration'] ?? null];
+                }
+            }
+            try {
+                foreach ($source->query('SELECT tag, key FROM storage_tags') as $row) {
+                    if (is_string($row['tag'] ?? null) && is_string($row['key'] ?? null)) {
+                        $tagRows[] = [$row['tag'], $row['key']];
+                    }
+                }
+            } catch (\Throwable $ignored) {
+            }
+            $source = null;
+        } catch (\Throwable $ignored) {
+        }
+
+        foreach ([$path, $path . '-wal', $path . '-shm'] as $oldFile) {
+            if (is_file($oldFile)) @unlink($oldFile);
+        }
+
+        try {
+            self::$pdo = new \PDO('sqlite:' . $path, null, null, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                \PDO::ATTR_TIMEOUT => 10,
+            ]);
+            self::$pdo->exec('PRAGMA busy_timeout = ' . self::BUSY_TIMEOUT_MS . ';');
+            self::$pdo->exec('PRAGMA journal_mode = WAL;');
+            self::$pdo->exec('CREATE TABLE storage (key TEXT PRIMARY KEY, value TEXT NOT NULL, expiration INTEGER)');
+            self::$pdo->exec('CREATE TABLE storage_tags (tag TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY (tag, key))');
+            $insert = self::$pdo->prepare('INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)');
+            foreach ($storageRows as $row) $insert->execute($row);
+            $tagInsert = self::$pdo->prepare('INSERT OR IGNORE INTO storage_tags (tag, key) VALUES (?, ?)');
+            foreach ($tagRows as $row) $tagInsert->execute($row);
+            if (PHP_OS_FAMILY !== 'Windows') @chmod($path, 0600);
+            error_log('PHLS SQLite corruption repaired; salvaged ' . count($storageRows) . ' storage row(s).');
+            return true;
+        } catch (\Throwable $error) {
+            self::$pdo = null;
+            error_log('PHLS SQLite recovery failed: ' . $error->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Reports prolonged contention once per PHP process without flooding logs.
+     */
+    private static function reportLockContention(): void
+    {
+        if (self::$lock_warning_logged) {
+            return;
+        }
+
+        self::$lock_warning_logged = true;
+        error_log('PHLS write contention exceeded the retry window; the non-critical operation was skipped.');
+    }
+
+    /**
      * (Internal) Adds or updates a key using an IMMEDIATE TRANSACTION to prevent locking.
      * @param string $key The key.
      * @param mixed $value The value.
@@ -101,69 +432,30 @@ class PHLS
      */
     private static function _add(string $key, $value, ?int $expiration = null, array $tags = [])
     {
-        $attempts = 0;
-        $max_attempts = 5; // Increased attempts for safety
-        $min_wait_us = 1000; // 1s start
-        $max_wait_us = 5000; // 5s max
+        return self::immediateTransaction(function (\PDO $pdo) use ($key, $value, $expiration, $tags) {
+            $exp_time = ($expiration !== null) ? time() + ($expiration * 60) : null;
+            $json_value = json_encode($value, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
 
-        while ($attempts < $max_attempts) {
-            try {
-                // 1. START TRANSACTION (IMMEDIATE)
-                // This locks the DB *immediately* for writing, preventing deadlocks 
-                // where two processes read and then try to write.
-                self::$pdo->exec("BEGIN IMMEDIATE TRANSACTION");
+            $stmt = $pdo->prepare(
+                "INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)"
+            );
+            $stmt->execute([$key, $json_value, $exp_time]);
 
-                // 2. Prepare Data
-                $exp_time = ($expiration !== null) ? time() + ($expiration * 60) : null;
-                $json_value = json_encode($value);
+            $delete_tags_stmt = $pdo->prepare("DELETE FROM storage_tags WHERE key = ?");
+            $delete_tags_stmt->execute([$key]);
 
-                // 3. Main Insert/Replace
-                $stmt = self::getStatement('add', "INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)");
-                $stmt->execute([$key, $json_value, $exp_time]);
-
-                // 4. Handle Tags
-                // Clear old tags first
-                $delete_tags_stmt = self::getStatement('delete_tags', "DELETE FROM storage_tags WHERE key = ?");
-                $delete_tags_stmt->execute([$key]);
-
-                // Insert new tags
-                if (!empty($tags)) {
-                    $insert_tag_stmt = self::getStatement('insert_tag', "INSERT INTO storage_tags (tag, key) VALUES (?, ?)");
-                    foreach ($tags as $tag) {
-                        $insert_tag_stmt->execute([$tag, $key]);
-                    }
+            if ($tags) {
+                $insert_tag_stmt = $pdo->prepare(
+                    "INSERT OR IGNORE INTO storage_tags (tag, key) VALUES (?, ?)"
+                );
+                foreach ($tags as $tag) {
+                    $insert_tag_stmt->execute([(string) $tag, $key]);
                 }
-
-                // 5. COMMIT (Save changes and release lock instantly)
-                self::$pdo->commit();
-                return true; // Success!
-
-            } catch (\PDOException $e) {
-                // Rollback changes if something failed so we don't leave the DB in a bad state
-                if (self::$pdo->inTransaction()) {
-                    self::$pdo->rollBack();
-                }
-
-                // Check for Lock Error (Code 5, 6, or HY000)
-                if (in_array($e->getCode(), ['HY000', '5', '6']) || stripos($e->getMessage(), 'locked') !== false) {
-                    $attempts++;
-                    // Exponential backoff: 100ms → 200ms → 400ms → ... up to ~3.2s
-                    $wait_us = $min_wait_us * (1 << ($attempts - 1));
-                    $wait_us = min($wait_us, $max_wait_us); // max 3.2s
-                    usleep($wait_us + rand(0, 1000)); // small random jitter
-                    continue;
-                }
-
-                // throw $e;
-                return false;
             }
-        }
 
-        // Final failure
-        // throw new \Exception("PHLS Error: Database locked after $max_attempts attempts. Check server I/O.");
-        return false;
+            return true;
+        }, true);
     }
-
     /**
      * Adds or updates a key-value pair, wrapping the operation in a transaction.
      * @param string $key The key.
@@ -171,15 +463,15 @@ class PHLS
      * @param int|null $expiration The expiration time in minutes.
      * @param array $tags The tags associated with the key.
      */
-    public static function add(string $key, $value, ?int $expiration = null, array $tags = [])
+    public static function add(string $key, $value, ?int $expiration = null, array $tags = []): bool
     {
         self::connect();
         // Transaction handling is now done inside _add()
         try {
             if (strpos($key, '=>') !== false) {
-                self::setNested($key, $value, $expiration, $tags);
+                return self::setNested($key, $value, $expiration, $tags);
             } else {
-                self::_add($key, $value, $expiration, $tags);
+                return self::_add($key, $value, $expiration, $tags);
             }
         } catch (\Exception $e) {
             // Rollback is handled inside _add, but we re-throw to alert the user
@@ -188,13 +480,42 @@ class PHLS
     }
 
     /**
+     * Stores a value only when the key does not already exist.
+     * This is atomic across concurrent PHP requests.
+     */
+    public static function addIfAbsent(string $key, $value, ?int $expiration = null, array $tags = []): bool
+    {
+        self::connect();
+        $json_value = json_encode($value, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+        $exp_time = ($expiration !== null) ? time() + ($expiration * 60) : null;
+
+        return self::immediateTransaction(function (\PDO $pdo) use ($key, $json_value, $exp_time, $tags) {
+            $stmt = $pdo->prepare(
+                'INSERT OR IGNORE INTO storage (key, value, expiration) VALUES (?, ?, ?)'
+            );
+            $stmt->execute([$key, $json_value, $exp_time]);
+            $inserted = $stmt->rowCount() === 1;
+
+            if ($inserted && $tags) {
+                $tag_stmt = $pdo->prepare(
+                    'INSERT OR IGNORE INTO storage_tags (tag, key) VALUES (?, ?)'
+                );
+                foreach ($tags as $tag) {
+                    $tag_stmt->execute([(string) $tag, $key]);
+                }
+            }
+
+            return $inserted;
+        }, true);
+    }
+    /**
      * Alias for add(). Included for API completeness.
      * @deprecated Use add() instead.
      * @see add()
      */
-    public static function update(string $key, $value, ?int $expiration = null, array $tags = [])
+    public static function update(string $key, $value, ?int $expiration = null, array $tags = []): bool
     {
-        self::add($key, $value, $expiration, $tags);
+        return self::add($key, $value, $expiration, $tags);
     }
 
     /**
@@ -204,21 +525,46 @@ class PHLS
     public static function remove(string $key)
     {
         self::connect();
-        // Removed explicit transaction to prevent nesting errors if other methods also use transaction
-        // But for consistency with _add pattern, we should probably wrap this in a retry loop if high concurrency
-        // For now, simple remove is fast enough usually.
-        try {
+        return self::immediateTransaction(function (\PDO $pdo) use ($key) {
             if (strpos($key, '=>') !== false) {
-                self::removeNested($key);
+                $parts = explode('=>', $key);
+                $root_key = array_shift($parts);
+                $last_key = array_pop($parts);
+                $select = $pdo->prepare(
+                    "SELECT value, expiration FROM storage WHERE key = ? AND (expiration IS NULL OR expiration > ?)"
+                );
+                $select->execute([$root_key, time()]);
+                $record = $select->fetch();
+                $current = is_array($record) ? json_decode((string) $record['value'], true) : null;
+                if (!is_array($current)) {
+                    return true;
+                }
+
+                $pointer = &$current;
+                foreach ($parts as $part) {
+                    if (!isset($pointer[$part]) || !is_array($pointer[$part])) {
+                        return true;
+                    }
+                    $pointer = &$pointer[$part];
+                }
+                unset($pointer[$last_key]);
+
+                $save = $pdo->prepare(
+                    "INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)"
+                );
+                $save->execute([
+                    $root_key,
+                    json_encode($current, JSON_THROW_ON_ERROR),
+                    $record['expiration'],
+                ]);
             } else {
-                $stmt = self::getStatement('remove', "DELETE FROM storage WHERE key = ?");
+                $stmt = $pdo->prepare("DELETE FROM storage WHERE key = ?");
                 $stmt->execute([$key]);
-                $stmt_tags = self::getStatement('remove_tags', "DELETE FROM storage_tags WHERE key = ?");
+                $stmt_tags = $pdo->prepare("DELETE FROM storage_tags WHERE key = ?");
                 $stmt_tags->execute([$key]);
             }
-        } catch (\Exception $e) {
-            throw $e;
-        }
+            return true;
+        });
     }
 
     /**
@@ -228,8 +574,11 @@ class PHLS
     public static function expire(string $key)
     {
         self::connect();
-        $stmt = self::$pdo->prepare("UPDATE storage SET expiration = ? WHERE key = ?");
-        $stmt->execute([time() - 1, $key]);
+        return self::immediateTransaction(function (\PDO $pdo) use ($key) {
+            $stmt = $pdo->prepare("UPDATE storage SET expiration = ? WHERE key = ?");
+            $stmt->execute([time() - 1, $key]);
+            return true;
+        });
     }
 
     /**
@@ -292,32 +641,28 @@ class PHLS
     public static function limitizer(string $key, $value, int $limit = 20, ?int $expiration = null)
     {
         self::connect();
-        // REMOVED: self::$pdo->beginTransaction();  
-
-        try {
-            // 1. Get Current List (Read Operation)
-            // This is safe outside a transaction because _add handles concurrency
-            $current_list = self::get($key) ?? [];
+        return self::immediateTransaction(function (\PDO $pdo) use ($key, $value, $limit, $expiration) {
+            $select = $pdo->prepare(
+                "SELECT value FROM storage WHERE key = ? AND (expiration IS NULL OR expiration > ?)"
+            );
+            $select->execute([$key, time()]);
+            $stored = $select->fetchColumn();
+            $current_list = $stored !== false ? json_decode((string) $stored, true) : [];
             if (!is_array($current_list))
                 $current_list = [];
 
-            // 2. Modify Array (PHP Memory Operation)
             array_unshift($current_list, $value);
             if (count($current_list) > $limit) {
                 $current_list = array_slice($current_list, 0, $limit);
             }
 
-            // 3. Save Changes (Write Operation)
-            // _add now handles its own locking/transaction safely.
-            self::_add($key, $current_list, $expiration);
-
-            // REMOVED: self::$pdo->commit();
-
-        } catch (\Exception $e) {
-            // REMOVED: if (self::$pdo->inTransaction()) self::$pdo->rollBack();
-            // Just throw the error, _add already handles its own rollback.
-            throw $e;
-        }
+            $exp_time = ($expiration !== null) ? time() + ($expiration * 60) : null;
+            $save = $pdo->prepare(
+                "INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)"
+            );
+            $save->execute([$key, json_encode($current_list, JSON_THROW_ON_ERROR), $exp_time]);
+            return true;
+        }, true);
     }
 
     /**
@@ -366,21 +711,50 @@ class PHLS
      * @param array $tags The tags associated with the root key.
      * @return void 
      */
-    private static function setNested(string $key, $value, ?int $expiration = null, array $tags = [])
+    private static function setNested(string $key, $value, ?int $expiration = null, array $tags = []): bool
     {
-        $keys = explode('=>', $key);
-        $root_key = array_shift($keys);
-        $current_data = self::get($root_key) ?? [];
-        if (!is_array($current_data))
-            $current_data = [];
-        $data_pointer = &$current_data;
-        foreach ($keys as $key_part) {
-            if (!isset($data_pointer[$key_part]) || !is_array($data_pointer[$key_part]))
-                $data_pointer[$key_part] = [];
-            $data_pointer = &$data_pointer[$key_part];
-        }
-        $data_pointer = $value;
-        self::_add($root_key, $current_data, $expiration, $tags);
+        return self::immediateTransaction(function (\PDO $pdo) use ($key, $value, $expiration, $tags) {
+            $keys = explode('=>', $key);
+            $root_key = array_shift($keys);
+            $select = $pdo->prepare(
+                "SELECT value FROM storage WHERE key = ? AND (expiration IS NULL OR expiration > ?)"
+            );
+            $select->execute([$root_key, time()]);
+            $stored = $select->fetchColumn();
+            $current_data = $stored !== false ? json_decode((string) $stored, true) : [];
+            if (!is_array($current_data))
+                $current_data = [];
+
+            $data_pointer = &$current_data;
+            foreach ($keys as $key_part) {
+                if (!isset($data_pointer[$key_part]) || !is_array($data_pointer[$key_part]))
+                    $data_pointer[$key_part] = [];
+                $data_pointer = &$data_pointer[$key_part];
+            }
+            $data_pointer = $value;
+
+            $exp_time = ($expiration !== null) ? time() + ($expiration * 60) : null;
+            $save = $pdo->prepare(
+                "INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)"
+            );
+            $save->execute([
+                $root_key,
+                json_encode($current_data, JSON_THROW_ON_ERROR),
+                $exp_time,
+            ]);
+
+            $delete_tags = $pdo->prepare("DELETE FROM storage_tags WHERE key = ?");
+            $delete_tags->execute([$root_key]);
+            if ($tags) {
+                $insert_tag = $pdo->prepare(
+                    "INSERT OR IGNORE INTO storage_tags (tag, key) VALUES (?, ?)"
+                );
+                foreach ($tags as $tag) {
+                    $insert_tag->execute([(string) $tag, $root_key]);
+                }
+            }
+            return true;
+        });
     }
 
     /**
@@ -457,8 +831,8 @@ class PHLS
             return $value;
 
         $value = $callback();
-        self::add($key, $value, $expiration, $tags);
-        return $value;
+        self::addIfAbsent($key, $value, $expiration, $tags);
+        return self::get($key);
     }
 
     /**
@@ -471,15 +845,22 @@ class PHLS
     public static function increment(string $key, int $amount = 1, ?int $expiration = null): int
     {
         self::connect();
-        // Removed transaction here because _add handles it
-        try {
-            $current_value = (int) self::get($key) ?: 0;
+        return self::immediateTransaction(function (\PDO $pdo) use ($key, $amount, $expiration) {
+            $select = $pdo->prepare(
+                "SELECT value FROM storage WHERE key = ? AND (expiration IS NULL OR expiration > ?)"
+            );
+            $select->execute([$key, time()]);
+            $stored = $select->fetchColumn();
+            $current_value = $stored !== false ? (int) json_decode((string) $stored, true) : 0;
             $new_value = $current_value + $amount;
-            self::_add($key, $new_value, $expiration);
+
+            $exp_time = ($expiration !== null) ? time() + ($expiration * 60) : null;
+            $save = $pdo->prepare(
+                "INSERT OR REPLACE INTO storage (key, value, expiration) VALUES (?, ?, ?)"
+            );
+            $save->execute([$key, json_encode($new_value, JSON_THROW_ON_ERROR), $exp_time]);
             return $new_value;
-        } catch (\Exception $e) {
-            throw $e;
-        }
+        });
     }
 
     /**
@@ -515,23 +896,21 @@ class PHLS
     public static function flushByTag(string $tag)
     {
         self::connect();
-        // Removed transaction nesting, let individual calls handle it or trust simple delete
-        try {
-            $select_stmt = self::getStatement('get_keys_by_tag', "SELECT key FROM storage_tags WHERE tag = ?");
+        return self::immediateTransaction(function (\PDO $pdo) use ($tag) {
+            $select_stmt = $pdo->prepare("SELECT key FROM storage_tags WHERE tag = ?");
             $select_stmt->execute([$tag]);
             $keys_to_delete = $select_stmt->fetchAll(\PDO::FETCH_COLUMN);
 
             if (!empty($keys_to_delete)) {
                 $placeholders = '?' . str_repeat(',?', count($keys_to_delete) - 1);
-                $delete_storage_stmt = self::getStatement('delete_storage_keys', "DELETE FROM storage WHERE key IN ($placeholders)");
+                $delete_storage_stmt = $pdo->prepare("DELETE FROM storage WHERE key IN ($placeholders)");
                 $delete_storage_stmt->execute($keys_to_delete);
 
-                $delete_tags_stmt = self::getStatement('delete_tags_by_tag', "DELETE FROM storage_tags WHERE tag = ?");
+                $delete_tags_stmt = $pdo->prepare("DELETE FROM storage_tags WHERE tag = ?");
                 $delete_tags_stmt->execute([$tag]);
             }
-        } catch (\Exception $e) {
-            throw $e;
-        }
+            return true;
+        });
     }
 
     /**
@@ -561,7 +940,14 @@ class PHLS
     {
         if (self::$pdo === null)
             return;
-        $stmt = self::$pdo->prepare("DELETE FROM storage WHERE expiration IS NOT NULL AND expiration <= ?");
-        $stmt->execute([time()]);
+        try {
+            $stmt = self::$pdo->prepare("DELETE FROM storage WHERE expiration IS NOT NULL AND expiration <= ?");
+            $stmt->execute([time()]);
+            self::$pdo->exec("DELETE FROM storage_tags WHERE key NOT IN (SELECT key FROM storage)");
+        } catch (\PDOException $e) {
+            if (stripos($e->getMessage(), 'locked') === false && stripos($e->getMessage(), 'busy') === false) {
+                throw $e;
+            }
+        }
     }
 }

@@ -176,7 +176,7 @@ class PHML {
      */
     public static function partial(string $filePath, array $localData = []): string {
         if (!file_exists($filePath)) {
-            if (defined('DEBUG_MODE') && DEBUG_MODE === true) {
+            if (class_exists('PHDE', false) && PHDE::isDebug()) {
                 error_log("PHML Error: Partial file '$filePath' not found.");
             }
             return "";
@@ -722,27 +722,34 @@ class PHML {
      * @return mixed The resolved content.
      */
     private static function resolveContent($content, $context) {
+        $content = trim((string) $content);
         if (str_starts_with($content, '$')) {
             $varName = substr($content, 1);
-            if (isset($context[$varName]) && (is_string($context[$varName]) || is_numeric($context[$varName]))) {
-                return $context[$varName];
+            if (array_key_exists($varName, $context) && is_scalar($context[$varName])) {
+                return htmlspecialchars((string) $context[$varName], ENT_QUOTES, 'UTF-8');
             }
             if (preg_match('/^([a-zA-Z0-9_]+)\[[\'"](.+?)[\'"]\]$/', $varName, $m)) {
                 $arrName = $m[1];
                 $key = $m[2];
                 if (isset($context[$arrName]) && is_array($context[$arrName])) {
-                    return $context[$arrName][$key] ?? '';
+                    $value = $context[$arrName][$key] ?? '';
+                    return is_scalar($value)
+                        ? htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8')
+                        : '';
                 }
             }
+            return '';
         }
-        extract($context);
-        try {
-            $evalContent = @eval("return $content;");
-            if ($evalContent !== false && $evalContent !== null && (is_string($evalContent) || is_numeric($evalContent))) {
-                return $evalContent;
+
+        $length = strlen($content);
+        if ($length >= 2) {
+            $quote = $content[0];
+            if (($quote === '"' || $quote === "'") && $content[$length - 1] === $quote) {
+                $literal = substr($content, 1, -1);
+                return $quote === '"'
+                    ? stripcslashes($literal)
+                    : str_replace(["\\\\", "\\'"], ["\\", "'"], $literal);
             }
-        } catch (Throwable $e) {
-            // Ignore evaluation errors
         }
 
         return $content;
@@ -817,7 +824,7 @@ class PHML {
 
             if ($bestMatch) {
                 $tagName = $bestMatch;
-                if (defined('DEBUG_MODE') && DEBUG_MODE === true) {
+                if (class_exists('PHDE', false) && PHDE::isDebug()) {
                     error_log("PHML Warning: Tag '$name' not found. Did you mean '$bestMatch'?");
                 }
             }
@@ -946,6 +953,9 @@ class PHML {
 
     private static $uiConfig = [];
 
+    private static bool $autoAssets = true;
+    private static bool $bufferStarted = false;
+
     /**
      * Initialize PHML output buffering.
      *
@@ -953,7 +963,18 @@ class PHML {
      */
     public static function init() {
         self::$metaConfig = self::$metaDefaults; 
-        ob_start([self::class, 'process']);
+        if (!self::$bufferStarted) {
+            self::$bufferStarted = true;
+            ob_start([self::class, 'process']);
+        }
+    }
+
+    /**
+     * Enable or disable the automatic application-script tag.
+     * The application script registers the service worker when appropriate.
+     */
+    public static function autoAssets(bool $enabled = true): void {
+        self::$autoAssets = $enabled;
     }
 
     /**
@@ -962,8 +983,7 @@ class PHML {
      * @return void
      */
     private static function initialize() {
-        self::$metaConfig = self::$metaDefaults; 
-        ob_start([self::class, 'process']);
+        self::init();
     }
 
     /**
@@ -972,8 +992,7 @@ class PHML {
      * @return void
      */
     public static function use() {
-        self::$metaConfig = self::$metaDefaults; 
-        ob_start([self::class, 'process']);
+        self::init();
     }
 
     /**
@@ -1101,8 +1120,15 @@ class PHML {
         }
 
         if (is_dir($cachePath)) {
-            $files = glob($cachePath . '/*');
-            foreach ($files as $file) if (is_file($file)) unlink($file);
+            $patterns = [
+                $cachePath . '/css/*.css',
+                $cachePath . '/js/*.js',
+            ];
+            foreach ($patterns as $pattern) {
+                foreach (glob($pattern) ?: [] as $file) {
+                    if (is_file($file)) unlink($file);
+                }
+            }
             return "Cache Cleared.";
         }
         return "Cache Not Found.";
@@ -1115,7 +1141,7 @@ class PHML {
      * @return void
      */
     private static function log($msg) {
-        if (defined('DEBUG_MODE') && DEBUG_MODE === true) {
+        if (class_exists('PHDE', false) && PHDE::isDebug()) {
             self::$debugLog[] = "<!-- DEBUG: $msg -->";
         }
     }
@@ -1180,44 +1206,52 @@ class PHML {
     private static function buildMetaTags() {
         $m = self::$metaConfig;
         $html = [];
+        $escape = static fn($value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 
-        if ($m['charset']) $html[] = '<meta charset="' . $m['charset'] . '">';
-        if ($m['viewport']) $html[] = '<meta name="viewport" content="' . htmlspecialchars($m['viewport']) . '">';
-        if ($m['http-equiv']) $html[] = '<meta http-equiv="' . htmlspecialchars($m['http-equiv'][0]) . '" content="' . htmlspecialchars($m['http-equiv'][1]) . '">';
-        if ($m['title']) $html[] = '<title>' . htmlspecialchars($m['title']) . '</title>';
-        if ($m['description']) $html[] = '<meta name="description" content="' . htmlspecialchars($m['description']) . '">';
-        if ($m['keywords']) $html[] = '<meta name="keywords" content="' . htmlspecialchars($m['keywords']) . '">';
-        if ($m['author']) $html[] = '<meta name="author" content="' . htmlspecialchars($m['author']) . '">';
-        if ($m['robots']) $html[] = '<meta name="robots" content="' . htmlspecialchars($m['robots']) . '">';
+        if ($m['charset']) $html[] = '<meta charset="' . $escape($m['charset']) . '">';
+        if ($m['viewport']) $html[] = '<meta name="viewport" content="' . $escape($m['viewport']) . '">';
+        if ($m['http-equiv']) $html[] = '<meta http-equiv="' . $escape($m['http-equiv'][0]) . '" content="' . $escape($m['http-equiv'][1]) . '">';
+        if ($m['title']) $html[] = '<title>' . $escape($m['title']) . '</title>';
+        if ($m['description']) $html[] = '<meta name="description" content="' . $escape($m['description']) . '">';
+        if ($m['keywords']) $html[] = '<meta name="keywords" content="' . $escape($m['keywords']) . '">';
+        if ($m['author']) $html[] = '<meta name="author" content="' . $escape($m['author']) . '">';
+        if ($m['robots']) $html[] = '<meta name="robots" content="' . $escape($m['robots']) . '">';
         
-        $currentUrl = $m['url'] ?: (isset($_SERVER['HTTPS']) ? "https" : "http") . "://$_SERVER[HTTP_HOST]$_SERVER[REQUEST_URI]";
+        $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+        $rootUrl = rtrim(PHRO::root(), '/');
+        $rootParts = parse_url($rootUrl);
+        $origin = isset($rootParts['scheme'], $rootParts['host'])
+            ? $rootParts['scheme'] . '://' . $rootParts['host']
+                . (isset($rootParts['port']) ? ':' . $rootParts['port'] : '')
+            : $rootUrl;
+        $currentUrl = $m['url'] ?: rtrim($origin, '/') . '/' . ltrim($requestPath, '/');
         $canonical = $m['canonical'] ?: $currentUrl;
-        $html[] = '<link rel="canonical" href="' . $canonical . '">';
+        $html[] = '<link rel="canonical" href="' . $escape($canonical) . '">';
 
-        $html[] = '<meta property="og:type" content="' . $m['type'] . '">';
-        $html[] = '<meta property="og:url" content="' . $currentUrl . '">';
-        $html[] = '<meta property="og:locale" content="' . $m['locale'] . '">';
-        if ($m['title']) $html[] = '<meta property="og:title" content="' . htmlspecialchars($m['title']) . '">';
-        if ($m['description']) $html[] = '<meta property="og:description" content="' . htmlspecialchars($m['description']) . '">';
-        if ($m['image']) $html[] = '<meta property="og:image" content="' . $m['image'] . '">';
-        if ($m['image_alt']) $html[] = '<meta property="og:image:alt" content="' . htmlspecialchars($m['image_alt']) . '">';
-        if ($m['site_name']) $html[] = '<meta property="og:site_name" content="' . htmlspecialchars($m['site_name']) . '">';
-        if ($m['fb_app_id']) $html[] = '<meta property="fb:app_id" content="' . $m['fb_app_id'] . '">';
+        $html[] = '<meta property="og:type" content="' . $escape($m['type']) . '">';
+        $html[] = '<meta property="og:url" content="' . $escape($currentUrl) . '">';
+        $html[] = '<meta property="og:locale" content="' . $escape($m['locale']) . '">';
+        if ($m['title']) $html[] = '<meta property="og:title" content="' . $escape($m['title']) . '">';
+        if ($m['description']) $html[] = '<meta property="og:description" content="' . $escape($m['description']) . '">';
+        if ($m['image']) $html[] = '<meta property="og:image" content="' . $escape($m['image']) . '">';
+        if ($m['image_alt']) $html[] = '<meta property="og:image:alt" content="' . $escape($m['image_alt']) . '">';
+        if ($m['site_name']) $html[] = '<meta property="og:site_name" content="' . $escape($m['site_name']) . '">';
+        if ($m['fb_app_id']) $html[] = '<meta property="fb:app_id" content="' . $escape($m['fb_app_id']) . '">';
         
-        $html[] = '<meta name="twitter:card" content="' . $m['twitter_card'] . '">';
-        if ($m['twitter_site']) $html[] = '<meta name="twitter:site" content="' . $m['twitter_site'] . '">';
-        if ($m['twitter_creator']) $html[] = '<meta name="twitter:creator" content="' . $m['twitter_creator'] . '">';
-        if ($m['title']) $html[] = '<meta name="twitter:title" content="' . htmlspecialchars($m['title']) . '">';
-        if ($m['description']) $html[] = '<meta name="twitter:description" content="' . htmlspecialchars($m['description']) . '">';
-        if ($m['image']) $html[] = '<meta name="twitter:image" content="' . $m['image'] . '">';
+        $html[] = '<meta name="twitter:card" content="' . $escape($m['twitter_card']) . '">';
+        if ($m['twitter_site']) $html[] = '<meta name="twitter:site" content="' . $escape($m['twitter_site']) . '">';
+        if ($m['twitter_creator']) $html[] = '<meta name="twitter:creator" content="' . $escape($m['twitter_creator']) . '">';
+        if ($m['title']) $html[] = '<meta name="twitter:title" content="' . $escape($m['title']) . '">';
+        if ($m['description']) $html[] = '<meta name="twitter:description" content="' . $escape($m['description']) . '">';
+        if ($m['image']) $html[] = '<meta name="twitter:image" content="' . $escape($m['image']) . '">';
 
-        if ($m['theme_color']) $html[] = '<meta name="theme-color" content="' . $m['theme_color'] . '">';
-        if ($m['favicon']) $html[] = '<link rel="icon" href="' . $m['favicon'] . '" sizes="any">';
-        if ($m['icon']) $html[] = '<link rel="apple-touch-icon" href="' . $m['icon'] . '">';
-        if ($m['manifest']) $html[] = '<link rel="manifest" href="' . $m['manifest'] . '">';
+        if ($m['theme_color']) $html[] = '<meta name="theme-color" content="' . $escape($m['theme_color']) . '">';
+        if ($m['favicon']) $html[] = '<link rel="icon" href="' . $escape($m['favicon']) . '" sizes="any">';
+        if ($m['icon']) $html[] = '<link rel="apple-touch-icon" href="' . $escape($m['icon']) . '">';
+        if ($m['manifest']) $html[] = '<link rel="manifest" href="' . $escape($m['manifest']) . '">';
 
-        if ($m['google_verify']) $html[] = '<meta name="google-site-verification" content="' . $m['google_verify'] . '">';
-        if ($m['bing_verify']) $html[] = '<meta name="msvalidate.01" content="' . $m['bing_verify'] . '">';
+        if ($m['google_verify']) $html[] = '<meta name="google-site-verification" content="' . $escape($m['google_verify']) . '">';
+        if ($m['bing_verify']) $html[] = '<meta name="msvalidate.01" content="' . $escape($m['bing_verify']) . '">';
 
         $schema = [
             "@context" => "https://schema.org",
@@ -1229,9 +1263,18 @@ class PHML {
         if ($m['image']) $schema["image"] = $m['image'];
         if ($m['published']) $schema["datePublished"] = $m['published'];
         
-        $html[] = '<script type="application/ld+json">' . json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . '</script>';
-        $html[] = '<script src="'.PHRO::root().'/sw.js"></script>';
-        $html[] = '<script src="'.PHRO::root().'/app.js"></script>';
+        $html[] = '<script type="application/ld+json">' . json_encode(
+            $schema,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+        ) . '</script>';
+        if (self::$autoAssets) {
+            $root = $escape(rtrim(PHRO::root(), '/'));
+            $appSource = dirname(__DIR__) . '/src/js/PHJS-min.php';
+            $appVersion = is_file($appSource) ? (string) filemtime($appSource) : '11.0.0';
+            // Keep the parser moving so the following render-blocking stylesheet
+            // is discovered immediately. PHJS initializes after HTML parsing.
+            $html[] = '<script src="' . $root . '/app.js?v=' . rawurlencode($appVersion) . '" defer></script>';
+        }
         
         return implode("\n    ", $html);
     }
@@ -1244,6 +1287,7 @@ class PHML {
      * @return string The processed HTML content.
      */
     public static function process($htmlContent) {
+        self::$bufferStarted = false;
         if (trim($htmlContent) === '') return '';
 
         if (http_response_code() >= 400) return $htmlContent;
@@ -1271,8 +1315,24 @@ class PHML {
             if (!mkdir($cachePath, 0777, true)) return $htmlContent;
         }
 
-        $publicUrl = str_replace($docRoot, '', $cachePath);
-        $publicUrl = '/' . ltrim($publicUrl, '/');
+        $cssCachePath = $cachePath . '/css';
+        $jsCachePath = $cachePath . '/js';
+        foreach ([$cssCachePath, $jsCachePath] as $assetCachePath) {
+            if (
+                !is_dir($assetCachePath) &&
+                !mkdir($assetCachePath, 0755, true) &&
+                !is_dir($assetCachePath)
+            ) {
+                return $htmlContent;
+            }
+        }
+
+        if (class_exists('DIR') && method_exists('DIR', 'link')) {
+            $publicUrl = rtrim(DIR::link('cache'), '/');
+        } else {
+            $publicUrl = '/' . ltrim(str_replace($docRoot, '', $cachePath), '/');
+        }
+        $publicUrl = htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8');
 
         try {
             $routeName = (class_exists('PHRO') && is_callable(['PHRO', 'route'])) 
@@ -1294,15 +1354,37 @@ class PHML {
 
         $fullScannableContent = $isHtmx ? $htmlContent : "<html $htmlAttrStr><body $bodyAttrStr>$htmlContent</body></html>";
 
-        $isDebug = defined('DEBUG_MODE') && DEBUG_MODE === true;
-        
-        $cssFilePath = $cachePath . "/{$fileId}.css";
-        $jsFilePath = $cachePath . "/{$fileId}.js";
+        $cssFilePath = $cssCachePath . "/{$fileId}.css";
+        $jsFilePath = $jsCachePath . "/{$fileId}.js";
 
-        $cssExists = file_exists($cssFilePath) && filesize($cssFilePath) > 0;
-        $jsExists = file_exists($jsFilePath) && filesize($jsFilePath) > 0;
+        $cssExists = file_exists($cssFilePath);
+        $jsExists = file_exists($jsFilePath);
 
-        $shouldGenerate = $isDebug || !$cssExists || !$jsExists;
+        $shouldGenerate = !$cssExists || !$jsExists;
+        $styleSources = [];
+        if (preg_match_all(
+            '/(?:class|x-[a-z0-9_.:-]+|hx-[a-z0-9_.:-]+)\s*=\s*(["\'])(.*?)\1/is',
+            $fullScannableContent,
+            $styleMatches,
+            PREG_SET_ORDER
+        )) {
+            foreach ($styleMatches as $styleMatch) {
+                $styleSources[] = trim($styleMatch[0]);
+            }
+        }
+        sort($styleSources);
+        $styleSignaturePayload = json_encode(
+            [array_values(array_unique($styleSources)), self::$cssStack, self::$uiConfig],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR
+        );
+        $styleSignature = hash('sha256', is_string($styleSignaturePayload) ? $styleSignaturePayload : implode('|', $styleSources));
+        $styleMarker = "/* phcs-source:{$styleSignature} */";
+        if (!$shouldGenerate && $cssExists) {
+            $existingCssPrefix = (string) @file_get_contents($cssFilePath, false, null, 0, 128);
+            if (!str_contains($existingCssPrefix, $styleMarker)) {
+                $shouldGenerate = true;
+            }
+        }
 
         if (!$shouldGenerate) {
             $cacheTime = min(
@@ -1317,7 +1399,10 @@ class PHML {
                 $routerFile,
                 (class_exists('DIR') && method_exists('DIR', 'path')) ? DIR::path('app') : '',
                 (class_exists('DIR') && method_exists('DIR', 'path')) ? DIR::path('component') : '',
-                __FILE__
+                __FILE__,
+                __DIR__ . '/PHUI.php',
+                __DIR__ . '/PHCS.php',
+                __DIR__ . '/PHJS.php',
             ];
 
             foreach ($pathsToCheck as $path) {
@@ -1353,6 +1438,7 @@ class PHML {
             $finalJsContent = implode("\n", self::$jsStack);
 
             $finalCssContent = trim($finalCssContent);
+            $finalCssContent = $styleMarker . ($finalCssContent !== '' ? "\n" . $finalCssContent : '');
             if ($finalCssContent !== "") {
                 $currentHash = $cssExists ? md5_file($cssFilePath) : '';
                 $newHash = md5($finalCssContent);
@@ -1361,8 +1447,9 @@ class PHML {
                     clearstatcache(true, $cssFilePath);
                     self::log("CSS Updated ($fileId).");
                 }
-            } elseif (file_exists($cssFilePath)) {
-                @unlink($cssFilePath);
+            } else {
+                file_put_contents($cssFilePath, '', LOCK_EX);
+                clearstatcache(true, $cssFilePath);
             }
 
             $finalJsContent = trim($finalJsContent);
@@ -1374,21 +1461,22 @@ class PHML {
                     clearstatcache(true, $jsFilePath);
                     self::log("JS Updated ($fileId).");
                 }
-            } elseif (file_exists($jsFilePath)) {
-                @unlink($jsFilePath);
+            } else {
+                file_put_contents($jsFilePath, '', LOCK_EX);
+                clearstatcache(true, $jsFilePath);
             }
         }
 
         $cssLinkTag = "";
         if (file_exists($cssFilePath) && filesize($cssFilePath) > 0) {
             $ver = md5_file($cssFilePath);
-            $cssLinkTag = "<link rel='stylesheet' href='{$publicUrl}/{$fileId}.css?v={$ver}'>";
+            $cssLinkTag = "<link rel='stylesheet' href='{$publicUrl}/css/{$fileId}.css?v={$ver}'>";
         }
 
         $autoScriptTag = "";
         if (file_exists($jsFilePath) && filesize($jsFilePath) > 0) {
             $ver = md5_file($jsFilePath);
-            $autoScriptTag = "<script src='{$publicUrl}/{$fileId}.js?v={$ver}' defer></script>";
+            $autoScriptTag = "<script src='{$publicUrl}/js/{$fileId}.js?v={$ver}' defer></script>";
         }
 
         clearstatcache();
@@ -1400,10 +1488,10 @@ class PHML {
                 $dom = new DOMDocument();
                 libxml_use_internal_errors(true); 
                 
-                $dom->loadHTML(
-                    mb_convert_encoding($htmlContent, 'HTML-ENTITIES', 'UTF-8'), 
-                    LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
-                );
+                $encodedHtml = function_exists('mb_convert_encoding')
+                    ? mb_convert_encoding($htmlContent, 'HTML-ENTITIES', 'UTF-8')
+                    : '<?xml encoding="UTF-8">' . $htmlContent;
+                $dom->loadHTML($encodedHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
                 libxml_clear_errors();
 
                 $xpath = new DOMXPath($dom);

@@ -22,7 +22,10 @@ class PHTM {
      * @param string $timezone Timezone identifier (e.g., 'Asia/Dhaka')
      */
     public static function setZone($timezone) {
-        date_default_timezone_set($timezone);
+        $timezone = (string) $timezone;
+        if (!in_array($timezone, timezone_identifiers_list(), true) || !date_default_timezone_set($timezone)) {
+            throw new InvalidArgumentException('Invalid timezone identifier');
+        }
         self::$timezone = $timezone;
     }
 
@@ -59,6 +62,9 @@ class PHTM {
             return date($format, $timestamp);
         } elseif (is_string($timestamp)) {
             $timestamp = strtotime($timestamp);
+            if ($timestamp === false) {
+                throw new InvalidArgumentException('Invalid date/time string');
+            }
             return date($format, $timestamp);
         } else {
             throw new InvalidArgumentException('Invalid timestamp format');
@@ -118,10 +124,14 @@ class PHTM {
 
         // Check if the modifier starts with '+' or '-'
         if ($first_sign === '+' || $first_sign === '-') {
-            $date->modify($modifier);
+            if ($date->modify($modifier) === false) {
+                throw new InvalidArgumentException('Invalid date/time modifier');
+            }
         } else {
             // Default behavior if no explicit sign is provided (considering '+' by default)
-            $date->modify('+' . $modifier);
+            if ($date->modify('+' . $modifier) === false) {
+                throw new InvalidArgumentException('Invalid date/time modifier');
+            }
         }
 
         return $date->format($format);

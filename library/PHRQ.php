@@ -13,6 +13,7 @@
 
 
 class PHRQ {
+    private static ?array $liveMapHostInfo = null;
 
     /**
      * Send an HTTP request from PHP using cURL.
@@ -25,7 +26,13 @@ class PHRQ {
      * @return mixed Response data.
      */
     public static function php($method, $url, $headers = [], $body = null, $options = []) {
+        $ch = null;
         try {
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            if (!in_array($scheme, ['http', 'https'], true)) {
+                throw new InvalidArgumentException('Only HTTP and HTTPS URLs are supported.');
+            }
+
             $ch = curl_init($url);
     
             if ($ch === false) {
@@ -36,46 +43,57 @@ class PHRQ {
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
     
-            if (!empty($headers)) {
-                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            $normalizedHeaders = [];
+            foreach ((array) $headers as $key => $value) {
+                $line = is_int($key) ? (string) $value : ((string) $key . ': ' . (string) $value);
+                if (preg_match('/[\r\n]/', $line)) throw new \InvalidArgumentException('HTTP headers cannot contain line breaks.');
+                $normalizedHeaders[] = $line;
             }
     
-            if ($body !== null && !empty($body)) {
+            if ($body !== null) {
                 if (is_array($body)) {
-                    $body = json_encode($body);
+                    $body = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+                    $hasContentType = false;
+                    foreach ($normalizedHeaders as $headerLine) {
+                        if (stripos($headerLine, 'Content-Type:') === 0) { $hasContentType = true; break; }
+                    }
+                    if (!$hasContentType) $normalizedHeaders[] = 'Content-Type: application/json';
                 }
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
             }
-    
-            if (isset($options['ssl']) && $options['ssl'] === false) {
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-            } else {
-                $ssl_verify = !(defined('DEBUG_MODE') && DEBUG_MODE === true);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $ssl_verify);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $ssl_verify ? 2 : 0);
-            }
+
+            if ($normalizedHeaders !== []) curl_setopt($ch, CURLOPT_HTTPHEADER, $normalizedHeaders);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 20);
     
             foreach ($options as $key => $value) {
-                if (defined($key)) {
+                if ($key === 'ssl') {
+                    continue;
+                }
+                if (is_string($key) && defined($key)) {
                     curl_setopt($ch, constant($key), $value);
                 }
             }
+
+            // TLS verification is a framework invariant and cannot be disabled by
+            // request options. This is deliberately applied after custom options.
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     
             $response = curl_exec($ch);
             if ($response === false) {
                 throw new Exception(curl_error($ch));
             }
     
-            if (is_resource($ch)) { curl_close($ch); }
-    
             $decoded_response = json_decode($response, true);
             if (json_last_error() === JSON_ERROR_NONE) {
                 return $decoded_response;
             }
             return $response;
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             return $e->getMessage();
+        } finally {
+            if ($ch instanceof \CurlHandle || is_resource($ch)) curl_close($ch);
         }
     }
 
@@ -91,10 +109,13 @@ class PHRQ {
      */
     public static function js($method, $url, $headers = [], $body = null, $options = []) {
         $jsFunction = <<<JS
-async function(method, url, headers, body) {
+async function(method, url, headers, body, options) {
     try {
         var xhr = new XMLHttpRequest();
-        xhr.open(method, url);
+        options = options || {};
+        xhr.open(method, url, true);
+        if (Number.isFinite(options.timeout) && options.timeout > 0) xhr.timeout = options.timeout;
+        if (options.withCredentials === true) xhr.withCredentials = true;
 
         if (headers) {
             for (var key in headers) {
@@ -102,6 +123,11 @@ async function(method, url, headers, body) {
             }
         }
 
+        if (body !== null && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof Blob)) {
+            var hasContentType = Object.keys(headers || {}).some(key => key.toLowerCase() === 'content-type');
+            if (!hasContentType) xhr.setRequestHeader('Content-Type', 'application/json');
+            body = JSON.stringify(body);
+        }
         xhr.send(body);
 
         return new Promise((resolve, reject) => {
@@ -109,15 +135,23 @@ async function(method, url, headers, body) {
                 if (xhr.readyState === XMLHttpRequest.DONE) {
                     var responseText = xhr.responseText;
                     var contentType = xhr.getResponseHeader('Content-Type');
-                    if (contentType && contentType.indexOf('application/json') !== -1) {
-                        responseText = JSON.parse(responseText);
+                    if (contentType && contentType.indexOf('application/json') !== -1 && responseText !== '') {
+                        try { responseText = JSON.parse(responseText); }
+                        catch (parseError) { reject(parseError); return; }
                     }
-                    resolve(responseText);
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(responseText);
+                    else {
+                        var error = new Error('HTTP ' + xhr.status);
+                        error.status = xhr.status;
+                        error.response = responseText;
+                        reject(error);
+                    }
                 }
             };
             xhr.onerror = function() {
-                reject(xhr.statusText);
+                reject(new Error(xhr.statusText || 'Network request failed'));
             };
+            xhr.ontimeout = function() { reject(new Error('Request timed out')); };
         });
     } catch (e) {
         console.error('XHR request failed:', e);
@@ -126,7 +160,14 @@ async function(method, url, headers, body) {
 }
 JS;
         // Call the function and return its code with await keyword
-        return 'async function() { return await (' . $jsFunction . ')("' . $method . '", "' . $url . '", ' . json_encode($headers) . ', ' . json_encode($body) . '); }';
+        $encodeFlags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR;
+        return 'async function() { return await (' . $jsFunction . ')('
+            . json_encode((string) $method, $encodeFlags) . ', '
+            . json_encode((string) $url, $encodeFlags) . ', '
+            . json_encode($headers, $encodeFlags) . ', '
+            . json_encode($body, $encodeFlags) . ', '
+            . json_encode($options, $encodeFlags)
+            . '); }';
     }
 
 
@@ -141,15 +182,15 @@ JS;
     public static function header($method = 'GET', $origin = '*', $contentType = 'application/json', $additionalHeaders = []) {
         header('Content-Type: '.$contentType);
         $headers = '*';
+        $requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
         if ($method === 'auto') {
-            $method =  $_SERVER['REQUEST_METHOD'];
+            $method = $requestMethod;
         }
-        if ($method === 'POST') {
+        if (strtoupper($method) === 'POST') {
             $method = 'POST, OPTIONS';
             $headers = 'Content-Type, Authorization';
         }
-        if ($method === 'POST' && $_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
-            header('Access-Control-Allow-Credentials: true');
+        if ($requestMethod === 'OPTIONS') {
             self::status();
             exit(0);
         }
@@ -169,18 +210,109 @@ JS;
      * @param bool $enable True to enable CORS, false to disable.
      * @param string $origin CORS origin (default is '*').
      */
-    public static function cross($enable = true, $origin = '*') {
+    public static function cross($enable = true, string|array $origin = '*', bool $credentials = false) {
         if ($enable) {
-            header("Access-Control-Allow-Origin: *");
-            header("Access-Control-Allow-Methods: *");
-            header("Access-Control-Allow-Headers: Content-Type, Authorization");
-            if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
-                header("Access-Control-Allow-Credentials: true");
-                http_response_code(200);
-                header("HTTP/1.1 200 OK");
+            $requestedOrigin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
+            $selfOrigin = self::requestOrigin();
+            $configured = is_array($origin) ? $origin : [$origin];
+            $allowed = [];
+            foreach ($configured as $candidate) {
+                $normalized = self::normalizeOrigin((string) $candidate, $selfOrigin);
+                if ($normalized === null) {
+                    throw new \InvalidArgumentException('CORS origins must be *, self, a domain/IP, or an absolute HTTP(S) origin.');
+                }
+                $allowed[] = $normalized;
+            }
+            $allowed = array_values(array_unique($allowed));
+            if ($credentials && in_array('*', $allowed, true)) {
+                throw new \InvalidArgumentException('Credentialed CORS cannot use a wildcard origin.');
+            }
+
+            $responseOrigin = null;
+            if (in_array('*', $allowed, true)) {
+                $responseOrigin = '*';
+            } elseif ($requestedOrigin !== '' && in_array(self::normalizeOrigin($requestedOrigin, $selfOrigin), $allowed, true)) {
+                $responseOrigin = $requestedOrigin;
+            } elseif ($requestedOrigin === '' && in_array($selfOrigin, $allowed, true)) {
+                $responseOrigin = $selfOrigin;
+            }
+
+            if ($responseOrigin !== null) {
+                header("Access-Control-Allow-Origin: {$responseOrigin}");
+            }
+            header("Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS");
+            header("Access-Control-Allow-Headers: Content-Type, Authorization, X-CSRF-Token, X-XSRF-Token");
+            if (!in_array('*', $allowed, true)) {
+                self::appendVary('Origin');
+            }
+            if ($credentials) {
+                header('Access-Control-Allow-Credentials: true');
+            }
+
+            // Functional baseline CSP for PHJS: executable expressions currently
+            // require unsafe-eval and generated bootstrap blocks require inline.
+            // All other resource types remain same-origin first and object/embed
+            // execution is disabled.
+            if (!self::hasResponseHeader('Content-Security-Policy')) {
+                $connectSources = ["'self'", 'https:', 'wss:'];
+                foreach ($allowed as $allowedOrigin) {
+                    if ($allowedOrigin !== '*' && $allowedOrigin !== $selfOrigin) $connectSources[] = $allowedOrigin;
+                }
+                $connectSources[] = 'https://cloudflareinsights.com';
+                header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com https://cdn.jsdelivr.net; script-src-elem 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src " . implode(' ', array_unique($connectSources)) . "; worker-src 'self' blob:");
+            }
+            if (strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
+                http_response_code($requestedOrigin !== '' && $responseOrigin === null ? 403 : 204);
                 exit(0);
             }
         }
+    }
+
+    private static function requestOrigin(): string
+    {
+        $secure = class_exists('PHRO', false) && is_callable(['PHRO', 'secure'])
+            ? PHRO::secure()
+            : (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off');
+        $scheme = $secure ? 'https' : 'http';
+        $host = preg_replace('/[\r\n].*/', '', (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+        return $scheme . '://' . $host;
+    }
+
+    private static function normalizeOrigin(string $origin, string $selfOrigin): ?string
+    {
+        $origin = trim($origin);
+        if ($origin === '*') return '*';
+        if ($origin === '' || strtolower($origin) === 'self') return $selfOrigin;
+        if (!str_contains($origin, '://')) {
+            $origin = (str_starts_with($selfOrigin, 'https://') ? 'https://' : 'http://') . $origin;
+        }
+        $parts = parse_url($origin);
+        if (!is_array($parts) || !in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true) || empty($parts['host'])) return null;
+        if (isset($parts['user']) || isset($parts['pass']) || !empty($parts['query']) || !empty($parts['fragment'])) return null;
+        if (isset($parts['path']) && $parts['path'] !== '' && $parts['path'] !== '/') return null;
+        $normalized = strtolower($parts['scheme']) . '://' . strtolower($parts['host']);
+        if (isset($parts['port'])) $normalized .= ':' . (int) $parts['port'];
+        return $normalized;
+    }
+
+    private static function appendVary(string $value): void
+    {
+        $values = [];
+        foreach (headers_list() as $header) {
+            if (stripos($header, 'Vary:') === 0) {
+                $values = array_merge($values, array_map('trim', explode(',', substr($header, 5))));
+            }
+        }
+        $values[] = $value;
+        header('Vary: ' . implode(', ', array_unique(array_filter($values))), true);
+    }
+
+    private static function hasResponseHeader(string $name): bool
+    {
+        foreach (headers_list() as $header) {
+            if (stripos($header, $name . ':') === 0) return true;
+        }
+        return false;
     }
 
     /**
@@ -821,6 +953,59 @@ JS;
         header('Content-Length: '.$length);
     }
 
+    private static function liveMapHostInfo(): array
+    {
+        if (self::$liveMapHostInfo !== null) return self::$liveMapHostInfo;
+        $serverIp = trim((string) ($_SERVER['SERVER_ADDR'] ?? $_SERVER['LOCAL_ADDR'] ?? ''));
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        $host = preg_replace('/:\\d+$/', '', $host);
+        $serverIsPublic = filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        if (!$serverIsPublic && $host !== '' && filter_var($host, FILTER_VALIDATE_IP)) {
+            $serverIp = $host;
+        }
+        if (!filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) && $host !== '' && function_exists('gethostbyname')) {
+            $resolved = gethostbyname($host);
+            if ($resolved !== $host) $serverIp = $resolved;
+        }
+        $info = [
+            'hostIP' => filter_var($serverIp, FILTER_VALIDATE_IP) ? $serverIp : null,
+            'hostLat' => null, 'hostLon' => null, 'hostCountryCode' => null,
+            'hostCountry' => null, 'hostCity' => null, 'hostArea' => null,
+            'hostIsp' => null, 'hostOrg' => null, 'hostAs' => null, 'hostVpn' => null,
+        ];
+        $publicIp = filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        if ($publicIp) {
+            $info['hostVpn'] = false;
+            $context = stream_context_create(['http' => ['timeout' => 2, 'ignore_errors' => true, 'header' => "Accept: application/json\r\nUser-Agent: MyStack-PHRQ\r\n"]]);
+            $decoded = null;
+            foreach ([
+                'https://ipapi.co/' . rawurlencode($publicIp) . '/json/',
+                'https://ipwho.is/' . rawurlencode($publicIp),
+            ] as $geoUrl) {
+                $geo = @file_get_contents($geoUrl, false, $context);
+                $candidate = is_string($geo) ? json_decode($geo, true) : null;
+                if (is_array($candidate) && (($candidate['success'] ?? true) !== false)) {
+                    $decoded = $candidate;
+                    break;
+                }
+            }
+            if (is_array($decoded)) {
+                $connection = is_array($decoded['connection'] ?? null) ? $decoded['connection'] : [];
+                $info['hostLat'] = isset($decoded['latitude']) && is_numeric($decoded['latitude']) ? (float) $decoded['latitude'] : null;
+                $info['hostLon'] = isset($decoded['longitude']) && is_numeric($decoded['longitude']) ? (float) $decoded['longitude'] : null;
+                $info['hostCountryCode'] = $decoded['country_code'] ?? null;
+                $info['hostCountry'] = $decoded['country_name'] ?? ($decoded['country'] ?? null);
+                $info['hostCity'] = $decoded['city'] ?? null;
+                $info['hostArea'] = $decoded['region'] ?? ($decoded['region_name'] ?? null);
+                $info['hostIsp'] = $decoded['org'] ?? ($connection['isp'] ?? null);
+                $info['hostOrg'] = $decoded['org'] ?? ($connection['org'] ?? null);
+                $info['hostAs'] = $decoded['asn'] ?? ($connection['asn'] ?? null);
+                $info['hostVpn'] = isset($decoded['security']['vpn']) ? (bool) $decoded['security']['vpn'] : false;
+            }
+        }
+        return self::$liveMapHostInfo = $info;
+    }
+
     /**
      * Handle live map data collection and processing based on the request.
      *
@@ -834,19 +1019,32 @@ JS;
      * @param int $time Time window in seconds to consider entries as 'live'.
      */
     public static function livemap($url = '/livemap', $skipList = [], $limit = 10, $time = 60 * 24) {
+        if (!class_exists('PHDE') || !PHDE::isDebug()) {
+            return;
+        }
+        $url = '/' . trim((string) $url, '/') ?: '/';
+        $limit = max(1, min(500, (int) $limit));
+        $time = max(1, min(60 * 24 * 30, (int) $time));
         PHRO::track(true);
         $footprint = PHRO::footprint();
+        $hostInfo = self::liveMapHostInfo();
         $skip = false;
         
         $parsedRoot = parse_url(PHRO::root());
-        $rootUrl = $parsedRoot['path'] ?? '';
-        $nowURL = str_replace($rootUrl, '', $footprint['REQUEST_URI']);
+        $rootUrl = rtrim((string) ($parsedRoot['path'] ?? ''), '/');
+        $requestUri = (string) ($footprint['REQUEST_URI'] ?? '/');
+        $nowURL = parse_url($requestUri, PHP_URL_PATH) ?: '/';
+        if ($rootUrl !== '' && str_starts_with($nowURL, $rootUrl)) {
+            $nowURL = substr($nowURL, strlen($rootUrl)) ?: '/';
+        }
         
         foreach ($skipList as $method => $skipUrl) {
-            $slashCount = substr_count($skipUrl, '/');
-            $skipUrlTrimmed = str_replace($rootUrl, '', $skipUrl);
-        
-            if (strtoupper($footprint['REQUEST_METHOD']) === strtoupper($method) && preg_match("~$skipUrlTrimmed~", $nowURL)) {
+            $skipPath = parse_url((string) $skipUrl, PHP_URL_PATH) ?: '/';
+            if ($rootUrl !== '' && str_starts_with($skipPath, $rootUrl)) {
+                $skipPath = substr($skipPath, strlen($rootUrl)) ?: '/';
+            }
+            $skipPath = '/' . trim($skipPath, '/') ?: '/';
+            if (strtoupper((string) ($footprint['REQUEST_METHOD'] ?? 'GET')) === strtoupper((string) $method) && $skipPath === ('/' . trim($nowURL, '/'))) {
                 $skip = true;
                 break;
             }
@@ -854,17 +1052,17 @@ JS;
         
         if ($skip === false) {
             $data = [
-                'hostIP' => isset($footprint['hostIP']) ? $footprint['hostIP'] : null,
-                'hostLat' => isset($footprint['hostLat']) ? $footprint['hostLat'] : null,
-                'hostLon' => isset($footprint['hostLon']) ? $footprint['hostLon'] : null,
-                'hostCountryCode' => isset($footprint['hostCountryCode']) ? $footprint['hostCountryCode'] : null,
-                'hostCountry' => isset($footprint['hostCountry']) ? $footprint['hostCountry'] : null,
-                'hostCity' => isset($footprint['hostCity']) ? $footprint['hostCity'] : null,
-                'hostArea' => isset($footprint['hostArea']) ? $footprint['hostArea'] : null,
-                'hostIsp' => isset($footprint['hostIsp']) ? $footprint['hostIsp'] : null,
-                'hostOrg' => isset($footprint['hostOrg']) ? $footprint['hostOrg'] : null,
-                'hostAs' => isset($footprint['hostAs']) ? $footprint['hostAs'] : null,
-                'hostVpn' => isset($footprint['hostVpn']) ? $footprint['hostVpn'] : null,
+                'hostIP' => $footprint['hostIP'] ?? $hostInfo['hostIP'],
+                'hostLat' => $footprint['hostLat'] ?? $hostInfo['hostLat'],
+                'hostLon' => $footprint['hostLon'] ?? $hostInfo['hostLon'],
+                'hostCountryCode' => $footprint['hostCountryCode'] ?? $hostInfo['hostCountryCode'],
+                'hostCountry' => $footprint['hostCountry'] ?? $hostInfo['hostCountry'],
+                'hostCity' => $footprint['hostCity'] ?? $hostInfo['hostCity'],
+                'hostArea' => $footprint['hostArea'] ?? $hostInfo['hostArea'],
+                'hostIsp' => $footprint['hostIsp'] ?? $hostInfo['hostIsp'],
+                'hostOrg' => $footprint['hostOrg'] ?? $hostInfo['hostOrg'],
+                'hostAs' => $footprint['hostAs'] ?? $hostInfo['hostAs'],
+                'hostVpn' => $footprint['hostVpn'] ?? $hostInfo['hostVpn'],
                 'clientPlatform' => $footprint['clientPlatform'] ?? $footprint['clientXPlatform'] ?? null,
                 'clientBrowser' => $footprint['clientBrowser'] ?? $footprint['clientXBrowser'] ?? null,
                 'clientIP' => $footprint['clientIP'] ?? $footprint['clientXIP'] ?? null,
@@ -897,7 +1095,12 @@ JS;
         }
 
         PHRO::get($url, function() {
+            if (!class_exists('PHDE') || !PHDE::isDebug()) {
+                http_response_code(404);
+                return;
+            }
             PHRQ::header("GET", "*", "text/html; charset=UTF-8", []);
+                ob_start();
                 print <<<EOT
                 <!DOCTYPE html>
                 <html lang="en">
@@ -1204,6 +1407,29 @@ JS;
                             margin: 2px 0;
                         }
 
+                        #live-status { display:inline-block; margin-left:10px; color:#9ee7ff; font-size:12px; font-weight:600; }
+                        .modal-content { max-width:calc(100vw - 28px); max-height:calc(100vh - 28px); overflow:auto; }
+                        #settingsForm button { flex:1 1 90px; justify-content:center; }
+                        @media (max-width:900px) {
+                            .header,.footer { left:10px; width:calc(100% - 20px); }
+                            .sidebar,.details { width:calc(100% - 20px); left:10px; right:auto; padding:8px; }
+                            .sidebar { height:26%; margin-top:42px; }
+                            .details { height:24%; bottom:42px; margin:0; }
+                            .footer { padding:7px; overflow-x:auto; justify-content:flex-start; }
+                            .color-palette { min-width:max-content; justify-content:flex-start; gap:4px; }
+                        }
+                        @media (max-width:560px) {
+                            .header { font-size:14px; padding:8px; }
+                            .header a { font-size:12px; }
+                            #gset { display:inline-block; padding:4px 7px; border:1px solid #ffffff44; border-radius:5px; }
+                            .sidebar { height:30%; }
+                            .details { height:28%; }
+                            .attack-card { padding:8px; margin-bottom:7px; }
+                            .attack-body { gap:7px; font-size:12px; }
+                            #settingsForm div { flex-wrap:wrap; gap:5px; }
+                            #settingsForm label { flex:1 1 100%; }
+                        }
+
                     </style>
                     <script src="https://cdn.jsdelivr.net/npm/globe.gl"></script>
                     <script>
@@ -1392,6 +1618,18 @@ JS;
                         const settingsModal = document.getElementById("settingsModal");
                         const gsetButton = document.getElementById("gset");
                         const closeBtn = document.querySelector(".close-btn");
+                        const liveStatus = document.getElementById('live-status') || (() => {
+                            const status = document.createElement('span');
+                            status.id = 'live-status';
+                            status.setAttribute('role', 'status');
+                            status.setAttribute('aria-live', 'polite');
+                            status.textContent = 'Connecting…';
+                            document.querySelector('.header')?.appendChild(status);
+                            return status;
+                        })();
+                        const setLiveStatus = (message, state = 'ok') => {
+                            if (liveStatus) { liveStatus.textContent = message; liveStatus.dataset.state = state; }
+                        };
 
                         // Open the modal when the "gset" button is clicked
                         gsetButton.onclick = () => settingsModal.style.display = "block";
@@ -1427,7 +1665,13 @@ JS;
                         // Load Settings from Cookies
                         function loadSettings() {
                             const cookieData = document.cookie.split('; ').find(row => row.startsWith('globeSettings='));
-                            return cookieData ? JSON.parse(cookieData.split('=')[1]) : defaultSettings;
+                            if (!cookieData) return { ...defaultSettings };
+                            try {
+                                const parsed = JSON.parse(cookieData.substring(cookieData.indexOf('=') + 1));
+                                return { ...defaultSettings, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+                            } catch (_) {
+                                return { ...defaultSettings };
+                            }
                         }
 
                         // Sync current settings from the form and return as an object
@@ -1474,15 +1718,9 @@ JS;
 
                         // Monitor Power Saving change
                         document.getElementById("powerSaving").addEventListener("change", (event) => {
-                            if (event.target.value === true) {
-                                const isPowerSaving = event.target.value === "true";
-                                togglePowerSaving(isPowerSaving);
-                                applyGlobeSettings(isPowerSaving ? powerSaveSettings : loadSettings());
-                            } else {
-                                const isPowerSaving = event.target.value === "false";
-                                togglePowerSaving(isPowerSaving);
-                                applyGlobeSettings(isPowerSaving ? powerSaveSettings : loadSettings());
-                            }
+                            const isPowerSaving = event.target.value === "true";
+                            togglePowerSaving(isPowerSaving);
+                            applyGlobeSettings(isPowerSaving ? powerSaveSettings : loadSettings());
                         });
 
                         // Show confirmation message after applying settings
@@ -1535,6 +1773,11 @@ JS;
                                 <circle fill="black" cx="14" cy="14" r="7"></circle>
                             </svg>`;
 
+                        if (typeof window.Globe !== 'function') {
+                            setLiveStatus('Map library was blocked or unavailable', 'error');
+                            const mapNode = document.getElementById('map');
+                            if (mapNode) mapNode.innerHTML = '<div style="display:grid;place-items:center;height:100%;padding:24px;color:#fecaca;text-align:center">Live map library could not be loaded. Check the CDN/CSP configuration.</div>';
+                        } else {
                         const map = Globe()
                             .globeImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg')
                             .bumpImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png')
@@ -1593,19 +1836,35 @@ JS;
 
 
                         // Fetch attack data
+                        let fetchInFlight = false;
+                        let refreshTimer = null;
                         async function fetchAttackData() {
+                            if (fetchInFlight) return;
+                            fetchInFlight = true;
                             try {
                                 const response = await fetch(window.location.href, {
                                     method: 'POST',
                                     headers: {
-                                        'Content-Type': 'application/json'
+                                        'Content-Type': 'application/json',
+                                        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
                                     }
                                 });
+                                if (!response.ok) throw new Error(`HTTP \${response.status}`);
                                 const data = await response.json();
-                                processAttackData(data);
+                                processAttackData(Array.isArray(data) ? data : []);
+                                setLiveStatus(`Live · \${Array.isArray(data) ? data.length : 0} requests`, 'ok');
                             } catch (error) {
-                                console.error('Error fetching attack data:', error);
+                                setLiveStatus('Live map connection failed', 'error');
+                            } finally {
+                                fetchInFlight = false;
+                                scheduleAttackFetch();
                             }
+                        }
+
+                        function scheduleAttackFetch() {
+                            if (refreshTimer) clearTimeout(refreshTimer);
+                            const delay = Math.max(1000, Math.min(60000, Number(loadSettings().refreshment) || 10000));
+                            refreshTimer = setTimeout(fetchAttackData, delay);
                         }
 
 
@@ -1757,7 +2016,7 @@ JS;
                                     let formattedHTML = "";
 
                                     for (const [key, value] of Object.entries(details)) {
-                                        formattedHTML += `<strong>\${key}</strong>: \${value}<br>`;
+                                        formattedHTML += `<strong>\${escapeHtml(key)}</strong>: \${escapeHtml(value)}<br>`;
                                     }
                                     formattedHTML += '<button id="makeUnselect" data="auto" onclick="makeUnselect()">Clear Details</button>';
 
@@ -1803,6 +2062,12 @@ JS;
                                 resumeAnimation(); // Enable auto-rotation
                             }
                         }
+
+                            function escapeHtml(value) {
+                                const node = document.createElement('div');
+                                node.textContent = value == null ? '' : String(value);
+                                return node.innerHTML;
+                            }
 
                             function truncateString(str, maxLength) {
                                 if (str && str.length > maxLength) {
@@ -1964,7 +2229,7 @@ JS;
                                     const detailsContent = document.getElementById("details-content");
                                     let formattedHTML = "";
                                     for (const [key, value] of Object.entries(decoded)) {
-                                        formattedHTML += `<strong>\${key}</strong>: \${value}<br>`;
+                                        formattedHTML += `<strong>\${escapeHtml(key)}</strong>: \${escapeHtml(value)}<br>`;
                                     }
                                     formattedHTML += '<button id="makeUnselect" onclick="makeUnselect()">Clear Details</button>';
                                     detailsContent.innerHTML = formattedHTML;
@@ -2023,6 +2288,7 @@ JS;
 
 
                         // Function to handle visibility change and window events
+                        let eventListenersSet = false;
                         function handleAutoRotation() {
                             if (eventListenersSet) return; // Skip if listeners are already set
 
@@ -2050,29 +2316,38 @@ JS;
                             window.addEventListener("focus", () => {
                                 resumeAnimation();
                             });
+                            eventListenersSet = true;
                         }
 
 
                         // Initialize the fetch process and set the attack details click event
                         fetchAttackData();
-                        setInterval(fetchAttackData, loadSettings()['refreshment']); // Refresh every 5 seconds
+                        handleAutoRotation();
                         setAttackDetailsOnClick('attack-list', 'details-content');
                         // Call this function after your DOM content is loaded
                         document.addEventListener('DOMContentLoaded', initializeTooltips);
+                        }
                     </script>
                 </body>
                 </html>
                 EOT;
+                $livemapHtml = ob_get_clean();
+                $csrfToken = class_exists('PHRO') && is_callable(['PHRO', 'getToken'])
+                    ? json_encode(PHRO::getToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
+                    : 'null';
+                $csrfMeta = '<meta name="csrf-token" content="' . htmlspecialchars((string) json_decode($csrfToken), ENT_QUOTES, 'UTF-8') . '">';
+                $livemapHtml = str_replace('<head>', '<head>' . $csrfMeta, $livemapHtml);
+                print $livemapHtml;
         });
 
         PHRO::post($url, function() {
-            header('Content-Type: application/json');
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: no-store, max-age=0');
+            header('X-Content-Type-Options: nosniff');
 
             $data = PHLS::get('livemap');
 
-            if (is_array($data) && !empty($data)) {
-                echo json_encode($data);
-            }
+            echo json_encode(is_array($data) ? array_values($data) : [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         });
     }
 

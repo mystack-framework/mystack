@@ -51,7 +51,9 @@ class PHOP {
      */
     private static function parseBytes($sizeStr) {
         if (!$sizeStr) return 0;
-        preg_match('/([\d\.]+)\s*(KB|MB|GB)?/i', trim($sizeStr), $matches);
+        if (!is_scalar($sizeStr) || !preg_match('/^\s*(\d+(?:\.\d+)?)\s*(KB|MB|GB)?\s*$/i', (string) $sizeStr, $matches)) {
+            return 0;
+        }
         $val = (float)$matches[1];
         $unit = strtoupper(isset($matches[2]) ? $matches[2] : 'B');
         switch($unit) {
@@ -68,9 +70,23 @@ class PHOP {
     private static function fetchSource($source) {
         if (preg_match('/^data:image\/(\w+);base64,/', $source, $m)) return base64_decode(substr($source, strpos($source, ',') + 1));
         if (filter_var($source, FILTER_VALIDATE_URL)) {
+            $scheme = strtolower((string) parse_url($source, PHP_URL_SCHEME));
+            if (!in_array($scheme, ['http', 'https'], true)) {
+                throw new \InvalidArgumentException('PHOP only supports HTTP(S) remote sources.');
+            }
             if (function_exists('curl_init')) {
                 $ch = curl_init($source);
-                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_SSL_VERIFYPEER => false]);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_MAXREDIRS => 3,
+                    CURLOPT_CONNECTTIMEOUT => 5,
+                    CURLOPT_TIMEOUT => 20,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2,
+                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                    CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                ]);
                 $data = curl_exec($ch); if (is_resource($ch)) { curl_close($ch); }
                 if ($data) return $data;
             }
@@ -84,6 +100,9 @@ class PHOP {
      * 🌟 THE MAIN IMAGE OPTIMIZER ENGINE (With Target Size AI) 🌟
      */
     public static function img($source, $output = 'preview', $options = []) {
+        if (!function_exists('imagecreatefromstring')) {
+            throw new \RuntimeException('PHOP Image: GD extension is not enabled.');
+        }
         ini_set('memory_limit', '512M'); 
         
         $opts = self::parseOptions($options);
@@ -169,7 +188,9 @@ class PHOP {
         if ($output === 'raw' || $output === 'return') return $final_data;
         if ($output === 'preview' || $output === 'show') { header("Content-Type: " . $mime); echo $final_data; exit; }
         
-        file_put_contents($output, $final_data);
+        if (@file_put_contents($output, $final_data, LOCK_EX) === false) {
+            throw new \RuntimeException("PHOP: Unable to write output file.");
+        }
         return $output; 
     }
 
@@ -207,7 +228,10 @@ class PHOP {
         $out_path = $output;
         if (in_array($output, ['preview', 'show', 'raw', 'return'])) {
             $is_temp = true;
-            $out_path = tempnam(sys_get_temp_dir(), 'phop_vid_') . '.' . $format;
+            $tempBase = tempnam(sys_get_temp_dir(), 'phop_vid_');
+            if ($tempBase === false) throw new \RuntimeException('Unable to create a temporary video output file.');
+            $out_path = $tempBase . '.' . $format;
+            @unlink($tempBase);
         }
 
         // Logic Based on Output Type

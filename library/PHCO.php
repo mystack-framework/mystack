@@ -23,8 +23,11 @@ class PHCO {
      * http or https
      */
     public static function isSecure(): bool {
+        if (class_exists('PHRO', false) && method_exists('PHRO', 'secure')) {
+            return PHRO::secure();
+        }
         $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-        $port443 = $_SERVER['SERVER_PORT'] == 443;
+        $port443 = isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443;
         
         return $https || $port443;
     }
@@ -37,6 +40,11 @@ class PHCO {
     private static function getDomainVariations(): array {
         $host = strtolower($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost');
         $host = explode(':', $host)[0];
+        if (!filter_var($host, FILTER_VALIDATE_IP)
+            && $host !== 'localhost'
+            && !preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i', $host)) {
+            $host = 'localhost';
+        }
 
         // For localhost or IP addresses, no special variations are needed.
         if (filter_var($host, FILTER_VALIDATE_IP) || $host === 'localhost') {
@@ -125,6 +133,25 @@ class PHCO {
     }
 
     /**
+     * Prefix historically used by PHJS cookies. Unlike pre(), underscores and
+     * hyphens are preserved so a project such as "edu_sys" remains
+     * "edu_sys_" in the browser.
+     */
+    private static function browserPre(): string {
+        $path = '';
+        if (class_exists('PHRO') && method_exists('PHRO', 'root')) {
+            $path = trim((string) (parse_url(PHRO::root(), PHP_URL_PATH) ?: ''), '/');
+        }
+        if ($path === '') {
+            $path = trim((string) dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/\\');
+        }
+        $segments = array_values(array_filter(explode('/', $path), 'strlen'));
+        $project = strtolower((string) (end($segments) ?: 'root'));
+        $project = preg_replace('/[^a-z0-9_-]/i', '', $project) ?: 'root';
+        return $project . '_';
+    }
+
+    /**
      * Adds a new cookie or updates an existing one.
      * Stores data as JSON to keep track of expiration time server-side.
      *
@@ -148,11 +175,14 @@ class PHCO {
         $options = [
             'expires'   => $expireTime,
             'path'      => self::path() ?? self::PATH,
-            'domain'    => self::getDomainVariations()[0],
             'secure'    => self::isSecure(), 
             'httponly'  => self::HTTP_ONLY,
             'samesite'  => self::SAME_SITE
         ];
+        $domain = self::getDomainVariations()[0];
+        if ($domain !== 'localhost' && !filter_var($domain, FILTER_VALIDATE_IP)) {
+            $options['domain'] = $domain;
+        }
         return setcookie($name, $payload, $options);
     }
 
@@ -251,6 +281,13 @@ class PHCO {
                 return $payload['v'] ?? $_COOKIE[$prefixedName];
             }
 
+            // PHJS compatibility: project names historically retained `_`/`-`.
+            $browserPrefixedName = self::browserPre() . $name;
+            if ($browserPrefixedName !== $prefixedName && isset($_COOKIE[$browserPrefixedName])) {
+                $payload = self::parsePayload($_COOKIE[$browserPrefixedName]);
+                return $payload['v'] ?? $_COOKIE[$browserPrefixedName];
+            }
+
             // Step 3: Fallback to non-prefixed (legacy support)
             if (isset($_COOKIE[$name])) {
                 $payload = self::parsePayload($_COOKIE[$name]);
@@ -272,8 +309,9 @@ class PHCO {
      * @return bool
      */
     public static function exists(string $name): bool {
-        $name = self::pre() . $name;
-        return isset($_COOKIE[$name]);
+        $primaryName = self::pre() . $name;
+        $browserName = self::browserPre() . $name;
+        return isset($_COOKIE[$primaryName]) || isset($_COOKIE[$browserName]);
     }
 
     /**

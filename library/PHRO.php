@@ -77,6 +77,7 @@ class PhroGuard
             'header' => new PhroHeaderInspectionShield(),
             'honeypot' => new PhroHoneypotShield(),
             'open_redirect' => new PhroOpenRedirectShield(),
+            'csrf' => new PhroCsrfShield(),
         ];
     }
 
@@ -289,7 +290,12 @@ class PhroSqlInjectionShield implements PhroShield
         }
 
         // 2. Unicode decoding (%uXXXX)
-        $normalized = preg_replace_callback('/%u([0-9a-f]{4})/i', fn($m) => mb_convert_encoding(pack('H*', $m[1]), 'UTF-8', 'UCS-2BE'), $normalized);
+        $normalized = preg_replace_callback('/%u([0-9a-f]{4})/i', static function ($match) {
+            if (function_exists('mb_convert_encoding')) {
+                return mb_convert_encoding(pack('H*', $match[1]), 'UTF-8', 'UCS-2BE');
+            }
+            return html_entity_decode('&#x' . $match[1] . ';', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }, $normalized);
 
         // 3. HTML Entity decoding
         $normalized = html_entity_decode($normalized, ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -387,7 +393,12 @@ class PhroXssShield implements PhroShield
         $normalized = html_entity_decode($normalized, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         // 3. Unicode decoding (%uXXXX)
-        $normalized = preg_replace_callback('/%u([0-9a-f]{4})/i', fn($m) => mb_convert_encoding(pack('H*', $m[1]), 'UTF-8', 'UCS-2BE'), $normalized);
+        $normalized = preg_replace_callback('/%u([0-9a-f]{4})/i', static function ($match) {
+            if (function_exists('mb_convert_encoding')) {
+                return mb_convert_encoding(pack('H*', $match[1]), 'UTF-8', 'UCS-2BE');
+            }
+            return html_entity_decode('&#x' . $match[1] . ';', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }, $normalized);
 
         // 4. Hex decoding (\xHH)
         $normalized = preg_replace_callback('/\\\\x([0-9a-f]{2})/i', fn($m) => chr(hexdec($m[1])), $normalized);
@@ -404,6 +415,8 @@ class PhroXssShield implements PhroShield
 
 class PhroRateLimitShield implements PhroShield
 {
+    private static bool $storage_warning_logged = false;
+
     public function inspect(array $request_data, array $config)
     {
         // Ensure PHLS class is available
@@ -448,17 +461,7 @@ class PhroRateLimitShield implements PhroShield
 
         // 3. Fallback: Check common proxy headers (if not already resolved by footprint())
         if ($client_ip === 'cli' || $client_ip === '127.0.0.1') {
-            $headers = PHRO::gatherHeaders(); // Use PHRO's helper to get normalized headers
-            $client_ip = $headers['cf-connecting-ip'] ?? // Cloudflare
-                $headers['x-forwarded-for'] ?? // Standard proxy
-                $headers['x-real-ip'] ?? // Nginx
-                $headers['client-ip'] ?? // Others
-                $_SERVER['REMOTE_ADDR'] ?? // Direct connection
-                $client_ip;
-            // Handle multiple IPs in X-Forwarded-For (take the first one)
-            if (strpos($client_ip, ',') !== false) {
-                $client_ip = trim(explode(',', $client_ip)[0]);
-            }
+            $client_ip = PHRO::getUserIP();
         }
 
         // 4. Validate IP (Optional, but good for robustness)
@@ -561,6 +564,7 @@ class PhroRateLimitShield implements PhroShield
         $block_key = "rl_blocked_{$tier_name}_" . $client_id;
         $graylist_count_key = "rl_graylist_count_{$tier_name}_" . $client_id;
 
+        try {
         // First, check if client is already in the hard block.
         if (PHLS::get($block_key) !== null) {
             usleep($slowdown_us); // Apply corresponding tier's slowdown
@@ -568,7 +572,9 @@ class PhroRateLimitShield implements PhroShield
         }
 
         // Then, log the current request and check if limit is exceeded.
-        PHLS::limitizer($log_key, time(), $max_requests + 1, $time_window_minutes + 1);
+        if (!PHLS::limitizer($log_key, time(), $max_requests + 1, $time_window_minutes + 1)) {
+            return;
+        }
         $requests_timestamps = PHLS::get($log_key);
 
         if (!is_array($requests_timestamps)) {
@@ -586,8 +592,11 @@ class PhroRateLimitShield implements PhroShield
                 PHLS::remove($log_key); // Clear log for blocked client
 
                 // Increment graylist counter (persists longer)
-                $block_count = (PHLS::get($graylist_count_key) ?? 0) + 1;
-                PHLS::add($graylist_count_key, $block_count, $block_duration_minutes * $graylist_threshold * 2);
+                $block_count = PHLS::increment(
+                    $graylist_count_key,
+                    1,
+                    $block_duration_minutes * $graylist_threshold * 2
+                );
 
                 usleep($slowdown_us); // Apply configured slowdown
                 throw new PhroSecurityException($block_message); // Halt immediately
@@ -598,6 +607,16 @@ class PhroRateLimitShield implements PhroShield
             if ($block_count > 0 && $block_count >= $graylist_threshold) {
                 usleep($graylist_slowdown_us);
             }
+        }
+        } catch (PhroSecurityException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // Storage contention must never turn the protection layer into a site-wide outage.
+            if (!self::$storage_warning_logged) {
+                self::$storage_warning_logged = true;
+                error_log('PHRO rate-limit storage was temporarily unavailable: ' . $e->getMessage());
+            }
+            return;
         }
     }
 }
@@ -635,17 +654,7 @@ class PhroAttemptShield implements PhroShield
         }
 
         if ($client_ip === 'cli' || $client_ip === '127.0.0.1') {
-            $headers = PHRO::gatherHeaders(); // Use PHRO's helper to get normalized headers
-            $client_ip = $headers['cf-connecting-ip'] ?? // Cloudflare
-                $headers['x-forwarded-for'] ?? // Standard proxy
-                $headers['x-real-ip'] ?? // Nginx
-                $headers['client-ip'] ?? // Others
-                $_SERVER['REMOTE_ADDR'] ?? // Direct connection
-                $client_ip;
-            // Handle multiple IPs in X-Forwarded-For (take the first one)
-            if (strpos($client_ip, ',') !== false) {
-                $client_ip = trim(explode(',', $client_ip)[0]);
-            }
+            $client_ip = PHRO::getUserIP();
         }
         if ($client_ip !== 'cli' && !filter_var($client_ip, FILTER_VALIDATE_IP)) {
             $client_ip = 'unknown_ip';
@@ -725,14 +734,8 @@ class PhroAttemptShield implements PhroShield
             throw new PhroSecurityException($block_message, 429);
         }
 
-        // 2. Safely get current attempts and increment
-        $current_attempts_raw = PHLS::get($attempt_key);
-        $current_attempts = is_numeric($current_attempts_raw) ? (int) $current_attempts_raw : 0;
-
-        $new_attempts = $current_attempts + 1;
-
-        // 3. Save the new attempt count
-        PHLS::add($attempt_key, $new_attempts, $reset_after_minutes);
+        // 2. Atomically increment so concurrent failed attempts cannot overwrite each other.
+        $new_attempts = PHLS::increment($attempt_key, 1, $reset_after_minutes);
 
         // 4. Check if THIS attempt caused a block
         if ($new_attempts >= $max_attempts) {
@@ -941,6 +944,14 @@ class PhroCsrfShield implements PhroShield
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
         if (in_array($method, ['GET', 'HEAD', 'OPTIONS'])) {
             return;
+        }
+
+        $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+        foreach ((array) ($config['except'] ?? []) as $excludedPath) {
+            $pattern = '#^' . str_replace('\*', '.*', preg_quote((string) $excludedPath, '#')) . '$#';
+            if (preg_match($pattern, $requestPath)) {
+                return;
+            }
         }
 
         if (session_status() === PHP_SESSION_NONE) {
@@ -1159,6 +1170,12 @@ class PHRO
     private static $footprint = false;
 
     /**
+     * Cross-request cache for Geo-IP tracker data.
+     */
+    private const GEO_CACHE_TTL = 21600;
+    private const GEO_FAILURE_CACHE_TTL = 300;
+
+    /**
      * Regular expression pattern to trim URL segments.
      * @var string
      */
@@ -1224,6 +1241,12 @@ class PHRO
      * 
      */
     private static $guard_instance = null;
+
+    /** @var bool Whether the MCP transport endpoint should be registered. */
+    private static bool $mcp_enabled = false;
+
+    /** @var array IP addresses of reverse proxies whose forwarding headers are trusted. */
+    private static array $trusted_proxies = [];
 
     /**
      * Array to store middlewares.
@@ -1316,8 +1339,8 @@ class PHRO
             self::$base_path = self::autoDetectBasePath();
         }
 
-        $url = $_SERVER['REQUEST_URI'];
-        self::$server_method = strtolower($_SERVER['REQUEST_METHOD']);
+        $url = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+        self::$server_method = strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
         // Remove query string from URL (e.g., ?a=b)
         if (strpos($url, '?') !== false) {
@@ -1365,9 +1388,277 @@ class PHRO
             'file_upload' => ['enabled' => true, 'uploads_enabled' => true, 'allowed_mimes' => null, 'max_size_kb' => 5120],
             'header' => ['enabled' => true, 'banned_user_agents' => ['sqlmap', 'nmap', 'nikto', 'badbot']],
             'honeypot' => ['enabled' => true, 'field_name' => 'user_email_confirm'],
-            'open_redirect' => ['enabled' => true, 'allowed_hosts' => null]
+            'open_redirect' => ['enabled' => true, 'allowed_hosts' => null],
+            'csrf' => ['enabled' => true, 'except' => []],
+            // Safe same-host reverse-proxy defaults. Cloudflare requests are
+            // additionally recognized by isTrustedProxyRequest().
+            'trusted_proxies' => ['127.0.0.1', '::1'],
+            'session' => [
+                'strict_mode' => true,
+                'cache_limiter' => '',
+                'name' => null,
+                'lifetime' => 0,
+                'path' => 'auto',
+                'secure' => 'auto',
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ],
         ];
+        $trustedProxyConfig = array_key_exists('trusted_proxies', $config)
+            ? (array) $config['trusted_proxies']
+            : $default_config['trusted_proxies'];
         self::$guard_config = empty($config) ? $default_config : array_replace_recursive($default_config, $config);
+        self::$guard_config['trusted_proxies'] = $trustedProxyConfig;
+        self::trustProxies((array) (self::$guard_config['trusted_proxies'] ?? []));
+        self::configureGuardSession((array) (self::$guard_config['session'] ?? []));
+
+        if (!headers_sent()) {
+            header_remove('X-Powered-By');
+            header('X-Content-Type-Options: nosniff');
+            header('X-Frame-Options: SAMEORIGIN');
+            header('Referrer-Policy: strict-origin-when-cross-origin');
+        }
+
+        if ((self::$guard_config['csrf']['enabled'] ?? false) === true) {
+            self::ensureCsrfToken();
+        }
+    }
+
+    /**
+     * Apply secure, portable session defaults before CSRF starts the session.
+     */
+    private static function configureGuardSession(array $config): void
+    {
+        if (session_status() !== PHP_SESSION_NONE || headers_sent()) {
+            return;
+        }
+
+        ini_set('session.use_strict_mode', !empty($config['strict_mode']) ? '1' : '0');
+        session_cache_limiter((string) ($config['cache_limiter'] ?? ''));
+
+        $name = trim((string) ($config['name'] ?? ''));
+        if ($name === '') {
+            $name = (class_exists('PHCO') ? PHCO::pre() : 'mystack_') . 'session';
+        }
+        session_name($name);
+
+        $path = $config['path'] ?? 'auto';
+        if ($path === 'auto' || !is_string($path) || $path === '') {
+            $path = self::autoDetectBasePath();
+        }
+        $path = '/' . trim((string) $path, '/') . '/';
+        if ($path === '//') {
+            $path = '/';
+        }
+
+        $secure = $config['secure'] ?? 'auto';
+        if ($secure === 'auto') {
+            $secure = self::isSecureRequest();
+        } else {
+            $secure = (bool) $secure;
+        }
+
+        $sameSite = ucfirst(strtolower((string) ($config['samesite'] ?? 'Lax')));
+        if (!in_array($sameSite, ['Lax', 'Strict', 'None'], true)) {
+            $sameSite = 'Lax';
+        }
+        if ($sameSite === 'None') {
+            $secure = true;
+        }
+
+        session_set_cookie_params([
+            'lifetime' => max(0, (int) ($config['lifetime'] ?? 0)),
+            'path' => $path,
+            'secure' => $secure,
+            'httponly' => (bool) ($config['httponly'] ?? true),
+            'samesite' => $sameSite,
+        ]);
+    }
+
+    private static function isSecureRequest(): bool
+    {
+        if (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') {
+            return true;
+        }
+        if ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443) {
+            return true;
+        }
+        if (!self::isTrustedProxyRequest()) {
+            return false;
+        }
+        if (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https') {
+            return true;
+        }
+        if (stripos((string) ($_SERVER['HTTP_FORWARDED'] ?? ''), 'proto=https') !== false) {
+            return true;
+        }
+        $visitor = json_decode((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), true);
+        return is_array($visitor) && ($visitor['scheme'] ?? null) === 'https';
+    }
+
+    /**
+     * Public proxy-aware HTTPS check for framework components such as PHCO.
+     */
+    public static function secure(): bool
+    {
+        return self::isSecureRequest();
+    }
+
+    /**
+     * Return the session CSRF token, creating it when necessary.
+     */
+    public static function getToken(): string
+    {
+        return self::ensureCsrfToken();
+    }
+
+    /**
+     * Return a ready-to-render hidden CSRF field.
+     */
+    public static function csrfField(): string
+    {
+        return '<input type="hidden" name="csrf_token" value="' .
+            htmlspecialchars(self::getToken(), ENT_QUOTES, 'UTF-8') . '">';
+    }
+
+    /**
+     * Rotate and return the current session CSRF token.
+     */
+    public static function regenerateToken(): string
+    {
+        if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
+            session_start();
+        }
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            throw new \RuntimeException('Unable to start a session for CSRF protection.');
+        }
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        return $_SESSION['csrf_token'];
+    }
+
+    private static function ensureCsrfToken(): string
+    {
+        if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
+            session_start();
+        }
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            throw new \RuntimeException('Unable to start a session for CSRF protection.');
+        }
+        if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        }
+        return $_SESSION['csrf_token'];
+    }
+
+    /**
+     * Trust forwarding headers only from these reverse-proxy IP addresses.
+     */
+    public static function trustProxies(array $ipAddresses): void
+    {
+        self::$trusted_proxies = array_values(array_unique(array_filter(
+            array_map('trim', $ipAddresses),
+            static fn($ip) => self::isValidProxyRule($ip)
+        )));
+    }
+
+    private static function isTrustedProxyRequest(): bool
+    {
+        $remoteAddress = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+        if (filter_var($remoteAddress, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+
+        foreach (self::$trusted_proxies as $proxyRule) {
+            if (self::ipMatchesRule($remoteAddress, $proxyRule)) {
+                return true;
+            }
+        }
+
+        return self::isCloudflareProxyRequest();
+    }
+
+    private static function isCloudflareProxyRequest(): bool
+    {
+        $remoteAddress = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+
+        // Cloudflare headers are trusted only when the direct peer is inside
+        // an official Cloudflare network. Header names alone are spoofable
+        // when an origin server is reachable directly.
+        if (empty($_SERVER['HTTP_CF_RAY']) ||
+            empty($_SERVER['HTTP_CF_CONNECTING_IP']) ||
+            filter_var($_SERVER['HTTP_CF_CONNECTING_IP'], FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+
+        foreach (self::cloudflareProxyRanges() as $proxyRule) {
+            if (self::ipMatchesRule($remoteAddress, $proxyRule)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function cloudflareProxyRanges(): array
+    {
+        return [
+            '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22',
+            '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+            '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22',
+            '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+            '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+            '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32',
+            '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29',
+            '2c0f:f248::/32',
+        ];
+    }
+
+    private static function isTrustedProxyAddress(string $address): bool
+    {
+        foreach (array_merge(self::$trusted_proxies, self::cloudflareProxyRanges()) as $rule) {
+            if (self::ipMatchesRule($address, $rule)) return true;
+        }
+        return false;
+    }
+
+    private static function isValidProxyRule(string $rule): bool
+    {
+        if (filter_var($rule, FILTER_VALIDATE_IP) !== false) {
+            return true;
+        }
+        if (!str_contains($rule, '/')) {
+            return false;
+        }
+        [$network, $prefix] = explode('/', $rule, 2);
+        if (filter_var($network, FILTER_VALIDATE_IP) === false || !ctype_digit($prefix)) {
+            return false;
+        }
+        $packed = @inet_pton($network);
+        return $packed !== false && (int) $prefix >= 0 && (int) $prefix <= strlen($packed) * 8;
+    }
+
+    private static function ipMatchesRule(string $ip, string $rule): bool
+    {
+        if (!str_contains($rule, '/')) {
+            return hash_equals($rule, $ip);
+        }
+        [$network, $prefixText] = explode('/', $rule, 2);
+        $ipBytes = @inet_pton($ip);
+        $networkBytes = @inet_pton($network);
+        if ($ipBytes === false || $networkBytes === false || strlen($ipBytes) !== strlen($networkBytes)) {
+            return false;
+        }
+
+        $prefix = (int) $prefixText;
+        $fullBytes = intdiv($prefix, 8);
+        $remainingBits = $prefix % 8;
+        if ($fullBytes > 0 && substr($ipBytes, 0, $fullBytes) !== substr($networkBytes, 0, $fullBytes)) {
+            return false;
+        }
+        if ($remainingBits === 0) {
+            return true;
+        }
+        $mask = (0xFF << (8 - $remainingBits)) & 0xFF;
+        return (ord($ipBytes[$fullBytes]) & $mask) === (ord($networkBytes[$fullBytes]) & $mask);
     }
 
     /**
@@ -1378,41 +1669,35 @@ class PHRO
      */
     private static function autoDetectBasePath()
     {
-        $script_name = $_SERVER['SCRIPT_NAME'];
-        $base_path = rtrim(dirname($script_name), '/\\');
-        $request_uri = $_SERVER['REQUEST_URI'] ?? '';
+        $scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 
-        if (($pos = strpos($request_uri, '?')) !== false) {
-            $request_uri = substr($request_uri, 0, $pos);
-        }
-
-        if ($base_path && strpos($request_uri, $base_path) === 0) {
-            return rtrim($base_path, '/') . '/';
-        }
-
-        $script_parts = explode('/', trim($script_name, '/'));
-        $uri_parts = explode('/', trim($request_uri, '/'));
-
-        $common_path = '/';
-        $path_segments = [];
-        $i = 0;
-        while (isset($script_parts[$i], $uri_parts[$i]) && $script_parts[$i] === $uri_parts[$i]) {
-            if (strpos(end($script_parts), '.php') !== false && $i === count($script_parts) - 1) {
-                break;
+        // Some front-controller servers set SCRIPT_NAME to the requested asset
+        // (for example /app.js). In that case derive the application directory
+        // from the actual entry script and the document root instead.
+        if (strtolower(pathinfo($scriptName, PATHINFO_EXTENSION)) !== 'php') {
+            $scriptFile = realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? ''));
+            $documentRoot = realpath((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''));
+            if ($scriptFile !== false && $documentRoot !== false) {
+                $normalizedFile = str_replace('\\', '/', $scriptFile);
+                $normalizedRoot = rtrim(str_replace('\\', '/', $documentRoot), '/');
+                $prefix = $normalizedRoot . '/';
+                if (str_starts_with(strtolower($normalizedFile), strtolower($prefix))) {
+                    $relativeScript = substr($normalizedFile, strlen($prefix));
+                    $scriptName = '/' . ltrim($relativeScript, '/');
+                }
             }
-            $path_segments[] = $uri_parts[$i];
-            $i++;
         }
 
-        if (!empty($path_segments)) {
-            $common_path = '/' . implode('/', $path_segments);
+        if (strtolower(pathinfo($scriptName, PATHINFO_EXTENSION)) !== 'php') {
+            return '/';
         }
 
-        if ($common_path === '//') {
-            $common_path = '/';
+        $basePath = str_replace('\\', '/', dirname($scriptName));
+        if ($basePath === '.' || $basePath === '/' || $basePath === '\\') {
+            return '/';
         }
 
-        return rtrim($common_path, '/') . '/';
+        return '/' . trim($basePath, '/') . '/';
     }
 
     /**
@@ -1433,15 +1718,16 @@ class PHRO
         if (isset($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) === 'on') {
             $is_secure = true;
         }
-        if (!$is_secure && isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') {
+        $trustForwardedHeaders = self::isTrustedProxyRequest();
+        if (!$is_secure && $trustForwardedHeaders && isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') {
             $is_secure = true;
         }
-        if (!$is_secure && isset($_SERVER['HTTP_FORWARDED'])) {
+        if (!$is_secure && $trustForwardedHeaders && isset($_SERVER['HTTP_FORWARDED'])) {
             if (strpos(strtolower($_SERVER['HTTP_FORWARDED']), 'proto=https') !== false) {
                 $is_secure = true;
             }
         }
-        if (!$is_secure && isset($_SERVER['HTTP_CF_VISITOR'])) {
+        if (!$is_secure && $trustForwardedHeaders && isset($_SERVER['HTTP_CF_VISITOR'])) {
             $visitor_data = json_decode($_SERVER['HTTP_CF_VISITOR']);
             if (isset($visitor_data->scheme) && $visitor_data->scheme === 'https') {
                 $is_secure = true;
@@ -1453,8 +1739,10 @@ class PHRO
 
         $protocol = $is_secure ? "https://" : "http://";
 
-        $domain = $_SERVER['SERVER_NAME'] ?? $_SERVER['HTTP_HOST'] ?? 'localhost';
-
+        $domain = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
+        if (!is_string($domain) || !preg_match('/^(?:\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.-]+)(?::\d{1,5})?$/', $domain)) {
+            $domain = 'localhost';
+        }
         $domain = preg_replace('/:(80|443)$/', '', $domain);
 
         $base_path = rtrim(self::$base_path, '/');
@@ -1998,7 +2286,13 @@ class PHRO
     public function header($header, ?string $value = null): self
     {
         $final_headers = [];
-        $items_to_process = is_array($header) ? $header : [[$header => $value]];
+        if (is_array($header)) {
+            $items_to_process = $header;
+        } elseif ($value === null) {
+            $items_to_process = [$header];
+        } else {
+            $items_to_process = [$header => $value];
+        }
 
         foreach ($items_to_process as $key => $val) {
             $is_shortcut = is_int($key) && is_string($val);
@@ -2243,6 +2537,7 @@ class PHRO
      */
     public function mcp(string $type, string $name, string $description, array $schema = []): self
     {
+        self::$mcp_enabled = true;
         $keys_to_modify = is_array(self::$last_route_key) ? self::$last_route_key : [self::$last_route_key];
 
         foreach ($keys_to_modify as $key) {
@@ -2548,6 +2843,15 @@ class PHRO
         }
 
         if ($urls === []) {
+            gc_collect_cycles();
+            exit;
+        }
+        if (!function_exists('curl_multi_init')) {
+            self::logErrorPhls(
+                'Background URL Tasks Unavailable',
+                new \RuntimeException('The cURL extension is required for URL background tasks.'),
+                $logExpirationMin
+            );
             gc_collect_cycles();
             exit;
         }
@@ -2915,7 +3219,7 @@ class PHRO
      */
     public static function routes($path = null, $method = 'GET')
     {
-        $method = strtoupper($method);
+        $method = strtolower($method);
         if (empty($path)) {
             return self::$routes;
         }
@@ -2949,7 +3253,7 @@ class PHRO
         // --- Case 1: Auto-Detection (If identifier is null) ---
         if ($identifier === null) {
             // ১. বর্তমান রিকোয়েস্ট URI এবং রুট পাথ সংগ্রহ করা
-            $requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+            $requestUri = (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/');
             $rootUrl = self::root();
             $rootPath = parse_url($rootUrl, PHP_URL_PATH);
 
@@ -3130,11 +3434,116 @@ class PHRO
      */
     public static function getUserIP()
     {
-        $ip_address = $_SERVER['REMOTE_ADDR'] ?? ''; // Use null coalescing operator
-        if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ip_address = $_SERVER['HTTP_X_FORWARDED_FOR'];
+        $remote = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+        $remoteIsValid = filter_var($remote, FILTER_VALIDATE_IP) !== false;
+        $trustedRequest = $remoteIsValid && self::isTrustedProxyRequest();
+
+        if ($trustedRequest) {
+            // Cloudflare's direct connecting-IP header is authoritative only
+            // when the direct peer itself belongs to Cloudflare.
+            if (self::isCloudflareProxyRequest()) {
+                $cloudflareClient = trim((string) ($_SERVER['HTTP_CF_CONNECTING_IP'] ?? ''));
+                if (filter_var($cloudflareClient, FILTER_VALIDATE_IP)) return $cloudflareClient;
+            }
+
+            // Walk X-Forwarded-For from the trusted edge inward. This ignores
+            // attacker-prepended values while retaining multi-proxy support.
+            $forwarded = array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''))
+            ), static fn($ip) => filter_var($ip, FILTER_VALIDATE_IP) !== false));
+            $forwarded[] = $remote;
+            for ($i = count($forwarded) - 1; $i >= 0; $i--) {
+                if (!self::isTrustedProxyAddress($forwarded[$i])) return $forwarded[$i];
+            }
+
+            $realIp = trim((string) ($_SERVER['HTTP_X_REAL_IP'] ?? ''));
+            if (filter_var($realIp, FILTER_VALIDATE_IP)) return $realIp;
+            return $remote;
         }
-        return $ip_address;
+
+        if ($remoteIsValid) return $remote;
+
+        $candidates = [];
+
+        // Keep proxy headers as a fallback when the direct peer is unavailable.
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) $candidates[] = $_SERVER['HTTP_CF_CONNECTING_IP'];
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) $candidates = array_merge($candidates, explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']));
+        if (!empty($_SERVER['HTTP_X_REAL_IP'])) $candidates[] = $_SERVER['HTTP_X_REAL_IP'];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim((string) $candidate);
+            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                return $candidate;
+            }
+        }
+
+        return '0.0.0.0';
+    }
+
+    /**
+     * Read cached tracker data from APCu when available, otherwise from a
+     * non-public temporary directory.
+     */
+    private static function geoCacheFetch(string $key): ?array
+    {
+        $cacheKey = 'mystack_geo_' . hash('sha256', dirname(__DIR__) . '|' . $key);
+
+        if (function_exists('apcu_fetch') && filter_var(ini_get('apc.enabled'), FILTER_VALIDATE_BOOL)) {
+            $success = false;
+            $cached = apcu_fetch($cacheKey, $success);
+            if ($success && is_array($cached)) {
+                return $cached;
+            }
+        }
+
+        $cacheDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'mystack-geo-cache';
+        $cacheFile = $cacheDir . DIRECTORY_SEPARATOR . hash('sha256', $cacheKey) . '.json';
+        if (!is_file($cacheFile) || !is_readable($cacheFile)) {
+            return null;
+        }
+
+        $payload = json_decode((string) file_get_contents($cacheFile), true);
+        if (
+            !is_array($payload) ||
+            !isset($payload['expires'], $payload['data']) ||
+            (int) $payload['expires'] < time() ||
+            !is_array($payload['data'])
+        ) {
+            return null;
+        }
+
+        return $payload['data'];
+    }
+
+    /**
+     * Persist tracker data and return it for concise call sites.
+     */
+    private static function geoCacheStore(string $key, array $data, int $ttl = self::GEO_CACHE_TTL): array
+    {
+        $ttl = max(60, $ttl);
+        $cacheKey = 'mystack_geo_' . hash('sha256', dirname(__DIR__) . '|' . $key);
+
+        if (function_exists('apcu_store') && filter_var(ini_get('apc.enabled'), FILTER_VALIDATE_BOOL)) {
+            apcu_store($cacheKey, $data, $ttl);
+        }
+
+        $cacheDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'mystack-geo-cache';
+        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0700, true) && !is_dir($cacheDir)) {
+            return $data;
+        }
+
+        $cacheFile = $cacheDir . DIRECTORY_SEPARATOR . hash('sha256', $cacheKey) . '.json';
+        $payload = json_encode([
+            'expires' => time() + $ttl,
+            'data' => $data,
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        if ($payload !== false) {
+            file_put_contents($cacheFile, $payload, LOCK_EX);
+        }
+
+        return $data;
     }
 
     /**
@@ -3378,12 +3787,14 @@ class PHRO
      */
     private static function _fetchUserIPInfoWithRetry($userIP)
     {
+        $userIP = trim(explode(',', (string) $userIP)[0]);
+
         // 1. List of API providers
         $providers = [
             'ipwhois' => "https://ipwho.is/{$userIP}",
             'ipapi' => "https://ipapi.co/{$userIP}/json/",
             'geoplugin' => "http://www.geoplugin.net/json.gp?ip={$userIP}",
-            'ip-api' => "http://ip-api.com/json/{$userIP}?fields=status,message,country,countryCode,region,regionName,city,lat,lon,zip,timezone,isp,org,as,query"
+            'ip-api' => "http://ip-api.com/json/{$userIP}?fields=status,message,country,countryCode,region,regionName,city,lat,lon,zip,timezone,isp,org,as,mobile,proxy,hosting,query"
         ];
 
         $default_ip_info = [
@@ -3402,6 +3813,30 @@ class PHRO
             'query' => $userIP
         ];
 
+        $cached = self::geoCacheFetch('client:' . $userIP);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        if (!filter_var(
+            $userIP,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        )) {
+            return self::geoCacheStore(
+                'client:' . $userIP,
+                $default_ip_info,
+                self::GEO_FAILURE_CACHE_TTL
+            );
+        }
+        if (!function_exists('curl_init')) {
+            return self::geoCacheStore(
+                'client:' . $userIP,
+                $default_ip_info,
+                self::GEO_FAILURE_CACHE_TTL
+            );
+        }
+
         foreach ($providers as $source => $url) {
             // Primary gets 3s, Fallbacks get 1-2s to fail fast
             $timeout = ($source === 'ipwhois') ? 3 : 2;
@@ -3412,7 +3847,8 @@ class PHRO
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
                 curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1); // Connect extremely fast
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // For speed/compatibility on fallbacks
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
                 curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Compatible; GeoFetcher/1.0)');
 
                 $response = curl_exec($ch);
@@ -3420,10 +3856,10 @@ class PHRO
 
                 if (curl_errno($ch) || $httpCode !== 200) {
                     // Log only if needed, kept silent to keep logs clean during fallback switch
-                    if (is_resource($ch)) { curl_close($ch); }
+                    if ($ch !== false) { curl_close($ch); }
                     continue; // Move to next provider
                 }
-                if (is_resource($ch)) { curl_close($ch); }
+                if ($ch !== false) { curl_close($ch); }
 
                 $data = json_decode($response, true);
                 if (!$data)
@@ -3433,6 +3869,7 @@ class PHRO
                 $mapped = $default_ip_info;
 
                 if ($source === 'ipwhois' && isset($data['success']) && $data['success'] === true) {
+                    $security = (array) ($data['security'] ?? []);
                     $mapped = [
                         'countryCode' => $data['country_code'] ?? null,
                         'country' => $data['country'] ?? null,
@@ -3446,9 +3883,10 @@ class PHRO
                         'org' => $data['connection']['org'] ?? null,
                         'as' => isset($data['connection']['asn']) ? "AS" . $data['connection']['asn'] : null,
                         'query' => $data['ip'] ?? $userIP,
-                        'proxy' => null
+                        'proxy' => (bool) ($security['proxy'] ?? $security['vpn'] ?? $security['tor'] ?? $security['anonymous'] ?? false),
+                        'hosting' => (bool) ($security['hosting'] ?? false)
                     ];
-                    return $mapped;
+                    return self::geoCacheStore('client:' . $userIP, $mapped);
                 } elseif ($source === 'ipapi' && empty($data['error'])) {
                     $mapped = [
                         'countryCode' => $data['country_code'] ?? null,
@@ -3464,7 +3902,7 @@ class PHRO
                         'as' => $data['asn'] ?? null,
                         'query' => $data['ip'] ?? $userIP,
                     ];
-                    return $mapped;
+                    return self::geoCacheStore('client:' . $userIP, $mapped);
                 } elseif ($source === 'geoplugin' && isset($data['geoplugin_countryCode'])) {
                     $mapped = [
                         'countryCode' => $data['geoplugin_countryCode'] ?? null,
@@ -3480,21 +3918,28 @@ class PHRO
                         'as' => null,
                         'query' => $data['geoplugin_request'] ?? $userIP,
                     ];
-                    return $mapped;
+                    return self::geoCacheStore('client:' . $userIP, $mapped);
                 } elseif ($source === 'ip-api' && isset($data['status']) && $data['status'] === 'success') {
                     // Your original structure
                     unset($data['status'], $data['message']);
-                    return array_merge($default_ip_info, $data);
+                    return self::geoCacheStore(
+                        'client:' . $userIP,
+                        array_merge($default_ip_info, $data)
+                    );
                 }
 
-            } catch (Exception $e) {
+            } catch (\Throwable $e) {
                 // Should not happen due to try/catch, but safety net
                 error_log("Geo Error {$source}: " . $e->getMessage());
             }
         }
 
         error_log("All Geo-IP providers failed for IP: {$userIP}");
-        return $default_ip_info;
+        return self::geoCacheStore(
+            'client:' . $userIP,
+            $default_ip_info,
+            self::GEO_FAILURE_CACHE_TTL
+        );
     }
 
     /**
@@ -3526,6 +3971,14 @@ class PHRO
             'timezone' => null
         ];
 
+        $cached = self::geoCacheFetch('server');
+        if ($cached !== null) {
+            return $cached;
+        }
+        if (!function_exists('curl_init')) {
+            return self::geoCacheStore('server', $default_geo_data, self::GEO_FAILURE_CACHE_TTL);
+        }
+
         foreach ($providers as $source => $url) {
             // Timeout: 3s for Primary, 2s for fallbacks to ensure page loads fast
             $timeout = ($source === 'ipwhois') ? 3 : 2;
@@ -3536,17 +3989,18 @@ class PHRO
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
                 curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
                 curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Compatible; GeoCaller/1.0)');
 
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
                 if (curl_errno($ch) || $httpCode !== 200) {
-                    if (is_resource($ch)) { curl_close($ch); }
+                    if ($ch !== false) { curl_close($ch); }
                     continue;
                 }
-                if (is_resource($ch)) { curl_close($ch); }
+                if ($ch !== false) { curl_close($ch); }
 
                 $data = json_decode($response, true);
                 if (!$data)
@@ -3556,7 +4010,7 @@ class PHRO
 
                 // 1. ipwho.is
                 if ($source === 'ipwhois' && isset($data['success']) && $data['success'] === true) {
-                    return [
+                    return self::geoCacheStore('server', [
                         'query' => $data['ip'] ?? null,
                         'lat' => $data['latitude'] ?? null,
                         'lon' => $data['longitude'] ?? null,
@@ -3570,12 +4024,12 @@ class PHRO
                         'org' => $data['connection']['org'] ?? null,
                         'as' => isset($data['connection']['asn']) ? "AS" . $data['connection']['asn'] : null,
                         'proxy' => null
-                    ];
+                    ], 86400);
                 }
 
                 // 2. ipapi.co
                 elseif ($source === 'ipapi' && empty($data['error'])) {
-                    return [
+                    return self::geoCacheStore('server', [
                         'query' => $data['ip'] ?? null,
                         'lat' => $data['latitude'] ?? null,
                         'lon' => $data['longitude'] ?? null,
@@ -3589,12 +4043,12 @@ class PHRO
                         'org' => $data['org'] ?? null,
                         'as' => $data['asn'] ?? null,
                         'proxy' => null
-                    ];
+                    ], 86400);
                 }
 
                 // 3. geoplugin
                 elseif ($source === 'geoplugin' && isset($data['geoplugin_countryCode'])) {
-                    return [
+                    return self::geoCacheStore('server', [
                         'query' => $data['geoplugin_request'] ?? null,
                         'lat' => $data['geoplugin_latitude'] ?? null,
                         'lon' => $data['geoplugin_longitude'] ?? null,
@@ -3608,22 +4062,30 @@ class PHRO
                         'org' => null,
                         'as' => null,
                         'proxy' => null
-                    ];
+                    ], 86400);
                 }
 
                 // 4. ip-api
                 elseif ($source === 'ip-api' && isset($data['status']) && $data['status'] === 'success') {
                     unset($data['status'], $data['message']);
-                    return array_merge($default_geo_data, $data);
+                    return self::geoCacheStore(
+                        'server',
+                        array_merge($default_geo_data, $data),
+                        86400
+                    );
                 }
 
-            } catch (Exception $e) {
+            } catch (\Throwable $e) {
                 // Silent fail to next provider
             }
         }
 
         error_log("Max retries reached for Geolocation API. Using default geo data.");
-        return $default_geo_data;
+        return self::geoCacheStore(
+            'server',
+            $default_geo_data,
+            self::GEO_FAILURE_CACHE_TTL
+        );
     }
 
 
@@ -3654,19 +4116,28 @@ class PHRO
             'clientXProxy' => null,     // Added proxy
             'clientXDevicekey' => null,
             'clientXNetkey' => null,
+            'clientXHash' => null,
+            'clientXFingerprint' => null,
         ];
 
-        if (!isset($_COOKIE['identity'])) {
+        $encryptedIdentityCookie = class_exists('PHCO')
+            ? \PHCO::get('identity')
+            : ($_COOKIE['identity'] ?? null);
+
+        if (!is_string($encryptedIdentityCookie) || $encryptedIdentityCookie === '') {
             return $defaultData;
         }
 
-        $encryptedIdentityCookie = $_COOKIE['identity'];
         $decryptedIdentity = self::decrypt($encryptedIdentityCookie);
 
         if ($decryptedIdentity === null || !isset($decryptedIdentity['identity'])) {
             // Cookie exists but decryption failed or no identity data
             // You might want to handle invalid cookies (e.g., delete them)
-            setcookie('identity', '', time() - 3600, '/'); // Delete invalid cookie
+            if (class_exists('PHCO')) {
+                \PHCO::remove('identity');
+            } else {
+                setcookie('identity', '', time() - 3600, '/');
+            }
             return $defaultData; // Return default data or handle as needed
         }
 
@@ -3690,7 +4161,9 @@ class PHRO
             'clientXMobile' => $identityData['location']['mobile'] ?? $defaultData['clientXMobile'],  // Added mobile
             'clientXProxy' => $identityData['location']['proxy'] ?? $defaultData['clientXProxy'],   // Added proxy
             'clientXDevicekey' => $identityData['id']['device'] ?? $defaultData['clientXDevicekey'],
-            'clientXNetkey' => $identityData['id']['fingerprint'] ?? $defaultData['clientXNetkey'],
+            'clientXNetkey' => $identityData['id']['netkey'] ?? $defaultData['clientXNetkey'],
+            'clientXHash' => $identityData['id']['hash'] ?? $defaultData['clientXHash'],
+            'clientXFingerprint' => $identityData['id']['fingerprint'] ?? $defaultData['clientXFingerprint'],
         ];
 
         return $mappedData;
@@ -4037,13 +4510,11 @@ class PHRO
 
         // --- 5. Conditional Geo-IP Fetch (only if tracking is enabled) ---
         $ipInfo = [];
-        $hostInfo = [];
         if (self::$footprint === true) {
             $ipInfo = self::_fetchUserIPInfoWithRetry(self::$params['clientIP']);
-            $hostInfo = self::getGeolocationData(); // For server's own IP
         }
-        // Merge fetched Geo-IP or default nulls. Prioritize fetched.
-        self::$params = array_merge(self::$params, $ipInfo, $hostInfo);
+        // Tracker data must describe the visitor, not the application server.
+        self::$params = array_merge(self::$params, $ipInfo);
 
         // --- 6. Generate/Validate Robust Identity Keys (ClientDevicekey, ClientNetkey, ClientHash, ClientFingerprint) ---
         // The goal is to always have valid, 16-char keys.
@@ -4063,7 +4534,11 @@ class PHRO
         if (empty($finalClientHash) || strlen($finalClientHash) !== 16) {
             if (class_exists('PHCO')) {
                 // Attempt to get hash from PHCO, or generate a robust fallback.
-                $phco_hash = \PHCO::get("hash");
+                $phco_hash = \PHCO::get("hash")
+                    ?? ($raw_data['HTTP_X_DEVICE_FINGERPRINT'] ?? $raw_data['X-Device-Fingerprint'] ?? null);
+                if (!is_string($phco_hash) || !preg_match('/^[a-f0-9]{16}$/i', $phco_hash)) {
+                    $phco_hash = null;
+                }
                 $finalClientHash = (empty($phco_hash) || strlen($phco_hash) !== 16) ? substr(hash('sha256', uniqid('phco_fallback_', true)), 0, 16) : $phco_hash;
             } else {
                 $finalClientHash = substr(hash('sha256', uniqid('no_phco_hash_', true)), 0, 16);
@@ -4090,7 +4565,11 @@ class PHRO
 
 
         // --- 7. Set/Update Identity Cookie ---
-        self::setIdentityCookie(self::$params);
+        // Internal PHFY configuration still receives guard/rate-limit protection,
+        // but does not need to refresh the large tracking cookie on every poll.
+        if (self::shouldRefreshIdentityCookie()) {
+            self::setIdentityCookie(self::$params);
+        }
 
         // --- 8. Final Transformation (to clientX prefixed keys for final output) ---
         // This is the last step for consistency, after all internal processing is done.
@@ -4131,6 +4610,33 @@ class PHRO
 
         self::$footprint_cache = self::$params; // Cache for current request
         return self::$params;
+    }
+
+    /**
+     * Keeps tracking enabled while avoiding redundant cookie refreshes on
+     * framework-internal configuration requests.
+     */
+    private static function shouldRefreshIdentityCookie(): bool
+    {
+        if (class_exists('PHMO', false)
+            && method_exists('PHMO', 'isProbeRequest')
+            && PHMO::isProbeRequest()) {
+            return false;
+        }
+
+        $request_path = rawurldecode((string) parse_url(
+            $_SERVER['REQUEST_URI'] ?? '/',
+            PHP_URL_PATH
+        ));
+        $base_path = '/' . trim((string) self::$base_path, '/');
+        if ($base_path !== '/' && (
+            $request_path === $base_path
+            || str_starts_with($request_path, $base_path . '/')
+        )) {
+            $request_path = substr($request_path, strlen($base_path)) ?: '/';
+        }
+
+        return ('/' . ltrim($request_path, '/')) !== '/_phfy/config';
     }
 
     /**
@@ -4540,7 +5046,9 @@ class PHRO
         }
 
         // 2. Lowercase (multibyte safe)
-        $string = mb_strtolower($string, 'UTF-8');
+        $string = function_exists('mb_strtolower')
+            ? mb_strtolower($string, 'UTF-8')
+            : strtolower($string);
 
         // 3. Replace common words (optional but good for SEO)
         $string = str_replace(
@@ -4825,7 +5333,7 @@ class PHRO
                                         if (json_last_error() === JSON_ERROR_NONE)
                                             $parsed_val = $decoded;
                                     } elseif (strpos($parsed_val, 'a:') === 0) {
-                                        $decoded = @unserialize($parsed_val);
+                                        $decoded = @unserialize($parsed_val, ['allowed_classes' => false]);
                                         if ($decoded !== false)
                                             $parsed_val = $decoded;
                                     } elseif (strpos($parsed_val, ',') !== false) {
@@ -5110,20 +5618,124 @@ class PHRO
      */
     public static function listen($error_handler = null)
     {
-        PHAI::routes('/mcp');
-        PHAI::middleware(function ($method) {
-            if ($method === 'tools/call')
-                return true;
-        });
+        $requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        $requestPath = rawurldecode((string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH));
+        if (
+            in_array($requestMethod, ['GET', 'HEAD'], true) &&
+            preg_match(
+                '~(?:^|/)src/cache/(css|js)/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.(css|js))$~i',
+                $requestPath,
+                $cacheAsset
+            )
+        ) {
+            $section = strtolower($cacheAsset[1]);
+            $extension = strtolower($cacheAsset[3]);
+            if ($section === $extension) {
+                $cacheRoot = realpath(DIR::path('cache'));
+                $assetFile = realpath(
+                    rtrim(DIR::path('cache'), '/\\') .
+                    DIRECTORY_SEPARATOR . $section .
+                    DIRECTORY_SEPARATOR . $cacheAsset[2]
+                );
+
+                if (
+                    $cacheRoot !== false &&
+                    $assetFile !== false &&
+                    str_starts_with(
+                        str_replace('\\', '/', $assetFile),
+                        rtrim(str_replace('\\', '/', $cacheRoot), '/') . '/' . $section . '/'
+                    ) &&
+                    is_file($assetFile)
+                ) {
+                    header(
+                        'Content-Type: ' .
+                        ($extension === 'css'
+                            ? 'text/css; charset=utf-8'
+                            : 'application/javascript; charset=utf-8')
+                    );
+                    header('Cache-Control: public, max-age=604800, immutable');
+                    header('X-Content-Type-Options: nosniff');
+                    header('Content-Length: ' . filesize($assetFile));
+                    if ($requestMethod === 'GET') {
+                        readfile($assetFile);
+                    }
+                    exit;
+                }
+            }
+        }
+
+        if (self::$mcp_enabled && class_exists('PHAI')) {
+            PHAI::routes('/mcp');
+            PHAI::middleware(function ($method) {
+                return $method === 'tools/call';
+            });
+        }
 
         self::get("/app.js", function ($data) {
+            $source = DIR::path("js:PHJS-min.php");
+            $etag = '"' . hash('sha256', $source . '|' . filemtime($source) . '|' . filesize($source) . '|' . (PHDE::isDebug() ? 'debug' : 'release')) . '"';
+            header_remove('Set-Cookie');
+            header('Cache-Control: public, max-age=604800, immutable', true);
+            header('ETag: ' . $etag);
+            header('Vary: Accept-Encoding');
+            header('X-Content-Type-Options: nosniff');
+            header('Referrer-Policy: strict-origin-when-cross-origin');
+            if (self::requestEtagMatches($etag)) {
+                http_response_code(304);
+                exit;
+            }
             import("js:PHJS-min.php");
-            // echo file_get_contents(DIR::path("js:phjs.js"));
-        })->header(['js'])->name("app-js");
+            exit;
+        })->header(['js', 'asset'])->name("app-js")->allow();
 
         self::get("/sw.js", function ($data) {
+            $source = DIR::path("js:SW.php");
+            $etag = '"' . hash('sha256', $source . '|' . filemtime($source) . '|' . filesize($source)) . '"';
+            header_remove('Set-Cookie');
+            header('Cache-Control: no-cache, no-store, max-age=0, must-revalidate', true);
+            header('Pragma: no-cache');
+            header('Expires: 0');
+            header('ETag: ' . $etag);
+            header('Vary: Accept-Encoding');
+            header('X-Content-Type-Options: nosniff');
+            if (self::requestEtagMatches($etag)) {
+                http_response_code(304);
+                exit;
+            }
             import("js:SW.php");
-        })->header(['js'])->name("sw-js");
+            exit;
+        })->header([
+            'js',
+            'Cache-Control' => 'no-cache, max-age=0, must-revalidate',
+        ])->name("sw-js")->allow();
+
+        self::get("/_phjs/network-info", function ($data) {
+            $footprint = self::footprint();
+            $geo = self::_fetchUserIPInfoWithRetry(
+                $footprint['clientIP'] ?? self::getUserIP()
+            );
+            $footprint = array_merge($footprint, $geo);
+            $network = [
+                'ip' => $footprint['query'] ?? $footprint['clientIP'] ?? self::getUserIP(),
+                'isp' => $footprint['clientXIsp'] ?? $footprint['isp'] ?? null,
+                'city' => $footprint['clientXCity'] ?? $footprint['city'] ?? null,
+                'country' => $footprint['clientXCountry'] ?? $footprint['country'] ?? null,
+                'countryCode' => $footprint['clientXCountryCode'] ?? $footprint['countryCode'] ?? null,
+                'proxy' => (bool) ($footprint['clientXProxy'] ?? $footprint['proxy'] ?? false),
+                'hosting' => (bool) ($footprint['hosting'] ?? false),
+                'key' => $footprint['clientXNetkey'] ?? $footprint['clientNetkey'] ?? null,
+                'hash' => $footprint['clientXHash'] ?? $footprint['clientHash'] ?? null,
+                'deviceKey' => $footprint['clientXDevicekey'] ?? $footprint['clientDevicekey'] ?? null,
+                'fingerprint' => $footprint['clientXFingerprint'] ?? $footprint['clientFingerprint'] ?? null,
+            ];
+
+            header('Cache-Control: private, max-age=3600, stale-while-revalidate=3600');
+            echo json_encode($network, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            exit;
+        })->header([
+            'json',
+            'Cache-Control' => 'private, max-age=3600, stale-while-revalidate=3600',
+        ])->name("phjs-network-info")->allow();
 
         self::get("/manifest.json", function ($data) {
             if (self::$manifest_config !== null) {
@@ -5477,6 +6089,7 @@ class PHRO
                     echo "<h1>404 Not Found</h1>";
                 }
             }
+            self::finalizeCachePolicy();
             return;
         }
 
@@ -5510,6 +6123,7 @@ class PHRO
                     // Fallback to PhroGuard::block if no custom error_handler is provided
                     PhroGuard::block($e->getMessage(), $e->getCode(), $e->getFile() . ":" . $e->getLine());
                 }
+                self::finalizeCachePolicy();
                 return; // Stop processing immediately
             }
 
@@ -5519,13 +6133,30 @@ class PHRO
 
                 set_exception_handler(function (\Throwable $e) use ($error_handler) {
                     if ($e instanceof PhroSecurityException) {
+                        $securityCode = $e->getCode() ?: 403;
                         if (is_callable($error_handler)) {
-                            $error_handler($e->getCode(), $e->getMessage(), $e->getFile() . ":" . $e->getLine());
+                            $error_handler($securityCode, $e->getMessage(), $e->getFile() . ":" . $e->getLine());
                         } else {
-                            PhroGuard::block($e->getMessage(), $e->getCode());
+                            PhroGuard::block($e->getMessage(), $securityCode);
                         }
                         exit;
                     }
+
+                    error_log(sprintf(
+                        'Unhandled %s: %s in %s:%d',
+                        $e::class,
+                        $e->getMessage(),
+                        $e->getFile(),
+                        $e->getLine()
+                    ));
+                    if (is_callable($error_handler)) {
+                        $error_handler(500, $e->getMessage(), $e->getFile() . ":" . $e->getLine());
+                    } else {
+                        http_response_code(500);
+                        echo '<h1>500 Internal Server Error</h1>';
+                    }
+                    self::finalizeCachePolicy();
+                    exit;
                 });
             }
 
@@ -5838,6 +6469,76 @@ class PHRO
                 }
             }
         }
+
+        self::finalizeCachePolicy($matched_route['headers'] ?? []);
+    }
+
+    /**
+     * Applies one final cache policy after sessions, middleware and callbacks.
+     * Error responses are never cached; successful routes keep their explicit policy.
+     */
+    private static function finalizeCachePolicy(array $route_headers = []): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+
+        $status = http_response_code();
+        if ($status >= 400) {
+            header_remove('Cache-Control');
+            header_remove('Pragma');
+            header_remove('Expires');
+            header('Cache-Control: no-store, private, max-age=0, must-revalidate', true);
+            header('Pragma: no-cache', true);
+            header('Expires: 0', true);
+            return;
+        }
+
+        $cache_policy = null;
+        foreach ($route_headers as $name => $value) {
+            if (is_string($name) && strtolower($name) === 'cache-control') {
+                $cache_policy = (string) $value;
+                break;
+            }
+        }
+
+        if ($cache_policy !== null && $cache_policy !== '') {
+            header_remove('Cache-Control');
+            header('Cache-Control: ' . $cache_policy, true);
+            if (stripos($cache_policy, 'no-cache') === false && stripos($cache_policy, 'no-store') === false) {
+                header_remove('Pragma');
+                header_remove('Expires');
+            }
+        }
+    }
+
+    /**
+     * Matches strong/weak validators and compression variants emitted by
+     * Nginx or a CDN for the same source representation.
+     */
+    private static function requestEtagMatches(string $etag): bool
+    {
+        $header = trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));
+        if ($header === '') {
+            return false;
+        }
+
+        $normalize = static function (string $value): string {
+            $value = trim($value);
+            if (str_starts_with($value, 'W/')) {
+                $value = substr($value, 2);
+            }
+            return preg_replace('/-(?:gzip|br)"$/i', '"', $value) ?? $value;
+        };
+        $expected = $normalize($etag);
+
+        foreach (explode(',', $header) as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '*' || hash_equals($expected, $normalize($candidate))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -5954,7 +6655,9 @@ class PHRO
             } else {
                 http_response_code(500);
                 echo "<h1>500 Internal Server Error</h1>";
-                echo "<p>Something went wrong: " . htmlspecialchars($message) . "</p>";
+                if (class_exists('PHDE', false) && PHDE::isDebug()) {
+                    echo "<p>Something went wrong: " . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . "</p>";
+                }
                 // debugging এর জন্য চাইলে ফাইল-লাইন দেখাতে পারো, কিন্তু production এ না
             }
         }

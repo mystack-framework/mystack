@@ -22,11 +22,22 @@ class PHSE {
     public static function start() {
         if (session_status() === PHP_SESSION_NONE) {
             // বেসিক সিকিউরিটি কনফিগারেশন (যদি php.ini তে সেট না থাকে)
-            if (ini_get('session.use_only_cookies') === '0') {
-                ini_set('session.use_only_cookies', '1');
+            ini_set('session.use_only_cookies', '1');
+            ini_set('session.use_strict_mode', '1');
+            $params = session_get_cookie_params();
+            $secure = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+                || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443;
+            session_set_cookie_params([
+                'lifetime' => (int) ($params['lifetime'] ?? 0),
+                'path' => (string) ($params['path'] ?? '/'),
+                'domain' => (string) ($params['domain'] ?? ''),
+                'secure' => $secure || (bool) ($params['secure'] ?? false),
+                'httponly' => true,
+                'samesite' => (string) ($params['samesite'] ?? 'Lax') ?: 'Lax',
+            ]);
+            if (!session_start()) {
+                throw new \RuntimeException('Unable to start the PHP session.');
             }
-            
-            session_start();
         }
     }
 

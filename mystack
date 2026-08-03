@@ -7,24 +7,27 @@
 
 define('ROOT_DIR', __DIR__);
 
-// Load library to utilize DIR class
+// Read the command before bootstrapping. Framework audits and smoke tests need
+// every library class; all other CLI commands stay lightweight and fast.
+$bootstrapArgs = $argv;
+array_shift($bootstrapArgs);
+$bootstrapCommand = $bootstrapArgs[0] ?? null;
+$needsFrameworkRuntime = in_array($bootstrapCommand, ['audit', 'smoke'], true);
+
 $libraryPath = ROOT_DIR . '/library/library.php';
-if (file_exists($libraryPath)) {
+if ($needsFrameworkRuntime && file_exists($libraryPath)) {
     require_once $libraryPath;
     if (class_exists('DIR') && method_exists('DIR', 'initialize')) {
         DIR::initialize(['rootDir' => ROOT_DIR]);
     }
-} else {
+} elseif ($needsFrameworkRuntime) {
     echo "\033[31m[!] Error: library/library.php not found. Are you in the project root?\033[0m\n";
     exit(1);
 }
 
 // Ensure necessary core directories exist
-$appDir = class_exists('DIR') ? DIR::path('app') : ROOT_DIR . '/app';
-$componentDir = class_exists('DIR') ? DIR::path('component') : ROOT_DIR . '/component';
-
-if (!is_dir($appDir)) mkdir($appDir, 0777, true);
-if (!is_dir($componentDir)) mkdir($componentDir, 0777, true);
+$appDir = ROOT_DIR . '/app';
+$componentDir = ROOT_DIR . '/component';
 
 // Utility functions for CLI output
 function printColor($msg, $colorCode) { echo "\033[{$colorCode}m{$msg}\033[0m"; }
@@ -32,6 +35,750 @@ function info($msg) { printColor("[INFO] ", "1;36"); echo "$msg\n"; }
 function success($msg) { printColor("[SUCCESS] ", "1;32"); echo "$msg\n"; }
 function error($msg) { printColor("[ERROR] ", "1;31"); echo "$msg\n"; exit(1); }
 function warning($msg) { printColor("[WARNING] ", "1;33"); echo "$msg\n"; }
+
+final class MyStackBrain {
+    private const COMMANDS = [
+        'make:controller',
+        'make:model',
+        'make:middleware',
+        'make:component',
+        'make:view',
+        'get:started',
+        'serve',
+        'cache:clear',
+        'doctor',
+        'audit',
+        'smoke',
+        'help',
+    ];
+
+    public static function analyze(string $root, string $appDir, string $componentDir): array {
+        $files = self::phpFiles([$appDir, $componentDir, $root . '/index.php']);
+        $classes = [];
+        $classMethods = [];
+        $routes = [];
+        $routeHandlers = [];
+        $routeNames = [];
+        $imports = [];
+        $views = [];
+        $issues = [];
+        $stats = [
+            'files' => count($files),
+            'lines' => 0,
+            'bytes' => 0,
+            'classes' => 0,
+            'functions' => 0,
+            'routes' => 0,
+            'imports' => 0,
+            'views' => 0,
+            'raw_includes' => 0,
+            'buffered_selects' => 0,
+        ];
+
+        foreach ($files as $file) {
+            $content = file_get_contents($file);
+            if ($content === false) {
+                $issues[] = self::issue('warning', 'read', self::relative($root, $file), 'File could not be read.');
+                continue;
+            }
+
+            $relative = self::relative($root, $file);
+            $stats['bytes'] += strlen($content);
+            $stats['lines'] += substr_count($content, "\n") + 1;
+
+            $tokens = token_get_all($content);
+            $tokenCount = count($tokens);
+            $fileClasses = [];
+            $fileFunctions = [];
+            for ($index = 0; $index < $tokenCount; $index++) {
+                $token = $tokens[$index];
+                if (!is_array($token)) continue;
+
+                if ($token[0] === T_CLASS) {
+                    $previous = self::previousMeaningfulToken($tokens, $index);
+                    if (is_array($previous) && $previous[0] === T_DOUBLE_COLON) continue;
+                    $name = self::nextTokenText($tokens, $index, T_STRING);
+                    if ($name !== null) {
+                        $classes[$name][] = $relative;
+                        $fileClasses[] = $name;
+                        $stats['classes']++;
+                    }
+                } elseif ($token[0] === T_FUNCTION) {
+                    $functionName = self::nextFunctionName($tokens, $index);
+                    if ($functionName !== null) {
+                        $fileFunctions[] = $functionName;
+                        $stats['functions']++;
+                    }
+                } elseif (in_array($token[0], [T_REQUIRE, T_REQUIRE_ONCE, T_INCLUDE, T_INCLUDE_ONCE], true)) {
+                    if (str_starts_with($relative, '/app/') || str_starts_with($relative, '/component/')) {
+                        $stats['raw_includes']++;
+                        $issues[] = self::issue(
+                            'advice',
+                            'architecture',
+                            $relative,
+                            "Use import('app:...') or import('component:...') instead of require/include."
+                        );
+                    }
+                }
+            }
+            foreach ($fileClasses as $fileClass) {
+                $classMethods[$fileClass] = array_values(array_unique(array_merge(
+                    $classMethods[$fileClass] ?? [],
+                    $fileFunctions
+                )));
+            }
+
+            preg_match_all(
+                '/\bimport\s*\((.*?)\)\s*;/is',
+                $content,
+                $importCalls,
+                PREG_SET_ORDER
+            );
+            foreach ($importCalls as $call) {
+                preg_match_all(
+                    '/([\'"])(app|component):([^\'"]+)\1/i',
+                    $call[1],
+                    $importMatches,
+                    PREG_SET_ORDER
+                );
+                foreach ($importMatches as $match) {
+                    $imports[] = [
+                        'type' => strtolower($match[2]),
+                        'target' => $match[3],
+                        'file' => $relative,
+                    ];
+                }
+            }
+
+            preg_match_all(
+                '/PHRO::(get|post|put|delete|patch|any)\s*\(\s*([\'"])(.*?)\2/is',
+                $content,
+                $routeMatches,
+                PREG_SET_ORDER
+            );
+            foreach ($routeMatches as $match) {
+                $routes[] = [
+                    'method' => strtoupper($match[1]),
+                    'path' => $match[3],
+                    'file' => $relative,
+                ];
+            }
+            preg_match_all(
+                '/PHRO::(get|post|put|delete|patch|any)\s*\(\s*([\'"])(.*?)\2\s*,\s*\[\s*([a-zA-Z_][a-zA-Z0-9_]*)::class\s*,\s*([\'"])([a-zA-Z_][a-zA-Z0-9_]*)\5\s*\]/is',
+                $content,
+                $handlerMatches,
+                PREG_SET_ORDER
+            );
+            foreach ($handlerMatches as $match) {
+                $routeHandlers[] = [
+                    'method' => strtoupper($match[1]),
+                    'path' => $match[3],
+                    'class' => $match[4],
+                    'action' => $match[6],
+                    'file' => $relative,
+                ];
+            }
+            preg_match_all('/->name\s*\(\s*([\'"])(.*?)\1\s*\)/is', $content, $nameMatches, PREG_SET_ORDER);
+            foreach ($nameMatches as $match) {
+                $routeNames[$match[2]][] = $relative;
+            }
+
+            preg_match_all(
+                '/PHJC::view\s*\(\s*([\'"])([^\'"]+)\1/is',
+                $content,
+                $viewMatches,
+                PREG_SET_ORDER
+            );
+            foreach ($viewMatches as $match) {
+                $views[] = ['target' => $match[2], 'file' => $relative];
+            }
+            preg_match_all(
+                '/PHRO::add\s*\(\s*([\'"])(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\1\s*,\s*([\'"])(.*?)\3/is',
+                $content,
+                $addRouteMatches,
+                PREG_SET_ORDER
+            );
+            foreach ($addRouteMatches as $match) {
+                $routes[] = [
+                    'method' => strtoupper($match[2]),
+                    'path' => $match[4],
+                    'file' => $relative,
+                ];
+            }
+
+            $bufferedMatches = preg_match_all(
+                '/PHDB::query\s*\(\s*([\'"])\s*SELECT\s+\*/i',
+                $content
+            );
+            $stats['buffered_selects'] += $bufferedMatches === false ? 0 : $bufferedMatches;
+
+            if (strlen($content) > 512 * 1024 && !str_starts_with($relative, '/library/')) {
+                $issues[] = self::issue(
+                    'advice',
+                    'performance',
+                    $relative,
+                    'Large application file detected; review responsibilities and generated payload size.'
+                );
+            }
+        }
+
+        foreach ($classes as $name => $locations) {
+            if (count($locations) > 1) {
+                $issues[] = self::issue(
+                    'critical',
+                    'class-collision',
+                    implode(', ', $locations),
+                    "Class {$name} is declared more than once."
+                );
+            }
+        }
+
+        $availableTargets = ['app' => [], 'component' => []];
+        foreach ($files as $file) {
+            $relative = self::relative($root, $file);
+            if (preg_match('#^/(app|component)/([^/]+)\.php$#i', $relative, $match)) {
+                $availableTargets[strtolower($match[1])][strtolower($match[2])] = $relative;
+            }
+        }
+        foreach ($imports as $import) {
+            $target = strtolower(pathinfo(str_replace('\\', '/', $import['target']), PATHINFO_FILENAME));
+            if (!isset($availableTargets[$import['type']][$target])) {
+                $issues[] = self::issue(
+                    'critical',
+                    'missing-import',
+                    $import['file'],
+                    "Missing {$import['type']} import target: {$import['target']}"
+                );
+            }
+        }
+        foreach ($views as $view) {
+            $target = strtolower(pathinfo(str_replace('\\', '/', $view['target']), PATHINFO_FILENAME));
+            if (!isset($availableTargets['component'][$target])) {
+                $issues[] = self::issue(
+                    'critical',
+                    'missing-view',
+                    $view['file'],
+                    "Missing component view target: {$view['target']}"
+                );
+            }
+        }
+
+        foreach ($routeNames as $routeName => $locations) {
+            if ($routeName !== '' && count($locations) > 1) {
+                $issues[] = self::issue(
+                    'critical',
+                    'route-name-collision',
+                    implode(', ', array_unique($locations)),
+                    "Duplicate route name: {$routeName}"
+                );
+            }
+        }
+
+        foreach ($routeHandlers as $handler) {
+            if (!isset($classes[$handler['class']])) {
+                $issues[] = self::issue(
+                    'critical',
+                    'missing-controller',
+                    $handler['file'],
+                    "{$handler['method']} {$handler['path']} references missing class {$handler['class']}."
+                );
+                continue;
+            }
+            if (!in_array($handler['action'], $classMethods[$handler['class']] ?? [], true)) {
+                $issues[] = self::issue(
+                    'critical',
+                    'missing-action',
+                    $handler['file'],
+                    "{$handler['method']} {$handler['path']} references missing {$handler['class']}::{$handler['action']}()."
+                );
+            }
+        }
+
+        $routeIndex = [];
+        foreach ($routes as $route) {
+            $key = $route['method'] . ' ' . $route['path'];
+            $routeIndex[$key][] = $route['file'];
+        }
+        foreach ($routeIndex as $route => $locations) {
+            if (count($locations) > 1) {
+                $issues[] = self::issue(
+                    'critical',
+                    'route-collision',
+                    implode(', ', array_unique($locations)),
+                    "Duplicate route: {$route}"
+                );
+            }
+        }
+
+        $indexContent = is_file($root . '/index.php')
+            ? (string) file_get_contents($root . '/index.php')
+            : '';
+        if ($indexContent === '') {
+            $issues[] = self::issue('critical', 'bootstrap', '/index.php', 'Application entry point is missing or empty.');
+        } else {
+            if (!str_contains($indexContent, 'PHRO::guard(')) {
+                $issues[] = self::issue('advice', 'security', '/index.php', 'PHRO::guard() is not enabled.');
+            }
+            if (preg_match('/PHDE::debug\s*\(\s*true\s*\)/i', $indexContent)) {
+                $issues[] = self::issue(
+                    'info',
+                    'environment',
+                    '/index.php',
+                    'Debug mode is enabled; keep it disabled on public production deployments.'
+                );
+            }
+        }
+
+        if ($stats['buffered_selects'] > 0) {
+            $issues[] = self::issue(
+                'info',
+                'performance',
+                '/app',
+                "{$stats['buffered_selects']} buffered SELECT * call(s) found; use PHDB::fast() for large result processing."
+            );
+        }
+
+        $stats['routes'] = count($routes);
+        $stats['imports'] = count($imports);
+        $stats['views'] = count($views);
+        $critical = count(array_filter($issues, static fn(array $issue): bool => $issue['severity'] === 'critical'));
+        $advice = count(array_filter($issues, static fn(array $issue): bool => $issue['severity'] === 'advice'));
+        $infoCount = count(array_filter($issues, static fn(array $issue): bool => $issue['severity'] === 'info'));
+
+        return [
+            'status' => $critical === 0,
+            'stats' => $stats,
+            'classes' => $classes,
+            'class_methods' => $classMethods,
+            'routes' => $routes,
+            'route_handlers' => $routeHandlers,
+            'route_names' => $routeNames,
+            'imports' => $imports,
+            'views' => $views,
+            'issues' => $issues,
+            'counts' => ['critical' => $critical, 'advice' => $advice, 'info' => $infoCount],
+            'fingerprint' => hash('sha256', json_encode([$stats, $classes, $routeIndex], JSON_UNESCAPED_SLASHES)),
+        ];
+    }
+
+    public static function folderMap(): array {
+        return [
+            '.' => ['writable' => true, 'mode' => 0755],
+            'app' => ['writable' => true, 'mode' => 0755],
+            'component' => ['writable' => true, 'mode' => 0755],
+            'library' => ['writable' => false, 'mode' => 0755],
+            'src' => ['writable' => false, 'mode' => 0755],
+            'src/audio' => ['writable' => true, 'mode' => 0755],
+            'src/cache' => ['writable' => true, 'mode' => 0775],
+            'src/cache/css' => ['writable' => true, 'mode' => 0775],
+            'src/cache/js' => ['writable' => true, 'mode' => 0775],
+            'src/cache/php' => ['writable' => true, 'mode' => 0775],
+            'src/css' => ['writable' => true, 'mode' => 0755],
+            'src/doc' => ['writable' => true, 'mode' => 0755],
+            'src/element' => ['writable' => true, 'mode' => 0755],
+            'src/files' => ['writable' => true, 'mode' => 0755],
+            'src/font' => ['writable' => true, 'mode' => 0755],
+            'src/img' => ['writable' => true, 'mode' => 0755],
+            'src/js' => ['writable' => true, 'mode' => 0755],
+            'src/scss' => ['writable' => true, 'mode' => 0755],
+            'src/upload' => ['writable' => true, 'mode' => 0775],
+            'src/video' => ['writable' => true, 'mode' => 0755],
+            '.mystack' => ['writable' => true, 'mode' => 0775],
+        ];
+    }
+
+    public static function ensureFolderMap(string $root, bool $repair = true): array {
+        $root = rtrim(str_replace('\\', '/', $root), '/');
+        $entries = [];
+        $created = 0;
+        $permissionsFixed = 0;
+        $failed = 0;
+
+        foreach (self::folderMap() as $relative => $config) {
+            $path = $root . '/' . $relative;
+            $entry = [
+                'path' => $relative,
+                'status' => 'ready',
+                'created' => false,
+                'permission_fixed' => false,
+                'writable' => (bool) $config['writable'],
+                'message' => '',
+            ];
+
+            if (is_link($path)) {
+                $entry['status'] = 'failed';
+                $entry['message'] = 'Symbolic directory links are not auto-repaired.';
+                $failed++;
+                $entries[] = $entry;
+                continue;
+            }
+            if (file_exists($path) && !is_dir($path)) {
+                $entry['status'] = 'failed';
+                $entry['message'] = 'A file exists where a framework directory is required.';
+                $failed++;
+                $entries[] = $entry;
+                continue;
+            }
+
+            if (!is_dir($path)) {
+                if (!$repair) {
+                    $entry['status'] = 'missing';
+                    $entry['message'] = 'Directory is missing.';
+                    $failed++;
+                    $entries[] = $entry;
+                    continue;
+                }
+                if (!@mkdir($path, $config['mode'], true) && !is_dir($path)) {
+                    $entry['status'] = 'failed';
+                    $entry['message'] = 'Directory could not be created.';
+                    $failed++;
+                    $entries[] = $entry;
+                    continue;
+                }
+                @chmod($path, $config['mode']);
+                $entry['created'] = true;
+                $created++;
+            }
+
+            clearstatcache(true, $path);
+            $permissionProblem = !self::directoryReadable($path)
+                || ($config['writable'] && !self::directoryWritable($path));
+            if ($permissionProblem && $repair) {
+                self::repairDirectoryPermission($path, $config['mode']);
+                clearstatcache(true, $path);
+                $permissionProblem = !self::directoryReadable($path)
+                    || ($config['writable'] && !self::directoryWritable($path));
+                if (!$permissionProblem) {
+                    $entry['permission_fixed'] = true;
+                    $permissionsFixed++;
+                }
+            }
+
+            if ($permissionProblem) {
+                $entry['status'] = 'failed';
+                $entry['message'] = $config['writable']
+                    ? 'Directory must be readable and writable.'
+                    : 'Directory must be readable.';
+                $failed++;
+            } elseif ($entry['created']) {
+                $entry['status'] = 'created';
+                $entry['message'] = 'Missing directory created automatically.';
+            } elseif ($entry['permission_fixed']) {
+                $entry['status'] = 'permission-fixed';
+                $entry['message'] = 'Directory permission repaired automatically.';
+            }
+            $entries[] = $entry;
+        }
+
+        $guardPath = $root . '/.mystack/.htaccess';
+        $guardEntry = [
+            'path' => '.mystack/.htaccess',
+            'status' => 'ready',
+            'created' => false,
+            'permission_fixed' => false,
+            'writable' => false,
+            'message' => '',
+        ];
+        $guardRules = "<IfModule mod_authz_core.c>\n"
+            . "    Require all denied\n"
+            . "</IfModule>\n"
+            . "<IfModule !mod_authz_core.c>\n"
+            . "    Order allow,deny\n"
+            . "    Deny from all\n"
+            . "</IfModule>\n"
+            . "Options -Indexes\n";
+        $guardProtected = is_file($guardPath)
+            && (($guardSource = @file_get_contents($guardPath)) !== false)
+            && (str_contains($guardSource, 'Require all denied') || str_contains($guardSource, 'Deny from all'));
+        if (!$guardProtected && $repair) {
+            $guardProtected = @file_put_contents($guardPath, $guardRules, LOCK_EX) !== false;
+            if ($guardProtected) {
+                @chmod($guardPath, 0640);
+                $guardEntry['status'] = 'created';
+                $guardEntry['created'] = true;
+                $guardEntry['message'] = 'Private storage access guard created automatically.';
+                $created++;
+            }
+        }
+        if (!$guardProtected) {
+            $guardEntry['status'] = 'failed';
+            $guardEntry['message'] = 'Private storage access guard is missing or invalid.';
+            $failed++;
+        }
+        $entries[] = $guardEntry;
+
+        return [
+            'status' => $failed === 0,
+            'total' => count($entries),
+            'ready' => count($entries) - $failed,
+            'created' => $created,
+            'permissions_fixed' => $permissionsFixed,
+            'failed' => $failed,
+            'entries' => $entries,
+        ];
+    }
+
+    public static function testFolderMapEngine(): bool {
+        try {
+            $base = rtrim(str_replace('\\', '/', sys_get_temp_dir()), '/')
+                . '/mystack-folder-map-' . bin2hex(random_bytes(8));
+        } catch (Throwable $exception) {
+            return false;
+        }
+
+        try {
+            $report = self::ensureFolderMap($base, true);
+            return !empty($report['status'])
+                && ($report['created'] ?? 0) >= count(self::folderMap()) - 1
+                && is_dir($base . '/app')
+                && is_dir($base . '/component')
+                && is_dir($base . '/src/cache/css')
+                && is_dir($base . '/src/cache/js')
+                && is_dir($base . '/src/cache/php')
+                && is_file($base . '/.mystack/.htaccess')
+                && str_contains((string) file_get_contents($base . '/.mystack/.htaccess'), 'Require all denied');
+        } finally {
+            self::removeFolderMapSandbox($base);
+        }
+    }
+
+    private static function directoryWritable(string $path): bool {
+        if (is_writable($path)) return true;
+        try {
+            $probe = rtrim($path, '/\\') . '/.mystack-permission-' . bin2hex(random_bytes(8)) . '.tmp';
+        } catch (Throwable $exception) {
+            return false;
+        }
+        $handle = @fopen($probe, 'x');
+        if (!is_resource($handle)) return false;
+        fclose($handle);
+        @unlink($probe);
+        return !file_exists($probe);
+    }
+
+    private static function directoryReadable(string $path): bool {
+        if (is_readable($path)) return true;
+        $handle = @opendir($path);
+        if (!is_resource($handle)) return false;
+        closedir($handle);
+        return true;
+    }
+
+    private static function repairDirectoryPermission(string $path, int $mode): void {
+        @chmod($path, $mode);
+        if (PHP_OS_FAMILY !== 'Windows' || self::directoryWritable($path)) return;
+
+        $username = trim((string) getenv('USERNAME'));
+        $domain = trim((string) getenv('USERDOMAIN'));
+        if ($username === '' || !preg_match('/^[a-zA-Z0-9_.-]+$/', $username)) return;
+        if ($domain !== '' && !preg_match('/^[a-zA-Z0-9_.-]+$/', $domain)) return;
+        if (!function_exists('exec') || str_contains((string) ini_get('disable_functions'), 'exec')) return;
+
+        $identity = $domain !== '' ? $domain . '\\' . $username : $username;
+        $command = 'icacls ' . escapeshellarg($path)
+            . ' /grant ' . escapeshellarg($identity . ':(OI)(CI)M')
+            . ' /T /C /Q 2>&1';
+        $output = [];
+        $exitCode = 1;
+        @exec($command, $output, $exitCode);
+    }
+
+    private static function removeFolderMapSandbox(string $path): void {
+        $temp = rtrim(str_replace('\\', '/', sys_get_temp_dir()), '/');
+        $normalized = rtrim(str_replace('\\', '/', $path), '/');
+        if (!str_starts_with($normalized, $temp . '/mystack-folder-map-') || !is_dir($normalized)) return;
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($normalized, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($iterator as $item) {
+            $itemPath = $item->getPathname();
+            if ($item->isLink() || $item->isFile()) {
+                @unlink($itemPath);
+            } elseif ($item->isDir()) {
+                @rmdir($itemPath);
+            }
+        }
+        @rmdir($normalized);
+    }
+
+    public static function renderFolderMap(array $report): void {
+        printColor(" Framework Folder Map \n", "1;46;97");
+        echo "  Ready: {$report['ready']}/{$report['total']} | Created: {$report['created']}"
+            . " | Permissions fixed: {$report['permissions_fixed']} | Failed: {$report['failed']}\n";
+        foreach ($report['entries'] as $entry) {
+            if ($entry['status'] === 'ready') continue;
+            $color = $entry['status'] === 'failed' || $entry['status'] === 'missing' ? '1;31' : '1;32';
+            printColor('[' . strtoupper($entry['status']) . '] ', $color);
+            echo $entry['path'] . ($entry['message'] !== '' ? ' - ' . $entry['message'] : '') . "\n";
+        }
+        echo "\n";
+    }
+
+    public static function render(array $report): void {
+        $stats = $report['stats'];
+        $counts = $report['counts'];
+        echo "\n";
+        printColor(" MyStack Intelligence \n", "1;45;97");
+        echo "  Project files: {$stats['files']} | Lines: {$stats['lines']} | Size: "
+            . self::formatBytes($stats['bytes']) . "\n";
+        echo "  Classes: {$stats['classes']} | Functions: {$stats['functions']} | Routes: "
+            . "{$stats['routes']} | Imports: {$stats['imports']} | Views: {$stats['views']}\n";
+        echo "  Critical: {$counts['critical']} | Advice: {$counts['advice']} | Info: {$counts['info']}\n";
+
+        if ($report['issues'] === []) {
+            printColor("[HEALTHY] ", "1;32");
+            echo "No architectural conflict or contextual risk detected.\n";
+        } else {
+            foreach (array_slice($report['issues'], 0, 20) as $issue) {
+                $color = $issue['severity'] === 'critical'
+                    ? '1;31'
+                    : ($issue['severity'] === 'advice' ? '1;33' : '1;36');
+                printColor('[' . strtoupper($issue['severity']) . '] ', $color);
+                echo "{$issue['message']} ({$issue['location']})\n";
+            }
+            if (count($report['issues']) > 20) {
+                echo '  ... ' . (count($report['issues']) - 20) . " more insight(s)\n";
+            }
+        }
+        echo "  Project fingerprint: " . substr($report['fingerprint'], 0, 16) . "\n\n";
+    }
+
+    public static function smartName(string $name): string {
+        $name = trim($name);
+        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $name) && !str_contains($name, '_')) {
+            $clean = ucfirst($name);
+        } else {
+            $parts = preg_split('/[^a-zA-Z0-9]+/', $name) ?: [];
+            $clean = implode('', array_map(
+                static fn(string $part): string => ucfirst(strtolower($part)),
+                array_filter($parts)
+            ));
+        }
+        if ($clean === '' || !preg_match('/^[a-zA-Z_]/', $clean)) {
+            throw new InvalidArgumentException('A valid alphabetic name is required.');
+        }
+        return $clean;
+    }
+
+    public static function tableName(string $className): string {
+        $base = preg_replace('/Model$/', '', $className);
+        $snake = strtolower((string) preg_replace('/(?<!^)[A-Z]/', '_$0', $base));
+        if (str_ends_with($snake, 'y') && !preg_match('/[aeiou]y$/', $snake)) {
+            return substr($snake, 0, -1) . 'ies';
+        }
+        if (preg_match('/(s|x|z|ch|sh)$/', $snake)) return $snake . 'es';
+        return $snake . 's';
+    }
+
+    public static function suggestCommand(string $command): ?string {
+        $command = strtolower(trim($command));
+        $best = null;
+        $bestDistance = PHP_INT_MAX;
+        foreach (self::COMMANDS as $candidate) {
+            $distance = levenshtein($command, $candidate);
+            if ($distance < $bestDistance) {
+                $bestDistance = $distance;
+                $best = $candidate;
+            }
+        }
+        return $bestDistance <= max(2, (int) floor(strlen($command) * 0.35)) ? $best : null;
+    }
+
+    private static function phpFiles(array $targets): array {
+        $files = [];
+        foreach ($targets as $target) {
+            if (is_file($target) && strtolower(pathinfo($target, PATHINFO_EXTENSION)) === 'php') {
+                $files[] = realpath($target) ?: $target;
+                continue;
+            }
+            if (!is_dir($target)) continue;
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($target, FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if ($file->isFile() && strtolower($file->getExtension()) === 'php') {
+                    $files[] = $file->getPathname();
+                }
+            }
+        }
+        sort($files, SORT_NATURAL | SORT_FLAG_CASE);
+        return array_values(array_unique($files));
+    }
+
+    private static function previousMeaningfulToken(array $tokens, int $index): mixed {
+        for ($cursor = $index - 1; $cursor >= 0; $cursor--) {
+            $token = $tokens[$cursor];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) continue;
+            return $token;
+        }
+        return null;
+    }
+
+    private static function nextTokenText(array $tokens, int $index, int $wanted): ?string {
+        for ($cursor = $index + 1, $count = count($tokens); $cursor < $count; $cursor++) {
+            $token = $tokens[$cursor];
+            if (is_array($token) && $token[0] === $wanted) return $token[1];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) continue;
+            if ($token === '&') continue;
+            return null;
+        }
+        return null;
+    }
+
+    private static function nextFunctionName(array $tokens, int $index): ?string {
+        for ($cursor = $index + 1, $count = count($tokens); $cursor < $count; $cursor++) {
+            $token = $tokens[$cursor];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) continue;
+            if ($token === '&') continue;
+            if (is_array($token) && preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $token[1])) {
+                return $token[1];
+            }
+            return null;
+        }
+        return null;
+    }
+
+    private static function issue(string $severity, string $type, string $location, string $message): array {
+        return compact('severity', 'type', 'location', 'message');
+    }
+
+    private static function relative(string $root, string $path): string {
+        $root = rtrim(str_replace('\\', '/', $root), '/');
+        $path = str_replace('\\', '/', $path);
+        return '/' . ltrim(str_starts_with(strtolower($path), strtolower($root))
+            ? substr($path, strlen($root))
+            : $path, '/');
+    }
+
+    private static function formatBytes(int $bytes): string {
+        if ($bytes < 1024) return $bytes . ' B';
+        if ($bytes < 1024 * 1024) return round($bytes / 1024, 1) . ' KB';
+        return round($bytes / 1024 / 1024, 2) . ' MB';
+    }
+}
+
+$folderRepairCommands = [
+    'make:controller',
+    'make:model',
+    'make:middleware',
+    'make:component',
+    'make:view',
+    'get:started',
+    'serve',
+    'cache:clear',
+    'doctor',
+];
+$folderMapReport = null;
+if (in_array($bootstrapCommand, $folderRepairCommands, true)) {
+    $folderMapReport = MyStackBrain::ensureFolderMap(ROOT_DIR, true);
+    if (empty($folderMapReport['status']) && $bootstrapCommand !== 'doctor') {
+        error('Framework folder map could not be repaired. Run: php mystack doctor');
+    }
+} elseif (in_array($bootstrapCommand, ['audit', 'smoke'], true)) {
+    $folderMapReport = MyStackBrain::ensureFolderMap(ROOT_DIR, false);
+}
 
 function generateFile($path, $content, $type) {
     if (file_exists($path)) {
@@ -43,7 +790,7 @@ function generateFile($path, $content, $type) {
 
 function showHelp() {
     echo "\n";
-    printColor(" 🚀 MyStack CLI Tool (v1.1.0) \n", "1;44;97");
+    printColor(" MyStack Intelligent CLI (v2.0.0) \n", "1;44;97");
     echo "\n";
     printColor(" Usage:\n", "1;33");
     echo "  php mystack [command] [arguments]\n\n";
@@ -62,15 +809,21 @@ function showHelp() {
 ";
     echo "  serve [port]                Start the PHP local development server (default: 8000).\n";
     echo "  cache:clear                 Clear application cache.\n";
-    echo "  doctor                      Scan, diagnose and autofix code issues in app and component.\n";
+    echo "  doctor                      Scan code; auto-heal framework folders and permissions.\n";
+    echo "  doctor --fix                Apply safe formatting and permission fixes.\n";
+    echo "  audit                       Run the read-only framework production audit.\n";
+    echo "  smoke                       Run the full read-only framework smoke test.\n";
     echo "  help                        Show this beautiful help screen.\n\n";
+    echo "  Intelligence is automatic: dependency graph, route/class collision reasoning,\n";
+    echo "  contextual advice, generator preflight and typo suggestions need no new command.\n\n";
     
     printColor(" Example:\n", "1;37");
     echo "  php mystack make:controller User\n";
     echo "  php mystack make:view dashboard\n\n";
 }
 
-function runDoctor($dirPaths) {
+function runDoctorLegacyUnsafe($dirPaths) {
+    throw new LogicException('Legacy mutating doctor is disabled; use runDoctor() instead.');
     echo "\n";
     printColor(" 🩺 MyStack Doctor - Highly Advanced Code Diagnosis & Repair \n", "1;42;97");
     echo "\n";
@@ -200,6 +953,1042 @@ function runDoctor($dirPaths) {
     echo "\n";
 }
 
+function runDoctor(array $dirPaths, bool $applyFixes = false): bool {
+    echo "\n";
+    printColor(
+        " MyStack Doctor - " . ($applyFixes ? "safe fix mode" : "read-only code scan + folder self-heal") . " \n",
+        "1;42;97"
+    );
+    echo "\n";
+
+    $totalScanned = 0;
+    $totalIssues = 0;
+    $totalFixed = 0;
+    $syntaxErrors = 0;
+
+    foreach ($dirPaths as $dirPath) {
+        if (!is_dir($dirPath)) {
+            continue;
+        }
+
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dirPath, FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($files as $file) {
+            if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
+                continue;
+            }
+
+            $totalScanned++;
+            $filePath = $file->getPathname();
+            $relativePath = str_replace(ROOT_DIR, '', $filePath);
+            $content = file_get_contents($filePath);
+            if ($content === false) {
+                $totalIssues++;
+                printColor("[READ ERROR] ", "1;31");
+                echo $relativePath . "\n";
+                continue;
+            }
+
+            $candidate = $content;
+            $safeFixes = [];
+            $diagnostics = [];
+            $bom = pack('H*', 'EFBBBF');
+
+            if (str_starts_with($candidate, $bom)) {
+                $candidate = substr($candidate, strlen($bom));
+                $safeFixes[] = 'Remove UTF-8 BOM';
+            }
+            if (trim($candidate) === '') {
+                $candidate = "<?php\n";
+                $safeFixes[] = 'Initialize empty PHP file';
+            }
+            if (preg_match('/<\?(?!php|=)/i', $candidate)) {
+                $candidate = preg_replace('/<\?(?!php|=)\s*/i', "<?php\n", $candidate);
+                $safeFixes[] = 'Convert short open tags';
+            }
+
+            $normalized = rtrim($candidate) . "\n";
+            if ($normalized !== $candidate) {
+                $candidate = $normalized;
+                $safeFixes[] = 'Normalize trailing newline';
+            }
+
+            $filename = pathinfo($filePath, PATHINFO_FILENAME);
+            $tokens = token_get_all($candidate);
+            $declaredClass = null;
+            for ($tokenIndex = 0, $tokenCount = count($tokens); $tokenIndex < $tokenCount; $tokenIndex++) {
+                if (!is_array($tokens[$tokenIndex]) || $tokens[$tokenIndex][0] !== T_CLASS) {
+                    continue;
+                }
+                for ($nameIndex = $tokenIndex + 1; $nameIndex < $tokenCount; $nameIndex++) {
+                    if (is_array($tokens[$nameIndex]) && $tokens[$nameIndex][0] === T_STRING) {
+                        $declaredClass = $tokens[$nameIndex][1];
+                        break 2;
+                    }
+                    if ($tokens[$nameIndex] === '{') {
+                        break;
+                    }
+                }
+            }
+            if ($declaredClass !== null && $declaredClass !== $filename) {
+                $diagnostics[] = "Class '{$declaredClass}' does not match filename '{$filename}' (manual review required)";
+            }
+
+            $currentPerms = substr(sprintf('%o', fileperms($filePath)), -4);
+            $permissionIssue = DIRECTORY_SEPARATOR !== '\\'
+                && !in_array($currentPerms, ['0644', '0664'], true);
+            if ($permissionIssue) {
+                $safeFixes[] = "Set permissions {$currentPerms} -> 0644";
+            }
+
+            $hasContentFix = $candidate !== $content;
+            if ($hasContentFix || $permissionIssue || $diagnostics) {
+                $totalIssues++;
+                printColor($applyFixes ? '[CHECK] ' : '[ISSUE] ', $applyFixes ? '1;33' : '1;31');
+                echo $relativePath . "\n";
+                foreach (array_merge($safeFixes, $diagnostics) as $message) {
+                    echo "        - {$message}\n";
+                }
+            }
+
+            $fileFixed = false;
+            if ($applyFixes && $hasContentFix) {
+                if (file_put_contents($filePath, $candidate, LOCK_EX) === false) {
+                    printColor("[WRITE ERROR] ", "1;31");
+                    echo $relativePath . "\n";
+                } else {
+                    $fileFixed = true;
+                }
+            }
+            if ($applyFixes && $permissionIssue) {
+                if (chmod($filePath, 0644)) {
+                    $fileFixed = true;
+                } else {
+                    printColor("[PERMISSION ERROR] ", "1;31");
+                    echo $relativePath . "\n";
+                }
+            }
+            if ($fileFixed) {
+                $totalFixed++;
+                printColor("[FIXED] ", "1;32");
+                echo $relativePath . "\n";
+            }
+
+            try {
+                token_get_all($candidate, TOKEN_PARSE);
+            } catch (ParseError $parseError) {
+                $syntaxErrors++;
+                printColor("[SYNTAX ERROR] ", "1;31");
+                echo $relativePath . "\n";
+                echo "               " . $parseError->getMessage() . "\n";
+            }
+        }
+    }
+
+    echo "\n";
+    printColor(" Doctor Report \n", "1;44;97");
+    echo "  Files scanned: {$totalScanned}\n";
+    echo "  Files with issues: {$totalIssues}\n";
+    echo "  Files safely fixed: {$totalFixed}\n";
+    echo "  Syntax errors: {$syntaxErrors}\n\n";
+
+    $folderState = $GLOBALS['folderMapReport']
+        ?? MyStackBrain::ensureFolderMap(ROOT_DIR, true);
+    MyStackBrain::renderFolderMap($folderState);
+
+    $intelligence = MyStackBrain::analyze(ROOT_DIR, $GLOBALS['appDir'], $GLOBALS['componentDir']);
+    MyStackBrain::render($intelligence);
+
+    return $syntaxErrors === 0
+        && ($applyFixes || $totalIssues === 0)
+        && !empty($folderState['status'])
+        && !empty($intelligence['status']);
+}
+
+function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): bool {
+    echo "\n";
+    printColor(" {$reportTitle} \n", "1;44;97");
+    echo "\n";
+
+    $passed = 0;
+    $failed = 0;
+    $warnings = 0;
+    $check = static function (string $label, bool $status, string $details = '') use (&$passed, &$failed): void {
+        if ($status) {
+            $passed++;
+            printColor("[PASS] ", "1;32");
+        } else {
+            $failed++;
+            printColor("[FAIL] ", "1;31");
+        }
+        echo $label . ($details !== '' ? " - {$details}" : '') . "\n";
+    };
+    $warn = static function (string $label, string $details = '') use (&$warnings): void {
+        $warnings++;
+        printColor("[WARN] ", "1;33");
+        echo $label . ($details !== '' ? " - {$details}" : '') . "\n";
+    };
+
+    $check('PHP runtime', version_compare(PHP_VERSION, '8.0.0', '>='), PHP_VERSION);
+
+    foreach (['json', 'openssl', 'PDO', 'pdo_sqlite'] as $extension) {
+        $loaded = $extension === 'PDO' ? class_exists('PDO') : extension_loaded($extension);
+        $check("Required extension: {$extension}", $loaded);
+    }
+    foreach (['curl', 'mysqli', 'mbstring', 'sodium', 'gd', 'imap'] as $extension) {
+        if (!extension_loaded($extension)) {
+            $warn("Optional extension unavailable: {$extension}", 'related features will use a fallback or remain disabled');
+        }
+    }
+
+    $syntaxFiles = glob(ROOT_DIR . '/library/*.php') ?: [];
+    $syntaxFiles[] = ROOT_DIR . '/index.php';
+    $syntaxOk = true;
+    foreach ($syntaxFiles as $file) {
+        try {
+            $source = file_get_contents($file);
+            if ($source === false) throw new RuntimeException('File could not be read.');
+            token_get_all($source, TOKEN_PARSE);
+        } catch (Throwable $syntaxError) {
+            $syntaxOk = false;
+            $warn('Syntax detail', str_replace(ROOT_DIR, '', $file) . ': ' . $syntaxError->getMessage());
+        }
+    }
+    $check('Core PHP syntax', $syntaxOk, count($syntaxFiles) . ' files');
+
+    $requiredClasses = ['DIR', 'PHRO', 'PHDE', 'PHLS', 'PHDB', 'PHFY', 'PHMO', 'PHJS', 'PHUI', 'PHML'];
+    $missingClasses = array_values(array_filter($requiredClasses, static fn($class) => !class_exists($class)));
+    $check('Core loader', $missingClasses === [], $missingClasses ? 'missing: ' . implode(', ', $missingClasses) : count($requiredClasses) . ' critical classes');
+
+    $phmoConfig = PHMO::config();
+    $phmoDirectory = rtrim(str_replace('\\', '/', (string) ($phmoConfig['log_directory'] ?? '')), '/');
+    $phmoExpectedDirectory = rtrim(str_replace('\\', '/', ROOT_DIR . '/.mystack'), '/');
+    $phmoGuard = ROOT_DIR . '/.mystack/.htaccess';
+    $phmoGuardSource = is_file($phmoGuard) ? file_get_contents($phmoGuard) : false;
+    $check(
+        'PHMO direct private log storage',
+        $phmoDirectory === $phmoExpectedDirectory
+            && ($phmoConfig['retention_days'] ?? null) === 90
+            && is_string($phmoGuardSource)
+            && str_contains($phmoGuardSource, 'Require all denied')
+            && !is_dir(ROOT_DIR . '/.mystack/logs'),
+        '.mystack with Apache/LiteSpeed access guard'
+    );
+    $phmoSource = (string) file_get_contents(ROOT_DIR . '/library/PHMO.php');
+    $phdeSource = (string) file_get_contents(ROOT_DIR . '/library/PHDE.php');
+    $phrqSource = (string) file_get_contents(ROOT_DIR . '/library/PHRQ.php');
+    $phmoReport = PHMO::report(gmdate('Y-m-d'), 25);
+    $check(
+        'Debug-only observability UI guards',
+        method_exists('PHMO', 'dashboard')
+            && method_exists('PHMO', 'report')
+            && isset($phmoReport['levels'], $phmoReport['issues'], $phmoReport['records'])
+            && count($phmoReport['records']) <= 25
+            && str_contains($phmoSource, 'class="problem-cards"')
+            && str_contains($phmoSource, ".problem-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))")
+            && str_contains($phmoSource, "@media(max-width:760px){.problem-cards{grid-template-columns:minmax(0,1fr)")
+            && str_contains($phmoSource, ".phmo-prune")
+            && !str_contains($phmoSource, 'random_int(1, 100)')
+            && str_contains($phmoSource, 'if (self::$dashboardRegistered || !self::debugMode()')
+            && str_contains($phdeSource, 'public static function apibar')
+            && str_contains($phdeSource, 'if (!self::isDebug())')
+            && str_contains($phrqSource, "if (!class_exists('PHDE') || !PHDE::isDebug())")
+            && str_contains($phrqSource, 'array_values($data)')
+            && str_contains($phrqSource, 'fetchInFlight')
+            && str_contains($phrqSource, '@media (max-width:900px)')
+            && str_contains($phrqSource, 'X-CSRF-Token')
+            && str_contains($phrqSource, 'ob_get_clean()'),
+        'PHMO dashboard, PHDE API Bar, and PHRQ Live Map'
+    );
+
+    $debugBefore = PHDE::isDebug();
+    PHDE::debug(true);
+    $debugOn = PHDE::isDebug();
+    PHDE::debug(false);
+    $debugOff = !PHDE::isDebug();
+    PHDE::debug($debugBefore);
+    $check('PHDE runtime debug toggle', $debugOn && $debugOff);
+
+    try {
+        $storage = PHLS::checker(false);
+        $check(
+            'PHLS integrity',
+            !empty($storage['status']) && strtolower((string) ($storage['integrity'] ?? '')) === 'ok',
+            (string) ($storage['journal_mode'] ?? 'unknown')
+        );
+    } catch (Throwable $exception) {
+        $check('PHLS integrity', false, $exception->getMessage());
+    }
+
+    $phlsSource = is_file(ROOT_DIR . '/library/PHLS.php')
+        ? file_get_contents(ROOT_DIR . '/library/PHLS.php')
+        : false;
+    $phroSource = is_file(ROOT_DIR . '/library/PHRO.php')
+        ? file_get_contents(ROOT_DIR . '/library/PHRO.php')
+        : false;
+    $phlsConcurrencySafe = is_string($phlsSource)
+        && is_string($phroSource)
+        && str_contains($phlsSource, 'BUSY_TIMEOUT_MS = 5000')
+        && str_contains($phlsSource, 'TRANSACTION_ATTEMPTS = 8')
+        && str_contains($phlsSource, 'initializeStorage($db_path)')
+        && str_contains($phlsSource, 'flock($lock_handle, LOCK_EX)')
+        && str_contains($phlsSource, '}, true);')
+        && str_contains($phroSource, 'rate-limit storage was temporarily unavailable');
+    $check('PHLS concurrent-writer and non-fatal guard protection', $phlsConcurrencySafe);
+
+    $serverBackup = $_SERVER;
+    try {
+        PHRO::trustProxies(['127.0.0.1', '::1']);
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+        $_SERVER['HTTP_CF_RAY'] = 'spoofed';
+        $_SERVER['HTTP_CF_CONNECTING_IP'] = '198.51.100.25';
+        $spoofSafe = PHRO::getUserIP() === '203.0.113.10';
+
+        $_SERVER['REMOTE_ADDR'] = '104.16.1.10';
+        $_SERVER['HTTP_CF_RAY'] = 'valid-marker';
+        $_SERVER['HTTP_CF_CONNECTING_IP'] = '198.51.100.25';
+        $cloudflareWorks = PHRO::getUserIP() === '198.51.100.25';
+        $_SERVER['HTTP_X_FORWARDED_PROTO'] = 'https';
+        $proxyHttpsWorks = PHCO::isSecure();
+
+        PHRO::trustProxies(['10.0.0.0/8']);
+        $_SERVER['REMOTE_ADDR'] = '10.20.30.40';
+        unset($_SERVER['HTTP_CF_RAY'], $_SERVER['HTTP_CF_CONNECTING_IP']);
+        $_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.30';
+        $cidrWorks = PHRO::getUserIP() === '198.51.100.30';
+        $check('Trusted proxy and Cloudflare validation', $spoofSafe && $cloudflareWorks && $proxyHttpsWorks && $cidrWorks);
+    } finally {
+        $_SERVER = $serverBackup;
+        PHRO::trustProxies(['127.0.0.1', '::1']);
+    }
+
+    $cryptoCapability = PHFY::cryptoCapability();
+    $check(
+        'OpenSSL P-256 / VAPID capability',
+        !empty($cryptoCapability['status']),
+        implode(', ', array_keys(array_filter($cryptoCapability)))
+    );
+    $phfySource = is_file(ROOT_DIR . '/library/PHFY.php')
+        ? file_get_contents(ROOT_DIR . '/library/PHFY.php')
+        : false;
+    $phfyRuntime = is_file(ROOT_DIR . '/src/js/phjs.js')
+        ? file_get_contents(ROOT_DIR . '/src/js/phjs.js')
+        : false;
+    $phfyPrivateSafe = is_string($phfySource)
+        && is_string($phfyRuntime)
+        && str_contains($phfySource, "'privateAllowed' => \$private_allowed")
+        && str_contains($phfySource, "'privateEndpoint' => \$private_allowed")
+        && str_contains($phfyRuntime, 'cfg.privateAllowed!==true')
+        && str_contains($phfyRuntime, 'res.status===401||res.status===403');
+    $check('PHFY authorized private polling guard', $phfyPrivateSafe);
+
+    $phfyContextSafe = is_string($phfySource)
+        && str_contains($phfySource, "PHCO::pre()")
+        && str_contains($phfySource, "PHCO::path()")
+        && str_contains($phfySource, "'projectPrefix' => self::projectPrefix()")
+        && str_contains($phfySource, "'basePath' => self::pathPrefix()")
+        && str_contains($phfySource, "self::storageKey('vapid')")
+        && str_contains($phfySource, "self::storageKey('subscription:")
+        && str_contains($phfySource, "self::storageKey('private:");
+    $check(
+        'PHFY PHP project context and storage namespace',
+        $phfyContextSafe,
+        'PHCO prefix/path defaults with legacy PHLS migration support'
+    );
+
+    PHJT::key('mystack-audit-key-0123456789abcdef');
+    $jwt = PHJT::create(['sub' => 'framework-audit'], 60);
+    $jwtCheck = !empty($jwt['status']) ? PHJT::verify((string) $jwt['data']) : ['status' => false];
+    $check('JWT create/verify round-trip', !empty($jwt['status']) && !empty($jwtCheck['status']));
+
+    $oauthProviders = PHAU::socialProviders();
+    $requiredOAuthProviders = [
+        'google', 'facebook', 'github', 'linkedin', 'twitter', 'microsoft', 'apple',
+        'discord', 'slack', 'spotify', 'twitch', 'reddit', 'gitlab', 'bitbucket',
+        'yahoo', 'amazon', 'dropbox', 'line', 'kakao', 'naver', 'atlassian',
+        'tiktok', 'telegram', 'custom',
+    ];
+    $check(
+        'PHAU OAuth/OIDC provider matrix',
+        count(array_diff($requiredOAuthProviders, $oauthProviders)) === 0
+            && method_exists('PHAU', 'socialUrl')
+            && method_exists('PHAU', 'listenCallback'),
+        count($oauthProviders) . ' providers/modes'
+    );
+
+    $totpKey = PHTP::key(24, 'TOTP');
+    $totpCode = !empty($totpKey['status']) ? PHTP::code($totpKey['data']) : ['status' => false];
+    $totpCheck = !empty($totpCode['status'])
+        ? PHTP::verify($totpCode['data'], $totpKey['data'])
+        : ['status' => false];
+    $rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+    $rfcVectors = ['sha1' => '94287082', 'sha256' => '32247374', 'sha512' => '69342147'];
+    $rfcPass = true;
+    foreach ($rfcVectors as $algorithm => $expected) {
+        $vector = PHTP::code($rfcSecret, 'TOTP', 8, 30, 59 - time(), $algorithm);
+        $rfcPass = $rfcPass && !empty($vector['status']) && ($vector['data'] ?? null) === $expected;
+    }
+    $check(
+        'TOTP RFC generation/verification',
+        !empty($totpCheck['status']) && $rfcPass,
+        'SHA1, SHA256, SHA512'
+    );
+
+    $authenticatorConfigured = PHTP::configure([
+        'issuer' => 'MyStack Audit',
+        'encryption_key' => 'mystack-audit-authenticator-key-0123456789',
+        'recovery_codes' => 2,
+    ]);
+    $authenticatorAccount = 'mystack-audit-authenticator';
+    PHTP::disable($authenticatorAccount, null, true);
+    $authenticatorEnroll = !empty($authenticatorConfigured['status'])
+        ? PHTP::enroll($authenticatorAccount)
+        : ['status' => false];
+    $authenticatorSecret = (string) ($authenticatorEnroll['data']['secret'] ?? '');
+    $authenticatorCode = $authenticatorSecret !== ''
+        ? PHTP::code($authenticatorSecret)
+        : ['status' => false];
+    $authenticatorConfirm = !empty($authenticatorCode['status'])
+        ? PHTP::confirm($authenticatorAccount, $authenticatorCode['data'])
+        : ['status' => false];
+    $authenticatorReplay = !empty($authenticatorCode['status'])
+        ? PHTP::authenticate($authenticatorAccount, $authenticatorCode['data'])
+        : ['status' => true];
+    $authenticatorRecoveryCode = (string) ($authenticatorEnroll['data']['recovery_codes'][0] ?? '');
+    $authenticatorRecovery = $authenticatorRecoveryCode !== ''
+        ? PHTP::authenticate($authenticatorAccount, $authenticatorRecoveryCode)
+        : ['status' => false];
+    $authenticatorRecoveryReplay = $authenticatorRecoveryCode !== ''
+        ? PHTP::authenticate($authenticatorAccount, $authenticatorRecoveryCode)
+        : ['status' => true];
+    $authenticatorStatus = PHTP::status($authenticatorAccount);
+    $authenticatorDisabled = PHTP::disable($authenticatorAccount, null, true);
+    $qrData = (string) ($authenticatorEnroll['data']['qr'] ?? '');
+    $qrBinary = str_starts_with($qrData, 'data:image/png;base64,')
+        ? base64_decode(substr($qrData, 22), true)
+        : false;
+    $qrInfo = is_string($qrBinary) ? @getimagesizefromstring($qrBinary) : false;
+    $check(
+        'Authenticator enrollment/replay/recovery lifecycle',
+        !empty($authenticatorEnroll['status'])
+            && !empty($authenticatorConfirm['status'])
+            && empty($authenticatorReplay['status'])
+            && ($authenticatorReplay['code'] ?? null) === 409
+            && !empty($authenticatorRecovery['status'])
+            && empty($authenticatorRecoveryReplay['status'])
+            && !empty($authenticatorStatus['data']['enabled'])
+            && ($authenticatorStatus['data']['recovery_remaining'] ?? null) === 1
+            && !empty($authenticatorDisabled['status']),
+        'encrypted storage, single-use TOTP, recovery codes'
+    );
+    $check(
+        'Authenticator QR memory-safe output',
+        is_array($qrInfo)
+            && ($qrInfo[0] ?? 0) >= 128 && ($qrInfo[0] ?? 0) <= 1024
+            && ($qrInfo[1] ?? 0) >= 128 && ($qrInfo[1] ?? 0) <= 1024
+            && strlen((string) $qrBinary) < 1048576,
+        is_array($qrInfo) ? ($qrInfo[0] . 'x' . $qrInfo[1]) : 'unavailable'
+    );
+
+    PHED::key('mystack-audit-encryption-key-0123456789');
+    $encrypted = PHED::make('framework-audit', 'encrypt');
+    $decrypted = !empty($encrypted['status'])
+        ? PHED::make((string) $encrypted['data'], 'decrypt')
+        : ['status' => false];
+    $check(
+        'PHED encryption round-trip',
+        !empty($decrypted['status']) && ($decrypted['data'] ?? null) === 'framework-audit'
+    );
+
+    $phcdReflection = new ReflectionClass('PHCD');
+    $packageValidator = $phcdReflection->getMethod('validatePackageName');
+    $packageValidationWorks = $packageValidator->invoke(null, 'chart.js') === 'chart.js'
+        && $packageValidator->invoke(null, '../src') === null
+        && $packageValidator->invoke(null, '*') === null
+        && $packageValidator->invoke(null, 'name/path') === null;
+    $check('PHCD package path validation', $packageValidationWorks);
+    $phcdSource = (string) file_get_contents(ROOT_DIR . '/library/PHCD.php');
+    $check(
+        'PHCD atomic install/update and responsive manager UI',
+        str_contains($phcdSource, 'phcd-toolbar')
+            && str_contains($phcdSource, '.phcd-stage-')
+            && str_contains($phcdSource, 'in_array($extension, [\'css\', \'js\'], true)')
+            && str_contains($phcdSource, 'Cache-Control: no-store')
+            && str_contains($phcdSource, 'str_replace($projectRoot, \'\', $file)')
+            && str_contains($phcdSource, 'window.addEventListener(\'unhandledrejection\''),
+        'staged activation, safe asset filtering, normalized paths, and UI refresh controls'
+    );
+
+    $phdbFastReflection = new ReflectionMethod('PHDB', 'fast');
+    $phdbFastReturnType = $phdbFastReflection->getReturnType();
+    $phdbFastGenerator = PHDB::fast('users', ['status' => 'active'], ['id', 'name']);
+    $phdbWhereReflection = new ReflectionMethod('PHDB', 'buildFastWhere');
+    $phdbWhereParams = [];
+    $phdbWhereArgs = [
+        ['status' => 'active', 'id >' => 10, 'role IN' => ['admin', 'staff']],
+        &$phdbWhereParams,
+    ];
+    $phdbWhereSql = $phdbWhereReflection->invokeArgs(null, $phdbWhereArgs);
+    $check(
+        'PHDB unbuffered streaming API',
+        $phdbFastReflection->isStatic()
+            && $phdbFastReflection->getNumberOfParameters() === 3
+            && $phdbFastReturnType instanceof ReflectionNamedType
+            && ltrim($phdbFastReturnType->getName(), '\\') === 'Generator'
+            && $phdbFastGenerator instanceof Generator
+            && str_contains($phdbWhereSql, '`status` = ?')
+            && str_contains($phdbWhereSql, '`id` > ?')
+            && str_contains($phdbWhereSql, '`role` IN (?, ?)')
+            && $phdbWhereParams === ['active', 10, 'admin', 'staff']
+    );
+    unset($phdbFastGenerator);
+
+    $phdbNormalizeType = new ReflectionMethod('PHDB', 'normalizeSchemaType');
+    $phdbColumnMatches = new ReflectionMethod('PHDB', 'columnMatchesDefinition');
+    $phdbAlterDefinition = new ReflectionMethod('PHDB', 'alterationColumnDefinition');
+    $phdbExistingVarchar = [
+        'Type' => 'varchar(120)',
+        'Null' => 'NO',
+        'Default' => null,
+        'Extra' => '',
+        'Collation' => 'utf8mb4_unicode_ci',
+    ];
+    $phdbExistingAutoId = [
+        'Type' => 'bigint(20) unsigned',
+        'Null' => 'NO',
+        'Default' => null,
+        'Extra' => 'auto_increment',
+        'Collation' => null,
+    ];
+    $phdbSource = (string) file_get_contents(__DIR__ . '/library/PHDB.php');
+    $phdbSchemaSyncWorks =
+        $phdbNormalizeType->invoke(null, 'INT(11) UNSIGNED') === 'int unsigned'
+        && $phdbColumnMatches->invoke(null, $phdbExistingVarchar, 'VARCHAR(120) NOT NULL')
+        && !$phdbColumnMatches->invoke(null, $phdbExistingVarchar, 'VARCHAR(255) NOT NULL')
+        && $phdbColumnMatches->invoke(
+            null,
+            $phdbExistingAutoId,
+            'BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY'
+        )
+        && !str_contains(
+            strtoupper($phdbAlterDefinition->invoke(
+                null,
+                'BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY'
+            )),
+            'PRIMARY KEY'
+        )
+        && str_contains($phdbSource, 'GET_LOCK(?, 10)')
+        && str_contains($phdbSource, 'schemaCacheHit')
+        && str_contains($phdbSource, 'MODIFY COLUMN')
+        && str_contains($phdbSource, 'DROP COLUMN')
+        && str_contains($phdbSource, 'STRICT_ALL_TABLES');
+    $check('PHDB automatic schema synchronization', $phdbSchemaSyncWorks);
+
+    $phpaSource = (string) file_get_contents(__DIR__ . '/library/PHPA.php');
+    $phpaRequests = [];
+    $phpaStripe = PHPA::stripe()
+        ->setKeys('sk_test_audit', '', 'whsec_audit')
+        ->expect('ORDER-AUDIT', 10.25, 'USD')
+        ->setTransport(static function (
+            string $method,
+            string $url,
+            array $headers,
+            mixed $data
+        ) use (&$phpaRequests): array {
+            $phpaRequests[] = compact('method', 'url', 'headers', 'data');
+            if (str_contains($url, '/refunds')) {
+                return ['code' => 200, 'data' => ['id' => 're_audit', 'status' => 'succeeded'], 'raw' => '{}'];
+            }
+            if ($method === 'GET') {
+                return ['code' => 200, 'data' => [
+                    'id' => 'pi_audit',
+                    'status' => 'succeeded',
+                    'currency' => 'usd',
+                    'metadata' => ['order_id' => 'ORDER-AUDIT'],
+                ], 'raw' => '{}'];
+            }
+            return ['code' => 200, 'data' => [
+                'id' => 'pi_audit',
+                'client_secret' => 'pi_audit_secret',
+                'status' => 'requires_payment_method',
+            ], 'raw' => '{}'];
+        });
+    $phpaCharge = $phpaStripe->charge(10.25, 'USD', 'ORDER-AUDIT');
+    $phpaVerify = $phpaStripe->verify('pi_audit');
+    $phpaRefund = $phpaStripe->refund('pi_audit', 10.25);
+    $phpaWebhookPayload = json_encode([
+        'id' => 'evt_audit',
+        'type' => 'payment_intent.succeeded',
+        'data' => ['object' => ['id' => 'pi_audit']],
+    ], JSON_THROW_ON_ERROR);
+    $phpaWebhookTime = time();
+    $phpaWebhookSignature = hash_hmac(
+        'sha256',
+        $phpaWebhookTime . '.' . $phpaWebhookPayload,
+        'whsec_audit'
+    );
+    $phpaWebhook = $phpaStripe->webhook($phpaWebhookPayload, [
+        'Stripe-Signature' => "t=$phpaWebhookTime,v1=$phpaWebhookSignature",
+    ]);
+    $phpaWebhookReplay = $phpaStripe->webhook($phpaWebhookPayload, [
+        'Stripe-Signature' => "t=$phpaWebhookTime,v1=$phpaWebhookSignature",
+    ]);
+    $phpaBadWebhook = $phpaStripe->webhook($phpaWebhookPayload, [
+        'Stripe-Signature' => "t=$phpaWebhookTime,v1=invalid",
+    ]);
+    $phpaSafeUnsupported = PHPA::braintree()
+        ->setKeys('audit')
+        ->charge(1.00, 'USD', 'ORDER-UNSUPPORTED');
+    $phpaFirstRequestBody = (string) ($phpaRequests[0]['data'] ?? '');
+    $check(
+        'PHPA production-safe payment core',
+        count(PHPA::available()) === 30
+            && !empty($phpaCharge['success'])
+            && ($phpaCharge['client_secret'] ?? null) === 'pi_audit_secret'
+            && str_contains($phpaFirstRequestBody, 'amount=1025')
+            && !empty($phpaVerify['success'])
+            && !empty($phpaRefund['success'])
+            && !empty($phpaWebhook['success'])
+            && !empty($phpaWebhookReplay['success'])
+            && !empty($phpaWebhookReplay['duplicate'])
+            && empty($phpaBadWebhook['success'])
+            && empty($phpaSafeUnsupported['success'])
+            && ($phpaSafeUnsupported['code'] ?? '') === 'unsupported_operation'
+            && !str_contains($phpaSource, "return ['success' => true];")
+            && !str_contains($phpaSource, 'return [];')
+            && str_contains($phpaSource, 'CURLOPT_CONNECTTIMEOUT')
+            && str_contains($phpaSource, 'CURLOPT_SSL_VERIFYPEER')
+            && str_contains($phpaSource, 'Idempotency-Key:')
+    );
+
+    $courierRequests = [];
+    $courier = PHPA::courier('steadfast')
+        ->setKeys('api-audit', 'secret-audit')
+        ->setTransport(static function ($method, $url, $headers, $data) use (&$courierRequests): array {
+            $courierRequests[] = compact('method', 'url', 'headers', 'data');
+            return ['code' => 200, 'data' => [
+                'status' => 200,
+                'consignment' => [
+                    'consignment_id' => 12345,
+                    'tracking_code' => 'ST-AUDIT-1',
+                    'status' => 'in_review',
+                ],
+            ], 'raw' => '{}'];
+        });
+    $courierCreated = $courier->create([
+        'invoice' => 'ORDER-AUDIT',
+        'recipient_name' => 'Audit User',
+        'recipient_phone' => '01700000000',
+        'recipient_address' => 'Dhaka',
+        'cod_amount' => 100,
+    ]);
+    $courierTracked = $courier->track('ST-AUDIT-1');
+    $bdCouriers = PHPA::courierAvailable('BD');
+    $allCouriers = PHPA::courierAvailable();
+    $nonBdCouriers = array_filter($allCouriers, static fn ($item) => ($item['region'] ?? '') !== 'BD');
+    $firstCourierHeaders = $courierRequests[0]['headers'] ?? [];
+    $check(
+        'PHPA unified courier architecture',
+        count($bdCouriers) === 10
+            && count($nonBdCouriers) === 10
+            && !empty($courierCreated['success'])
+            && ($courierCreated['tracking_id'] ?? '') === 'ST-AUDIT-1'
+            && !empty($courierTracked['success'])
+            && str_contains((string) ($courierRequests[0]['url'] ?? ''), '/create_order')
+            && str_contains((string) ($courierRequests[1]['url'] ?? ''), '/status_by_trackingcode/ST-AUDIT-1')
+            && in_array('Api-Key: api-audit', $firstCourierHeaders, true)
+            && in_array('Secret-Key: secret-audit', $firstCourierHeaders, true)
+            && PHPA::courierProfile('DHL')['auth'] === 'basic'
+            && PHPA::courierProfile('FedEx')['auth'] === 'oauth_client',
+        '10 Bangladesh + 10 international provider profiles'
+    );
+
+    $phuiRegistered = PHUI::register(
+        'audit:card',
+        '<article class="rounded-xl {{class}}" {{attr}}>@slot</article>',
+        ['title' => 'Audit Card']
+    );
+    $phuiHtml = PHUI::ui('audit:card', [
+        'class' => ['p-4', 'bg-slate-900'],
+        'slot' => 'Reusable UI',
+        'attrs' => ['disabled' => true, 'aria-label' => 'Audit'],
+        'phjs' => ['click' => 'show #audit-target'],
+        'htmx' => ['get' => '/audit-fragment', 'target' => '#audit-target'],
+    ]);
+    $phuiKitWorks = PHUI::count() >= 1000
+        && $phuiRegistered
+        && str_contains($phuiHtml, 'p-4 bg-slate-900')
+        && str_contains($phuiHtml, 'data-phui="audit:card"')
+        && str_contains($phuiHtml, 'disabled')
+        && str_contains($phuiHtml, 'x-on:click=')
+        && str_contains($phuiHtml, 'hx-get="/audit-fragment"')
+        && str_contains(PHUI::section('hero', ['title' => 'Audit']), 'Audit');
+    $check('PHUI reusable kit / class / PHJS integration', $phuiKitWorks, PHUI::count() . ' entries');
+
+    $secureUiComponents = [
+        'auth:oauth-buttons', 'auth:oauth-provider-button', 'auth:oauth-callback',
+        'auth:account-linking', 'auth:2fa-setup', 'auth:2fa-verify',
+        'auth:recovery-codes', 'auth:recovery-input', 'auth:2fa-status',
+        'auth:2fa-disable', 'payment:gateway-selector', 'payment:gateway-option',
+        'payment:checkout-summary', 'payment:processing', 'payment:status',
+        'payment:success', 'payment:failed', 'payment:receipt',
+        'payment:refund-status', 'payment:masked-method',
+        'courier:selector', 'courier:option', 'courier:tracking-form',
+        'courier:tracking-result', 'courier:timeline', 'courier:timeline-event',
+        'courier:shipment-card', 'courier:rate-card', 'courier:address-form',
+        'courier:label-preview', 'courier:pickup-card', 'courier:error',
+    ];
+    $secureUiValid = true;
+    foreach ($secureUiComponents as $component) {
+        $rendered = PHUI::ui($component, [
+            'label' => 'Audit',
+            'message' => 'Safe state',
+            'attr' => ['data-audit-component' => $component],
+        ]);
+        if (!PHUI::exists($component)
+            || str_contains($rendered, 'not found')
+            || !str_contains($rendered, 'data-audit-component=')) {
+            $secureUiValid = false;
+            break;
+        }
+    }
+    $check(
+        'PHUI OAuth / 2FA / payment / courier component family',
+        $secureUiValid,
+        count($secureUiComponents) . ' reusable components'
+    );
+
+    $phjcReflection = new ReflectionClass('PHJC');
+    $compileDirectives = $phjcReflection->getMethod('compileDirectives');
+    $compiledUiDirective = $compileDirectives->invoke(
+        null,
+        "@ui('audit:card', ['slot' => strtoupper('ok')])"
+    );
+    $check(
+        'PHUI component-template directive',
+        is_string($compiledUiDirective)
+            && str_contains($compiledUiDirective, '\\PHUI::ui')
+            && str_contains($compiledUiDirective, "strtoupper('ok')")
+    );
+
+    $phjsAdvanced = PHJS::module([
+        ['type' => 'import', 'from' => './api.js', 'named' => ['request']],
+        [
+            'type' => 'const',
+            'name' => 'config',
+            'value' => [
+                'endpoint' => '/api',
+                'createdAt' => PHJS::expr('Date.now()'),
+            ],
+        ],
+        [
+            'type' => 'function',
+            'name' => 'loadData',
+            'params' => ['id'],
+            'async' => true,
+            'body' => [
+                [
+                    'type' => 'const',
+                    'name' => 'response',
+                    'value' => PHJS::awaitValue(PHJS::invoke('request', PHJS::expr('id'))),
+                ],
+                ['type' => 'return', 'value' => PHJS::expr('response.data')],
+            ],
+        ],
+        ['type' => 'export', 'names' => ['loadData']],
+    ]);
+    $phjsTemplate = (string) PHJS::template(
+        'Hello {{name}}',
+        ['name' => PHJS::expr('user.name')]
+    );
+    $phjsDslTemplate = PHJS::render(
+        '<button @[DATA: {message:"a|b]", nested:[1,2]} | @click: console.log("x|y")]>Run</button>'
+    );
+    $check(
+        'PHJS PHP translation / template / module builder',
+        str_contains($phjsAdvanced, 'createdAt": Date.now()')
+            && str_contains($phjsAdvanced, 'async function loadData(id)')
+            && str_contains($phjsAdvanced, 'await request(id)')
+            && str_contains($phjsAdvanced, 'export { loadData };')
+            && $phjsTemplate === '`Hello ${user.name}`'
+            && str_contains($phjsDslTemplate, 'x-data=')
+            && str_contains($phjsDslTemplate, 'a|b]')
+            && str_contains($phjsDslTemplate, '@click=')
+    );
+
+    $phpPair = [
+        ROOT_DIR . '/src/js/PHJS-min.php',
+        ROOT_DIR . '/src/js/PHJS.php',
+    ];
+    $jsPair = [
+        ROOT_DIR . '/src/js/phjs.js',
+        ROOT_DIR . '/src/js/phjs.min.js',
+    ];
+    $pairMatches = is_file($phpPair[0]) && is_file($phpPair[1]) && is_file($jsPair[0]) && is_file($jsPair[1])
+        && hash_file('sha256', $phpPair[0]) === hash_file('sha256', $phpPair[1])
+        && hash_file('sha256', $jsPair[0]) === hash_file('sha256', $jsPair[1]);
+    $check('PHJS synchronized builds', $pairMatches);
+
+    $nativeSource = is_file($phpPair[0]) ? (string) file_get_contents($phpPair[0]) : '';
+    $nativeIncluded = is_string(@file_get_contents($phpPair[0]))
+        && str_contains((string) @file_get_contents($phpPair[0]), '__PHJS_NATIVE_LAYER__')
+        && str_contains($nativeSource, '[x-get],[y-get]')
+        && str_contains($nativeSource, '[x-effect],[y-effect]');
+    $check(
+        'PHJS self-contained native directive/request layer',
+        $nativeIncluded,
+        'no Alpine/HTMX runtime dependency'
+    );
+
+    $componentLayerIncluded = str_contains($nativeSource, '__PHJS_COMPONENT_LAYER__')
+        && str_contains($nativeSource, 'A.compose=api')
+        && str_contains($nativeSource, 'api.keepAlive=')
+        && str_contains($nativeSource, 'api.transitionGroup=')
+        && str_contains($nativeSource, 'api.portal=')
+        && str_contains($nativeSource, 'api.form=')
+        && str_contains($nativeSource, 'api.profile=');
+    $check(
+        'PHJS component/composition lifecycle layer',
+        $componentLayerIncluded,
+        'props, slots, context, async, keep-alive, forms, transitions and profiling'
+    );
+
+    $declarativeLayerIncluded = str_contains($nativeSource, '__PHJS_DECLARATIVE_LAYER__')
+        && str_contains($nativeSource, 'A.declarative={scan:scan,action:runActions,define:defineComponents}')
+        && str_contains($nativeSource, 'template[x-component-definition]')
+        && str_contains($nativeSource, '[x-form-schema]')
+        && str_contains($nativeSource, '[x-visible-action]')
+        && str_contains($nativeSource, '[x-route-component]')
+        && str_contains($nativeSource, "case'toast'")
+        && str_contains($nativeSource, "case'copy'");
+    $check(
+        'PHJS HTML-only declarative application layer',
+        $declarativeLayerIncluded,
+        'components, props, slots, actions, context, forms, lazy/route mounting and fallbacks'
+    );
+
+    $keymapLayerIncluded = str_contains($nativeSource, '__PHJS_KEYMAP_LAYER__')
+        && str_contains($nativeSource, "nodes(root,'[x-keymap],[y-keymap]')")
+        && str_contains($nativeSource, "nodes(root,'[x-hotkey],[y-hotkey]')")
+        && str_contains($nativeSource, 'A.keymap={register:register,unregister:unregister')
+        && str_contains($nativeSource, "A.declarative.action(selected.el,selected.action,event)")
+        && str_contains($nativeSource, "aria-keyshortcuts")
+        && str_contains($nativeSource, "entry.combo.indexOf(text+' ')");
+    $check(
+        'PHJS declarative enterprise keymap layer',
+        $keymapLayerIncluded,
+        'HTML-only maps/hotkeys, chords, platform aliases, scopes, priority and cleanup'
+    );
+
+    $courierLayerIncluded = str_contains($nativeSource, '__PHJS_COURIER_LAYER__')
+        && str_contains($nativeSource, 'APP.courier=(function()')
+        && str_contains($nativeSource, '[data-ph-courier-track]')
+        && str_contains($nativeSource, 'Courier UI only permits same-origin backend endpoints.')
+        && str_contains($nativeSource, 'courier:success');
+    $check(
+        'PHJS secure courier UI helper',
+        $courierLayerIncluded,
+        'same-origin tracking, normalization, responsive result rendering and SPA remount'
+    );
+
+    $toastLayerIncluded = str_contains($nativeSource, '__PHJS_TOAST_RELIABILITY__')
+        && str_contains($nativeSource, 'A.ui.ensureToastLayer=ensure')
+        && str_contains($nativeSource, "w.toast=toast")
+        && str_contains($nativeSource, "z-index','2147483647")
+        && str_contains($nativeSource, "A.on('router:after'");
+    $check(
+        'PHJS persistent toast reliability layer',
+        $toastLayerIncluded,
+        'body-level placement, CSS-independent positioning, duplicate cleanup and navigation re-attach'
+    );
+
+    $secureFlowSource = is_file($jsPair[0]) ? file_get_contents($jsPair[0]) : false;
+    $phmlSource = is_file(ROOT_DIR . '/library/PHML.php')
+        ? file_get_contents(ROOT_DIR . '/library/PHML.php')
+        : false;
+    $cssReadyNavigation = is_string($secureFlowSource)
+        && is_string($phmlSource)
+        && str_contains($secureFlowSource, 'APP.prepareRouteStyles=')
+        && str_contains($secureFlowSource, 'await APP.prepareRouteStyles(parsed,finalUrl.href)')
+        && str_contains($secureFlowSource, 'if(shouldSyncRouteAssets)APP.syncRouteAssets')
+        && str_contains($secureFlowSource, 'data-phjs-prefetch-style')
+        && str_contains($phmlSource, ' defer></script>');
+    $check(
+        'PHJS CSS-ready navigation and hover prefetch',
+        $cssReadyNavigation,
+        'deferred bootstrap, destination CSS preload, and style activation before DOM swap'
+    );
+
+    $secureFlowHelpers = is_string($secureFlowSource)
+        && str_contains($secureFlowSource, 'APP.secureFlow=')
+        && str_contains($secureFlowSource, 'APP.auth={oauth:')
+        && str_contains($secureFlowSource, 'twoFactor:{normalize')
+        && str_contains($secureFlowSource, 'APP.payment=')
+        && str_contains($secureFlowSource, 'Cross-origin action endpoints are not allowed.')
+        && str_contains($secureFlowSource, '"Idempotency-Key":idempotency')
+        && str_contains($secureFlowSource, 'data-2fa-digit')
+        && method_exists('PHJS', 'appOAuthStart')
+        && method_exists('PHJS', 'appOAuthCallback')
+        && method_exists('PHJS', 'appTwoFactorSubmit')
+        && method_exists('PHJS', 'appPaymentStart')
+        && method_exists('PHJS', 'appPaymentStatus')
+        && str_contains(PHJS::appOAuthStart('/oauth/google'), 'APP.auth.oauth.start')
+        && str_contains(PHJS::appTwoFactorSubmit('/2fa', 'code'), 'APP.auth.twoFactor.submit')
+        && str_contains(PHJS::appPaymentStart('/payment'), 'APP.payment.start');
+    $check(
+        'PHJS secure OAuth / 2FA / hosted-payment bridge',
+        $secureFlowHelpers,
+        'same-origin actions, CSRF, timeout, idempotency, replay-safe UX'
+    );
+
+    $phroSource = is_file(ROOT_DIR . '/library/PHRO.php')
+        ? file_get_contents(ROOT_DIR . '/library/PHRO.php')
+        : false;
+    $canonicalPhjsSource = is_file($phpPair[0]) ? file_get_contents($phpPair[0]) : false;
+    $identityBridgeValid = is_string($secureFlowSource)
+        && is_string($canonicalPhjsSource)
+        && is_string($phroSource)
+        && str_contains($canonicalPhjsSource, "PHCO::path()")
+        && str_contains($canonicalPhjsSource, "PHCO::pre()")
+        && str_contains($canonicalPhjsSource, 'projectPrefix:detectedProjectPrefix')
+        && str_contains($secureFlowSource, '_persistIdentity("hash",fp)')
+        && str_contains($secureFlowSource, '_persistIdentity("key",networkKey)')
+        && str_contains($secureFlowSource, '"X-Device-Fingerprint":this.fingerprint||""')
+        && str_contains($secureFlowSource, 'networkInfoEndpoint:detectedBasePath+"_phjs/network-info"')
+        && !str_contains($secureFlowSource, 'json.geoiplookup.io')
+        && !str_contains($secureFlowSource, 'freeipapi.com')
+        && !str_contains($secureFlowSource, 'ip-api.io')
+        && str_contains($phroSource, 'self::get("/_phjs/network-info"')
+        && str_contains($phroSource, "'key' => \$footprint['clientXNetkey']")
+        && str_contains($phroSource, "'hosting' => (bool)");
+    $check(
+        'PHJS device/network identity bridge',
+        $identityBridgeValid,
+        'PHP-injected base/prefix, stable hash/key cookies, same-origin network lookup, VPN/proxy signals'
+    );
+
+    $phjsUtf8Valid = true;
+    foreach (array_merge($phpPair, $jsPair) as $phjsBuild) {
+        $phjsSource = is_file($phjsBuild) ? file_get_contents($phjsBuild) : false;
+        if (
+            $phjsSource === false
+            || !preg_match('//u', $phjsSource)
+            || str_starts_with($phjsSource, "\xEF\xBB\xBF")
+            || str_contains($phjsSource, "\u{FFFD}")
+            || preg_match('/(?:à¦|à§|Ã°|Ãƒ|â€|ï¿½)/u', $phjsSource)
+            || !str_contains($phjsSource, 'সংরক্ষণ করুন')
+        ) {
+            $phjsUtf8Valid = false;
+            break;
+        }
+    }
+    $check('PHJS UTF-8 and Bengali text integrity', $phjsUtf8Valid);
+
+    $premiumUiSource = is_file($jsPair[0]) ? file_get_contents($jsPair[0]) : false;
+    $premiumUiSystems = [
+        'APP.navigation=',
+        'APP.commerce=',
+        'APP.dataTable=',
+        'APP.dashboard=',
+        'APP.controls=',
+        'APP.fileManager=',
+        'APP.richText=',
+        'APP.kanban=',
+        'APP.calendar=',
+        'APP.workflow=',
+        'APP.virtualList=',
+        'APP.carousel=',
+        'APP.tree=',
+        'APP.timeline=',
+        'APP.splitPane=',
+        'APP.tour=',
+        'APP.signature=',
+        'APP.premium=',
+    ];
+    $premiumUiValid = is_string($premiumUiSource);
+    foreach ($premiumUiSystems as $premiumUiSystem) {
+        if (!$premiumUiValid || !str_contains($premiumUiSource, $premiumUiSystem)) {
+            $premiumUiValid = false;
+            break;
+        }
+    }
+    $check('PHJS premium UI systems - ' . count($premiumUiSystems) . ' modules', $premiumUiValid);
+
+    $swSource = ROOT_DIR . '/src/js/SW.php';
+    $swBuild = ROOT_DIR . '/src/js/sw.js';
+    $swMatches = false;
+    if (is_file($swSource) && is_file($swBuild)) {
+        ob_start();
+        include $swSource;
+        $renderedWorker = ob_get_clean();
+        $swMatches = is_string($renderedWorker)
+            && hash('sha256', str_replace(["\r\n", "\r"], "\n", $renderedWorker))
+                === hash('sha256', str_replace(["\r\n", "\r"], "\n", (string) file_get_contents($swBuild)));
+    }
+    $check('Service Worker synchronized build', $swMatches);
+
+    foreach (['css', 'js', 'php'] as $section) {
+        $directory = ROOT_DIR . '/src/cache/' . $section;
+        $check("Cache directory: {$section}", is_dir($directory) && is_writable($directory));
+    }
+
+    $folderState = $GLOBALS['folderMapReport']
+        ?? MyStackBrain::ensureFolderMap(ROOT_DIR, false);
+    $check(
+        'Framework canonical folder map',
+        !empty($folderState['status']) && MyStackBrain::testFolderMapEngine(),
+        ($folderState['ready'] ?? 0) . '/' . ($folderState['total'] ?? 0) . ' ready, auto-repair verified'
+    );
+
+    $intelligence = MyStackBrain::analyze(
+        ROOT_DIR,
+        $GLOBALS['appDir'],
+        $GLOBALS['componentDir']
+    );
+    $check(
+        'Project intelligence graph',
+        ($intelligence['stats']['files'] ?? 0) > 0
+            && MyStackBrain::smartName('user-profile') === 'UserProfile'
+            && MyStackBrain::tableName('UserProfileModel') === 'user_profiles'
+            && MyStackBrain::suggestCommand('doctro') === 'doctor',
+        ($intelligence['stats']['routes'] ?? 0) . ' routes, '
+            . ($intelligence['stats']['classes'] ?? 0) . ' classes, '
+            . ($intelligence['stats']['imports'] ?? 0) . ' imports'
+    );
+    $check(
+        'Route/class collision reasoning',
+        !empty($intelligence['status']),
+        ($intelligence['counts']['critical'] ?? 0) . ' critical conflict(s)'
+    );
+    foreach ($intelligence['issues'] as $insight) {
+        if ($insight['severity'] === 'advice') {
+            $warn(
+                'Intelligence advice: ' . $insight['type'],
+                $insight['message'] . ' (' . $insight['location'] . ')'
+            );
+        }
+    }
+
+    echo "\n";
+    printColor(" {$reportTitle} Report \n", "1;44;97");
+    echo "  Passed: {$passed}\n";
+    echo "  Failed: {$failed}\n";
+    echo "  Warnings: {$warnings}\n\n";
+
+    return $failed === 0;
+}
+
+/**
+ * Full framework smoke test. This intentionally reuses the comprehensive,
+ * read-only audit suite so every smoke run exercises the same production
+ * contracts without mutating application data or configuration.
+ */
+function runSmokeTests(): bool {
+    return runFrameworkAudit('MyStack Full Smoke Test');
+}
+
 $args = $argv;
 array_shift($args); // remove script name
 $command = array_shift($args);
@@ -210,8 +1999,32 @@ if (!$command || $command === 'help' || $command === '--help' || $command === '-
     exit(0);
 }
 
-// Smart Name Formatting
-$cleanName = ucfirst(preg_replace('/[^a-zA-Z0-9_]/', '', (string)$name));
+// Context-aware name formatting is applied only to generator commands.
+$cleanName = '';
+if (str_starts_with((string) $command, 'make:') && $name !== null) {
+    try {
+        $cleanName = MyStackBrain::smartName((string) $name);
+    } catch (InvalidArgumentException $exception) {
+        error($exception->getMessage());
+    }
+}
+
+$generatedClassSuffixes = [
+    'make:controller' => 'Controller',
+    'make:model' => 'Model',
+    'make:middleware' => 'Middleware',
+];
+if ($cleanName !== '' && isset($generatedClassSuffixes[$command])) {
+    $suffix = $generatedClassSuffixes[$command];
+    $candidateClass = str_ends_with($cleanName, $suffix) ? $cleanName : $cleanName . $suffix;
+    $preflight = MyStackBrain::analyze(ROOT_DIR, $appDir, $componentDir);
+    if (isset($preflight['classes'][$candidateClass])) {
+        error(
+            "Generation blocked: class {$candidateClass} already exists in "
+            . implode(', ', $preflight['classes'][$candidateClass])
+        );
+    }
+}
 
 switch ($command) {
     case 'make:controller':
@@ -219,17 +2032,17 @@ switch ($command) {
         $className = str_ends_with($cleanName, 'Controller') ? $cleanName : $cleanName . 'Controller';
         $path = $appDir . '/' . $className . '.php';
         
-        $content = "<?php\n/**\n * $className\n * Auto-generated by MyStack CLI\n */\nclass {$className} {\n\n    /**\n     * Fetch all records\n     */\n    public function index() {\n        // Demo: \$users = PHDB::query('SELECT * FROM users');\n        return ['status' => 'success', 'data' => 'List of items'];\n    }\n\n    /**\n     * Handle record creation\n     */\n    public function store(\$request) {\n        // Demo: PHDB::query('INSERT INTO users (name) VALUES (?)', [\$request['name']]);\n        return ['status' => 'success', 'message' => 'Created successfully'];\n    }\n\n    /**\n     * Fetch specific record\n     */\n    public function show(\$id) {\n        // Demo: \$user = PHDB::query('SELECT * FROM users WHERE id = ?', [\$id]);\n        return ['status' => 'success', 'id' => \$id];\n    }\n}\n";
+        $content = "<?php\n/**\n * $className\n * Context-aware MyStack controller.\n */\nclass {$className} {\n\n    public function index(): array {\n        return ['status' => true, 'data' => PHDB::select('users')];\n    }\n\n    public function store(array \$request): array {\n        \$name = trim((string) (\$request['name'] ?? ''));\n        if (\$name === '') return ['status' => false, 'message' => 'Name is required.'];\n        \$saved = PHDB::insert('users', ['name' => \$name]);\n        return ['status' => (bool) \$saved, 'id' => PHDB::id()];\n    }\n\n    public function show(int \$id): array {\n        \$rows = PHDB::select('users', '*', ['id' => \$id], 1);\n        return ['status' => !empty(\$rows), 'data' => \$rows[0] ?? null];\n    }\n}\n";
         generateFile($path, $content, 'Controller');
         break;
 
     case 'make:model':
         if (!$name) error("Model name is required. Example: php mystack make:model Product");
         $className = str_ends_with($cleanName, 'Model') ? $cleanName : $cleanName . 'Model';
-        $tableName = strtolower(str_replace('Model', '', $className)) . 's';
+        $tableName = MyStackBrain::tableName($className);
         $path = $appDir . '/' . $className . '.php';
         
-        $content = "<?php\n/**\n * $className\n * Auto-generated by MyStack CLI\n */\nclass {$className} {\n    protected static \$table = '{$tableName}';\n\n    public static function all() {\n        return PHDB::query(\"SELECT * FROM \" . self::\$table);\n    }\n\n    public static function find(\$id) {\n        \$result = PHDB::query(\"SELECT * FROM \" . self::\$table . \" WHERE id = ? LIMIT 1\", [\$id]);\n        return \$result[0] ?? null;\n    }\n\n    public static function create(array \$data) {\n        \$columns = implode(',', array_keys(\$data));\n        \$placeholders = implode(',', array_fill(0, count(\$data), '?'));\n        return PHDB::query(\"INSERT INTO \" . self::\$table . \" (\$columns) VALUES (\$placeholders)\", array_values(\$data));\n    }\n}\n";
+        $content = "<?php\n/**\n * $className\n * Context-aware MyStack model.\n */\nclass {$className} {\n    protected static string \$table = '{$tableName}';\n\n    public static function all(): array {\n        return PHDB::select(self::\$table);\n    }\n\n    public static function stream(array \$where = []): Generator {\n        return PHDB::fast(self::\$table, \$where);\n    }\n\n    public static function find(int \$id): ?array {\n        \$rows = PHDB::select(self::\$table, '*', ['id' => \$id], 1);\n        return \$rows[0] ?? null;\n    }\n\n    public static function create(array \$data): bool {\n        return (bool) PHDB::insert(self::\$table, \$data);\n    }\n}\n";
         generateFile($path, $content, 'Model');
         break;
 
@@ -247,7 +2060,7 @@ switch ($command) {
         $className = str_ends_with($cleanName, 'Component') ? $cleanName : $cleanName . 'Component';
         $path = $componentDir . '/' . $className . '.php';
         
-        $content = "<?php\n/**\n * Component: $className\n * Render this using PHUI or include it directly.\n */\n\n\$title = \$data['title'] ?? 'Component Title';\n\$text = \$data['text'] ?? 'Component description goes here.';\n\$class = \$data['class'] ?? '';\n?>\n<div class=\"bg-card p-6 rounded-2xl shadow-sm border border-border <?= htmlspecialchars(\$class) ?>\">\n    <h3 class=\"text-xl font-bold text-foreground\"><?= htmlspecialchars(\$title) ?></h3>\n    <p class=\"text-muted-foreground mt-2\"><?= htmlspecialchars(\$text) ?></p>\n</div>\n";
+        $content = "<?php\n/**\n * Component: $className\n * Native PHUI component; import with import('component:$className').\n */\n\$title = (string) (\$data['title'] ?? 'Component Title');\n\$text = (string) (\$data['text'] ?? 'Component description goes here.');\n\$class = (string) (\$data['class'] ?? '');\n\$body = PHUI::ui('html:h3', [\n    'class' => 'text-xl font-bold text-foreground',\n    'text' => \$title,\n]);\n\$body .= PHUI::ui('html:p', [\n    'class' => 'text-muted-foreground mt-2',\n    'text' => \$text,\n]);\necho PHUI::ui('html:div', [\n    'class' => trim('bg-card p-6 rounded-2xl shadow-sm border border-border ' . \$class),\n    'slot' => \$body,\n]);\n";
         generateFile($path, $content, 'UI Component');
         break;
 
@@ -265,6 +2078,10 @@ switch ($command) {
         
         // 1. Create a demo route in app/
         $routePath = $appDir . "/WelcomeController.php";
+        $viewPath = $componentDir . "/welcome.php";
+        if (file_exists($routePath) || file_exists($viewPath)) {
+            error('Getting-started generation stopped: WelcomeController.php or welcome.php already exists.');
+        }
         $routeContent = "<?php
 class WelcomeController {
     public static function index() {
@@ -277,7 +2094,6 @@ PHRO::get(\"/\", [WelcomeController::class, \"index\"]);
         generateFile($routePath, $routeContent, "Demo Controller");
 
         // 2. Create a demo view in component/
-        $viewPath = $componentDir . "/welcome.php";
         $viewContent = "<?php
 /**
  * View: Welcome
@@ -315,9 +2131,15 @@ PHRO::get(\"/\", [WelcomeController::class, \"index\"]);
     case 'cache:clear':
         $cacheDir = ROOT_DIR . '/src/cache';
         if (is_dir($cacheDir)) {
-            $files = glob($cacheDir . '/*');
-            foreach ($files as $file) {
-                if (is_file($file)) unlink($file);
+            $patterns = [
+                $cacheDir . '/css/*.css',
+                $cacheDir . '/js/*.js',
+                $cacheDir . '/php/*.php',
+            ];
+            foreach ($patterns as $pattern) {
+                foreach (glob($pattern) ?: [] as $file) {
+                    if (is_file($file)) unlink($file);
+                }
             }
             success("Application cache cleared instantly!");
         } else {
@@ -326,10 +2148,27 @@ PHRO::get(\"/\", [WelcomeController::class, \"index\"]);
         break;
         
     case 'doctor':
-        runDoctor([$appDir, $componentDir]);
+        $applyFixes = in_array('--fix', $args, true);
+        if (!runDoctor([$appDir, $componentDir], $applyFixes)) {
+            exit(1);
+        }
+        break;
+
+    case 'audit':
+        if (!runFrameworkAudit()) {
+            exit(1);
+        }
+        break;
+
+    case 'smoke':
+        if (!runSmokeTests()) {
+            exit(1);
+        }
         break;
 
     default:
-        error("Command not recognized: '$command'\nRun 'php mystack help' to see all valid commands.");
+        $suggestion = MyStackBrain::suggestCommand((string) $command);
+        $hint = $suggestion !== null ? "\nDid you mean: php mystack {$suggestion}" : '';
+        error("Command not recognized: '$command'{$hint}\nRun 'php mystack help' to see all valid commands.");
         break;
 }

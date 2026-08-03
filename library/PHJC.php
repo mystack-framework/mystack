@@ -154,10 +154,40 @@ class PHJC {
         return $type === 'cache' ? 'cache' : 'component'; 
     }
 
+    /**
+     * Use the same readable kebab-case filename for PHP, CSS, and JS caches.
+     */
+    private static function normalizeCacheName(string $name, string $fallback = 'index'): string {
+        $name = trim(str_replace('\\', '/', $name), '/');
+        $name = preg_replace('/([a-z0-9])([A-Z])/', '$1-$2', $name) ?? $name;
+        $name = preg_replace('/[^a-zA-Z0-9]+/', '-', $name) ?? '';
+        $name = strtolower(trim($name, '-'));
+        return $name !== '' ? $name : $fallback;
+    }
+
+    /**
+     * Keep compiled PHP templates in the framework cache directory.
+     * Server rules deny direct web access to this dedicated subdirectory.
+     */
+    private static function getCompiledCacheDir(): string {
+        $cacheDir = rtrim(self::getPath('cache'), '/\\') . DIRECTORY_SEPARATOR . 'php';
+
+        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0750, true) && !is_dir($cacheDir)) {
+            throw new \RuntimeException("Unable to create compiled view cache directory: {$cacheDir}");
+        }
+        return str_replace('\\', '/', $cacheDir);
+    }
+
     private static function resolveViewPath(string $view): string {
         if (isset(self::$resolvedPaths[$view])) return self::$resolvedPaths[$view];
 
         $viewPath = str_replace('.', '/', $view);
+        if (
+            str_contains($viewPath, "\0") ||
+            preg_match('~(?:^|/)\.\.(?:/|$)~', str_replace('\\', '/', $viewPath))
+        ) {
+            throw new \InvalidArgumentException('View path traversal is not allowed.');
+        }
         $basePath = self::getPath('component') . '/' . ltrim($viewPath, '/');
 
         $resolved = '';
@@ -178,29 +208,17 @@ class PHJC {
      * 🚀 EXACT ROUTE NAME CACHING (No Hash)
      */
     private static function getCacheFilePath(string $view, ?string $fragment = null): string {
-        $cacheDir = self::getPath('cache');
-        if (!is_dir($cacheDir)) mkdir($cacheDir, 0777, true);
+        $cacheDir = self::getCompiledCacheDir();
         
-        $routeName = '';
-        if (class_exists('PHRO') && is_callable(['PHRO', 'route'])) {
-            $routeInfo = PHRO::route();
-            if (!empty($routeInfo['name'])) {
-                $routeName = $routeInfo['name'];
-            }
-        }
+        $routeName = self::normalizeCacheName($view, 'view');
         
         // যদি রাউটের নাম না থাকে, তবে ভিউয়ের নাম ব্যবহার করবে
-        if (empty($routeName)) {
-            $routeName = str_replace(['/', '\\', '.'], '_', $view);
-        } else {
-            $routeName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $routeName);
-        }
 
         // ফ্র্যাগমেন্ট থাকলে নামের শেষে যুক্ত হবে
         if ($fragment !== null) {
-            $routeName .= '_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $fragment);
+            $routeName .= '-' . self::normalizeCacheName($fragment, 'fragment');
         }
-        
+
         return $cacheDir . '/' . $routeName . '.php';
     }
 
@@ -208,7 +226,7 @@ class PHJC {
      * ক্যাশ পরিষ্কার করার মেথড
      */
     public static function clearCache(): bool {
-        $cacheDir = self::getPath('cache');
+        $cacheDir = self::getCompiledCacheDir();
         if (!is_dir($cacheDir)) return true;
         $files = glob($cacheDir . '/*.php');
         foreach ($files as $file) {
@@ -231,10 +249,12 @@ class PHJC {
             }
         }
 
-        $cacheFile = self::getCacheFilePath($view, $fragment);
-        $isDebug = defined('DEBUG_MODE') && DEBUG_MODE === true;
+        if (!$viewFile) {
+            throw new \InvalidArgumentException("View not found: {$view}");
+        }
 
-        $mustBuild = !file_exists($cacheFile) || $isDebug;
+        $cacheFile = self::getCacheFilePath($view, $fragment);
+        $mustBuild = !file_exists($cacheFile);
         
         if (!$mustBuild) {
             $cacheTime = filemtime($cacheFile);
@@ -286,7 +306,13 @@ class PHJC {
      */
     private static function buildMasterTemplate(string $mainView, string $cacheFile, ?string $fragment = null) {
         $mainViewFile = self::resolveViewPath($mainView);
+        if (!$mainViewFile || !is_readable($mainViewFile)) {
+            throw new \InvalidArgumentException("View not found or unreadable: {$mainView}");
+        }
         $content = file_get_contents($mainViewFile);
+        if ($content === false) {
+            throw new \RuntimeException("Unable to read view: {$mainView}");
+        }
 
         // 0. Remove Template Comments
         $content = preg_replace('/\{\{--.*?--\}\}/s', '', $content);
@@ -305,6 +331,9 @@ class PHJC {
             $layoutContent = '';
             if (preg_match('/@(extends|layout|master|inherits)\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)/i', $content, $matches)) {
                 $layoutViewFile = self::resolveViewPath($matches[2]);
+                if (!$layoutViewFile || !is_readable($layoutViewFile)) {
+                    throw new \InvalidArgumentException("Layout not found or unreadable: {$matches[2]}");
+                }
                 $layoutContent = file_get_contents($layoutViewFile);
                 $content = preg_replace('/@(extends|layout|master|inherits)\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)/i', '', $content);
             }
@@ -361,7 +390,9 @@ class PHJC {
             $viewToInclude = trim($m[2]);
             $fragmentName = trim($m[3]);
             $dataCode = !empty($m[4]) ? $m[4] : '[]';
-            return "<?php echo \PHJC::view('{$viewToInclude}', array_merge(get_defined_vars(), {$dataCode}), '{$fragmentName}'); ?>";
+            return "<?php echo \PHJC::view(" . var_export($viewToInclude, true)
+                . ", array_merge(get_defined_vars(), {$dataCode}), "
+                . var_export($fragmentName, true) . "); ?>";
         }, $content);
 
         // 7. Inject Components & Includes
@@ -371,14 +402,60 @@ class PHJC {
         $content = self::compileDirectives($content);
 
         // ফাইল তৈরি
-        file_put_contents($cacheFile, trim($content));
+        try {
+            token_get_all($content, TOKEN_PARSE);
+        } catch (\ParseError $e) {
+            throw new \RuntimeException(
+                "Compiled view contains invalid PHP ({$mainView}): {$e->getMessage()}",
+                0,
+                $e
+            );
+        }
+        self::writeCompiledCache($cacheFile, trim($content));
+    }
+
+    private static function writeCompiledCache(string $cacheFile, string $content): void {
+        $directory = dirname($cacheFile);
+        $lockPath = $directory . DIRECTORY_SEPARATOR . '.phjc-compile.lock';
+        $lock = @fopen($lockPath, 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            if (is_resource($lock)) fclose($lock);
+            throw new \RuntimeException("Unable to lock compiled view cache: {$cacheFile}");
+        }
+
+        $temporary = @tempnam($directory, '.phjc-');
+        try {
+            if ($temporary === false || file_put_contents($temporary, $content, LOCK_EX) === false) {
+                throw new \RuntimeException("Unable to write compiled view cache: {$cacheFile}");
+            }
+            @chmod($temporary, 0640);
+
+            if (!@rename($temporary, $cacheFile)) {
+                // Windows cannot always replace an existing file atomically.
+                // The lock keeps framework writers serialized in that case.
+                if (file_put_contents($cacheFile, $content, LOCK_EX) === false) {
+                    throw new \RuntimeException("Unable to replace compiled view cache: {$cacheFile}");
+                }
+                @unlink($temporary);
+            }
+        } finally {
+            if (is_string($temporary) && is_file($temporary)) @unlink($temporary);
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
     }
 
     private static function injectComponentsAndIncludes($content) {
         // @include | @partial | @import
         $content = preg_replace_callback('/@(include|partial|import)\s*\(\s*[\'"]?(.*?)[\'"]?\s*(?:,\s*(\[.*?\]))?\s*\)/i', function($m) {
             $viewPath = self::resolveViewPath($m[2]);
+            if (!$viewPath || !is_readable($viewPath)) {
+                throw new \InvalidArgumentException("Included view not found or unreadable: {$m[2]}");
+            }
             $includedHtml = file_get_contents($viewPath);
+            if ($includedHtml === false) {
+                throw new \RuntimeException("Unable to read included view: {$m[2]}");
+            }
             $dataCode = !empty($m[3]) ? "<?php extract({$m[3]}); ?>" : "";
             return $dataCode . self::injectComponentsAndIncludes($includedHtml);
         }, $content);
@@ -412,7 +489,7 @@ class PHJC {
                         $k = substr($k, 1);
                         $attributes[] = "'$k' => $v";
                     } else {
-                        $attributes[] = "'$k' => '$v'";
+                        $attributes[] = var_export($k, true) . ' => ' . var_export($v, true);
                     }
                 }
                 $attributes[] = "'slot' => " . var_export($slotContent, true);
@@ -437,7 +514,7 @@ class PHJC {
                 $key = substr($key, 1); 
                 $attributes[] = "'$key' => $value"; 
             } else { 
-                $attributes[] = "'$key' => '$value'"; 
+                $attributes[] = var_export($key, true) . ' => ' . var_export($value, true);
             }
         }
         
@@ -462,6 +539,26 @@ class PHJC {
 
         $content = preg_replace('/\{\!\!\s*(.+?)\s*\!\!\}/', '<?php echo $1 ?? \'\'; ?>', $content);
         $content = preg_replace('/@php(.*?)@endphp/s', '<?php $1 ?>', $content);
+
+        // PHUI kit directives. Keep @section reserved for layout composition.
+        // Each UI directive intentionally occupies one template line so nested
+        // PHP expressions inside its data array remain safe to compile.
+        $content = preg_replace_callback(
+            '/^[ \t]*@(ui|element|uisection|uilayout|uipage)\s*\(\s*([\'"])([a-z0-9:._-]+)\2\s*(?:,\s*(.+))?\s*\)[ \t]*$/im',
+            static function ($match) {
+                $method = match (strtolower($match[1])) {
+                    'element' => 'element',
+                    'uisection' => 'section',
+                    'uilayout' => 'layout',
+                    'uipage' => 'page',
+                    default => 'ui',
+                };
+                $slug = var_export($match[3], true);
+                $data = isset($match[4]) && trim($match[4]) !== '' ? trim($match[4]) : '[]';
+                return "<?php echo \\PHUI::{$method}({$slug}, {$data}); ?>";
+            },
+            $content
+        );
 
         $content = preg_replace_callback('/@foreach\s*\((.+?)\s+as\s+(.+?)\)/', function($m) {
             return "<?php \n \PHJC::startLoop({$m[1]});\n foreach({$m[1]} as {$m[2]}): \n \$loop = \PHJC::currentLoop(); \n ?>";
@@ -1802,74 +1899,19 @@ JS;
         }
     }
 
-    public static function app($stream) {
-        PHRO::get($stream, function($data){
+    public static function app(string $stream, callable $producer) {
+        PHRO::get($stream, function($data) use ($producer) {
             PHRQ::header('GET', '*', 'application/javascript; charset=utf-8', []);
-            $getR = PHRO::routes($data['path']);
-            $short = $getR['short'];
-            $link = $getR['link'];
-            $method = $getR['method'];
-            $file = $getR['callback_details']['file'];
-    
-            $phpCode = PHRO::source($short);
-            $lines = explode("\n", $phpCode);
-            $firstLine = $lines[0] ?? null;
-            $lastLine = end($lines);
-
-            function extractFunction($file, $startPattern) {
-                if (!file_exists($file)) {
-                    return null;
-                }
-                $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-                $functionCode = [];
-                $braceCount = 0;
-                $isCapturing = false;
-                foreach ($lines as $line) {
-                    $trimmedLine = trim($line);
-                    if (!$isCapturing) {
-                        if (preg_match('/' . preg_quote($startPattern, '/') . '/', $trimmedLine)) {
-                            $isCapturing = true;
-                        }
-                    }
-                    if ($isCapturing) {
-                        $functionCode[] = $line;
-                        $braceCount += substr_count($line, '{') - substr_count($line, '}');
-                        if ($braceCount === 0) {
-                            break;
-                        }
-                    }
-                }
-                if (!$functionCode) {
-                    return null;
-                }
-                array_shift($functionCode);
-                array_pop($functionCode);
-                $extractedCode = implode("\n", $functionCode);
-                $cleanedCode = preg_replace('/^\s*\n+/m', '', $extractedCode);
-                return $cleanedCode ?: null;
+            $result = $producer($data);
+            if ($result instanceof \Stringable || is_scalar($result)) {
+                echo (string) $result;
+                return;
             }
-
-            $functionCode = extractFunction($file, $firstLine);
-            $functionCode = str_replace('PHJC::render(', 'PHJC::render_j(', $functionCode);
-            ob_start();
-            eval($functionCode . ';');
-            $currentData = ob_get_clean();
-
-            if ($currentData) {            
-                $dom = new DOMDocument();
-                libxml_use_internal_errors(true);
-                $dom->loadHTML($currentData);
-                libxml_clear_errors();
-                $xpath = new DOMXPath($dom);
-                $scriptNode = $xpath->query("//script[@id='main']")->item(0);
-                if ($scriptNode) {
-                    $scriptContent = $scriptNode->nodeValue;
-                    echo $scriptContent;
-                } else {
-                    echo "//No main script found.";
-                }
+            if ($result !== null) {
+                throw new \UnexpectedValueException(
+                    'PHJC::app producer must return a string, scalar, Stringable, or null.'
+                );
             }
-
         });
     }
 
@@ -1884,23 +1926,30 @@ JS;
         }
         if (empty($routeName)) {
             $uri = $_SERVER['REQUEST_URI'] ?? 'index';
-            $routeName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', trim(parse_url($uri, PHP_URL_PATH), '/'));
-            if (empty($routeName)) $routeName = 'index';
-        } else {
-            $routeName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $routeName);
+            $routeName = (string) parse_url($uri, PHP_URL_PATH);
         }
-        $routeName = ltrim($routeName, '_');
+        $routeName = self::normalizeCacheName($routeName);
         
         $cacheDir = self::getPath('cache');
-        if (!is_dir($cacheDir)) @mkdir($cacheDir, 0777, true);
+        $cssCacheDir = $cacheDir . '/css';
+        $jsCacheDir = $cacheDir . '/js';
+        foreach ([$cssCacheDir, $jsCacheDir] as $assetCacheDir) {
+            if (
+                !is_dir($assetCacheDir) &&
+                !mkdir($assetCacheDir, 0755, true) &&
+                !is_dir($assetCacheDir)
+            ) {
+                throw new \RuntimeException("Unable to create asset cache directory: {$assetCacheDir}");
+            }
+        }
         
         $docRoot = str_replace(['\\', '//'], '/', rtrim($_SERVER['DOCUMENT_ROOT'] ?? '', '/'));
         $cachePathNormalized = str_replace(['\\', '//'], '/', rtrim($cacheDir, '/'));
         $publicUrl = str_replace($docRoot, '', $cachePathNormalized);
         $publicUrl = '/' . ltrim($publicUrl, '/');
 
-        $cssFile = $cacheDir . '/' . $routeName . '.css';
-        $jsFile = $cacheDir . '/' . $routeName . '.js';
+        $cssFile = $cssCacheDir . '/' . $routeName . '.css';
+        $jsFile = $jsCacheDir . '/' . $routeName . '.js';
 
         // CSS Cache
         $rawCss = trim(preg_replace('/<\/?style[^>]*>/i', '', self::$css));
@@ -1911,9 +1960,11 @@ JS;
                 $writeCss = false;
             }
             if ($writeCss) {
-                file_put_contents($cssFile, $rawCss, LOCK_EX);
+                if (file_put_contents($cssFile, $rawCss, LOCK_EX) === false) {
+                    throw new \RuntimeException("Unable to write CSS cache file: {$cssFile}");
+                }
             }
-            self::$headPart .= "    <link rel=\"stylesheet\" href=\"{$publicUrl}/{$routeName}.css?v={$v}\">\n";
+            self::$headPart .= "    <link rel=\"stylesheet\" href=\"{$publicUrl}/css/{$routeName}.css?v={$v}\">\n";
             self::$css = ''; 
         } else {
             if (file_exists($cssFile)) @unlink($cssFile);
@@ -1929,9 +1980,11 @@ JS;
                 $writeJs = false;
             }
             if ($writeJs) {
-                file_put_contents($jsFile, $rawJs, LOCK_EX);
+                if (file_put_contents($jsFile, $rawJs, LOCK_EX) === false) {
+                    throw new \RuntimeException("Unable to write JavaScript cache file: {$jsFile}");
+                }
             }
-            self::$bodyPart .= "    <script id=\"main\" src=\"{$publicUrl}/{$routeName}.js?v={$v}\" defer></script>\n";
+            self::$bodyPart .= "    <script id=\"main\" src=\"{$publicUrl}/js/{$routeName}.js?v={$v}\" defer></script>\n";
             self::$js = ''; 
         } else {
             if (file_exists($jsFile)) @unlink($jsFile);

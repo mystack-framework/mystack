@@ -691,7 +691,7 @@ class PHVD
         if (is_int($v) || is_float($v))
             return $v;
         if (is_string($v))
-            return mb_strlen($v);
+            return function_exists('mb_strlen') ? mb_strlen($v) : strlen($v);
         if (is_array($v) && isset($v['tmp_name']))
             return $v['size'] / 1024;
         if (is_array($v))
@@ -989,11 +989,14 @@ class PHVD
             throw new PhvdInternalException("PHDB class not found for 'unique' rule.");
         $table = $params[0];
         $column = $params[1];
+        self::assertDatabaseIdentifier($table);
+        self::assertDatabaseIdentifier($column);
         $except_id = $params[2] ?? null;
         $query = "SELECT COUNT(*) as count FROM `{$table}` WHERE `{$column}` = ?";
         $bindings = [$value];
         if ($except_id) {
             $except_column = $params[3] ?? 'id';
+            self::assertDatabaseIdentifier($except_column);
             $query .= " AND `{$except_column}` != ?";
             $bindings[] = $except_id;
         }
@@ -1004,8 +1007,17 @@ class PHVD
     {
         if (!class_exists('PHDB'))
             throw new PhvdInternalException("PHDB class not found for 'exists' rule.");
+        self::assertDatabaseIdentifier($params[0] ?? '');
+        self::assertDatabaseIdentifier($params[1] ?? '');
         $count = PHDB::count($params[0], [$params[1] => $value]);
         return $count > 0;
+    }
+
+    private static function assertDatabaseIdentifier(string $identifier): void
+    {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $identifier)) {
+            throw new PhvdInternalException('Invalid database identifier in validation rule.');
+        }
     }
 
     // Array & Content

@@ -52,7 +52,9 @@ class PHAP
         }
 
         $routerMethod = strtolower($method);
-        if (!method_exists('PHRO', $routerMethod)) $routerMethod = 'any';
+        if (!method_exists('PHRO', $routerMethod)) {
+            throw new \InvalidArgumentException("Unsupported API method: {$method}");
+        }
 
         PHRO::$routerMethod($route, function() use ($middleware, $rules, $logic, $msg) {
             // 2. Middleware/Auth Check
@@ -109,6 +111,8 @@ class PHAP
      */
     public static function get(string $table, mixed $id, string $col = 'id'): void
     {
+        self::assertIdentifier($table, 'table');
+        self::assertIdentifier($col, 'column');
         $res = PHDB::select($table, '*', [$col => $id]);
         if (!$res) self::fail("Item not found", 404);
         self::ok($res[0]);
@@ -124,6 +128,7 @@ class PHAP
      */
     public static function add(string $table, array $rules = [], string $msg = "Record created"): void
     {
+        self::assertIdentifier($table, 'table');
         self::run(fn($d) => PHDB::insert($table, $d), $rules, $msg);
     }
 
@@ -138,6 +143,11 @@ class PHAP
      */
     public static function up(string $table, mixed $id, array $rules = [], string $col = 'id'): void
     {
+        self::assertIdentifier($table, 'table');
+        self::assertIdentifier($col, 'column');
+        if ($id === null || $id === '') {
+            self::fail('Record ID is required', 422);
+        }
         self::run(fn($d) => PHDB::update($table, $d, [$col => $id]), $rules, "Record updated");
     }
 
@@ -151,6 +161,11 @@ class PHAP
      */
     public static function rm(string $table, mixed $id, string $col = 'id'): void
     {
+        self::assertIdentifier($table, 'table');
+        self::assertIdentifier($col, 'column');
+        if ($id === null || $id === '') {
+            self::fail('Record ID is required', 422);
+        }
         $res = PHDB::delete($table, [$col => $id]);
         $res ? self::ok([], "Record deleted") : self::fail("Delete failed");
     }
@@ -176,10 +191,14 @@ class PHAP
             if (is_array($result) && isset($result['status']) && $result['status'] === false) {
                 self::fail($result['message'] ?? "Operation failed", $result['code'] ?? 400);
             }
+            if ($result === false) {
+                self::fail('Operation failed', 500);
+            }
 
             self::ok($result, $successMsg);
         } catch (\Throwable $e) {
-            self::fail($e->getMessage(), 500);
+            $debug = class_exists('PHDE') && method_exists('PHDE', 'isDebug') && PHDE::isDebug();
+            self::fail($debug ? $e->getMessage() : 'Internal server error', 500);
         }
     }
 
@@ -283,6 +302,8 @@ class PHAP
      */
     public static function page(string $table, array $where = [], int $limit = 15, ?callable $callback = null): void
     {
+        self::assertIdentifier($table, 'table');
+        $limit = max(1, min(500, $limit));
         $page = (int)(self::input('page', 1));
         if ($page < 1) $page = 1;
         $offset = ($page - 1) * $limit;
@@ -290,7 +311,7 @@ class PHAP
         $totalRes = PHDB::query("SELECT COUNT(*) as total FROM `$table`" . (empty($where) ? "" : " WHERE " . self::buildWhere($where)), array_values($where));
         $total = $totalRes[0]['total'] ?? 0;
 
-        $data = PHDB::select($table, '*', $where, "LIMIT $limit OFFSET $offset");
+        $data = PHDB::select($table, '*', $where, $limit, $offset);
         $items = self::collection($data, $callback);
 
         $response = [
@@ -336,8 +357,6 @@ class PHAP
         if (!headers_sent()) {
             http_response_code($code);
             header('Content-Type: application/json; charset=utf-8');
-            header('Access-Control-Allow-Origin: *'); // Basic CORS Support
-            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
         }
 
         echo json_encode([
@@ -354,9 +373,17 @@ class PHAP
     {
         $cond = [];
         foreach (array_keys($where) as $key) {
+            self::assertIdentifier((string) $key, 'column');
             $cond[] = "`$key` = ?";
         }
         return implode(' AND ', $cond);
+    }
+
+    private static function assertIdentifier(string $identifier, string $type): void
+    {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $identifier)) {
+            throw new \InvalidArgumentException("Invalid {$type} identifier.");
+        }
     }
 
     /**
