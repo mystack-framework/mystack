@@ -25,7 +25,8 @@ Never invent a method, configuration key, provider capability, or runtime depend
 | `src/js/` | PHJS runtime/build sources, Service Worker, and optional browser assets | Treat `PHJS-min.php` as canonical; see synchronization rules below. |
 | `src/cache/css`, `src/cache/js`, `src/cache/php` | Generated component builds | Directories are auto-created. Do not rename generated files to hashes or opaque names. |
 | `.mystack/` | Private PHLS/PHMO runtime state and structured logs | Never expose publicly or commit runtime data. Keep its access guard intact. |
-| `mystack` | Intelligent CLI, doctor, audit, smoke test, folder repair, updater | Keep executable PHP syntax and update its smoke coverage with framework changes. |
+| `mystack`, `mystack.cmd` | Extensible console kernel plus portable Unix/Windows launcher | Preserve `php mystack`, direct `mystack`, original commands, executable PHP syntax and smoke coverage. |
+| `docs/`, `llms.txt`, `llms-full.txt` | Source-generated human and AI documentation, API catalog and static portal | Regenerate with `mystack docs:build`; do not hand-edit generated API files. |
 
 `app/` and `component/` intentionally use a flat layout. Framework-owned runtime folders may have their own internal structure.
 
@@ -50,7 +51,7 @@ PHJT::algorithm('HS512');
 
 // Configure optional services here.
 
-import('app:HomeController', 'component:PublicHome');
+import('app:HomeController', 'component:HomeView');
 
 PHRO::get('/', [HomeController::class, 'index']);
 PHRO::listen();
@@ -71,7 +72,7 @@ Order-sensitive rules:
 Use the framework path layer instead of hardcoded document-root or project-folder assumptions:
 
 ```php
-$path = DIR::path('component:PublicHome');
+$path = DIR::path('component:HomeView');
 $url  = DIR::link('js:custom.js', true);
 $base = PHCO::path();
 $prefix = PHCO::pre();
@@ -81,7 +82,7 @@ Use `import()` for project/application assets:
 
 ```php
 import('app:UserController');
-import('component:PublicHome');
+import('component:HomeView');
 import('js:custom.js');
 import('css:app.css');
 ```
@@ -242,19 +243,42 @@ Use the built-in CLI from the project root:
 
 ```bash
 php mystack help
+php mystack cli:status
+php mystack list
+php mystack route:list
+php mystack migrate:status
+php mystack queue:status
+php mystack schedule:list
 php mystack doctor
 php mystack doctor --fix
 php mystack audit
 php mystack smoke
+php mystack docs:build
+php mystack docs:check
 php mystack update --check
 ```
 
 - `doctor` is read-only; `doctor --fix` applies bounded formatting/permission repair.
 - `audit` is a read-only production review.
 - `smoke` is the canonical framework regression suite and must remain green.
+- Application commands are auto-discovered only from flat `app/*Command.php` files with valid static `commandName()`, `description()` and `handle()` methods.
+- `php mystack` remains the universal fallback. Direct `mystack` uses the Unix shebang or Windows launchers; `cli:install` may create a user-level shim but must not silently mutate system PATH. Preserve plain `--json` output and honor `NO_COLOR`/`--no-ansi`.
+- Generated migrations, seeders, jobs and schedules are opt-in. Never run user migration/seeder code during discovery, help, doctor, audit or ordinary web requests.
+- Queue and scheduler state in `.mystack/console.sqlite` is private, WAL-backed, atomic local single-host state. It is not a distributed queue; long-running workers require an external process supervisor.
+- Destructive CLI operations such as rollback, cache pruning, queue flush/forget and schedule removal must retain confirmation/`--yes` gates.
 - `update` compares the official GitHub `main` branch by SHA-256/exact bytes, prompts before changes, validates staged files, runs smoke, and rolls back on failure.
-- Update scope is strictly limited to `library/*`, `src/js/*`, `AGENTS.md`, `LICENSE`, `MANUAL_BN.md`, `README.md`, and `mystack`. It never deletes unmatched local files.
+- Update scope is strictly limited to `library/*`, `src/js/*`, `docs/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, and `mystack.cmd`. Keep root HTTP denial for private metadata and both CLI files. It never deletes unmatched local files.
+- `docs:build` derives public signatures from current `library/*.php` without executing library code. `docs:check` and smoke reject stale API catalogs. Keep the portal, API JSON, `llms` files and per-library references synchronized.
+- The Pages workflow publishes only `docs/`. Keep root and `docs/` copies of both `llms` files synchronized. Do not generate static `robots.txt` or `sitemap.xml`; PHRO provides those routes dynamically.
+- MyStack follows the rolling official `main` branch and has no fixed framework version. Do not invent, display or document a MyStack release/version number.
 - Before handoff, run syntax checks for changed PHP, relevant targeted tests, and `php mystack smoke` for framework changes.
+
+## 11.1 License, ownership and contribution governance
+
+- MyStack is licensed under Apache License 2.0; preserve `LICENSE`, `NOTICE`, copyright and attribution notices.
+- Copyright owner and lead maintainer: Sakibur Rahman (`sakibweb`). Official organization: `https://github.com/mystack-framework`; official repository: `https://github.com/mystack-framework/mystack`.
+- Copies and modifications are allowed under the License. Modified files/distributions must be identified and must not claim authorship of the original MyStack work or imply that an unofficial fork is the official framework.
+- Public issues, requests and pull requests do not grant write, merge, release or official-update authority. Follow `CONTRIBUTING.md` and `.github/CODEOWNERS`; owner or authorized maintainers make official repository decisions.
 
 ## 12. Change safety and compatibility checklist
 

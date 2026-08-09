@@ -1,0 +1,3046 @@
+# MyStack Framework
+
+> Official repository: https://github.com/mystack-framework/mystack
+> Documentation: https://mystack-framework.github.io/mystack/
+> License: Apache-2.0
+
+MyStack is a zero-Composer PHP full-stack framework. Executable code in library/, src/js/PHJS-min.php and mystack is authoritative. Never invent APIs; verify exact signatures.
+
+## Canonical resources
+- AGENTS.md: agent contract
+- README.md: overview
+- MANUAL_BN.md: detailed Bangla manual
+- docs/api.json: machine API catalog
+
+## Source API map
+
+### PHAI — library/PHAI.php
+- `static setAccounts(array $accounts)` — Sets AI provider accounts.
+- `static setPriority(array $priority)` — Sets AI provider priority order.
+- `static setModels(array $models)` — Sets AI models for providers.
+- `static setTimeout(int $seconds)` — Sets the default timeout for AI requests.
+- `static getModels(string $provider)` — Gets models for a specific provider.
+- `static registerBridgeProcess($key, $process, $pipes)` — Registers a bridge process and its pipes.
+- `static getBridgeProcess($key)` — Gets a registered bridge process.
+- `static cleanup()` — Cleans up all registered bridge processes.
+- `static serve(string $prefix = "/v1", ?string $apiKey = null)` — AI API SERVE (Universal Compatibility Bridge - Final)
+- `static clusterAPI(string $path = "/v1/chat/completions", ?string $apiKey = null)`
+- `static cluster(mixed $input, array $options = [])`
+- `static getInstance(): PHAI`
+- `static routes(string $path = "/mcp")`
+- `static tool(string $name, string $description, array $schema, mixed $handler): PhaiBuilder`
+- `static prompt(string $name, string $description, array $arguments, mixed $handler): PhaiBuilder`
+- `static resource(string $uri, string $name, string $description, mixed $handler): PhaiBuilder`
+- `static resourceTemplate(string $uriTemplate, string $name, string $description, mixed $handler): PhaiBuilder`
+- `static alias(string $customAlias, string $targetMethod)`
+- `static middleware(callable $middleware)`
+- `handleRequest($data)`
+- `static bridge(string $target, string $method, array $params = [], $options = [])`
+- `__construct(array &$reference)`
+- `middleware(callable $callback): self`
+- `retries(int $amount): self`
+- `set(string $key, $value, ?int $expiration = null, array $tags = [])`
+- `remove(string $key)`
+- `static call(string $provider, mixed $input, string $apiKey, array $options = [])`
+
+### PHAP — library/PHAP.php
+- `static api(string $signature, mixed $middleware = false, array $rules = [], mixed $logic = null, string $msg = "Success"): void` — MASTER API METHOD (Positional - The Easiest Way)
+- `static all(string $table, array $where = [], int $limit = 15): void` — PHAP::all('users') -> Returns paginated list
+- `static get(string $table, mixed $id, string $col = 'id'): void` — PHAP::get('users', 5) -> Returns single item
+- `static add(string $table, array $rules = [], string $msg = "Record created"): void` — PHAP::add('users', ['email' => 'required|email']) -> Inserts data
+- `static up(string $table, mixed $id, array $rules = [], string $col = 'id'): void` — PHAP::up('users', 5, ['name' => 'required']) -> Updates data
+- `static rm(string $table, mixed $id, string $col = 'id'): void` — PHAP::rm('users', 5) -> Deletes data
+- `static run(callable $logic, array $rules = [], string $successMsg = "Action Successful"): void` — A-Z API EXECUTION ENGINE
+- `static input(?string $key = null, mixed $default = null): mixed` — Universal Input Handler (JSON, POST, GET, Route Params)
+- `static resource(mixed $data, ?callable $callback = null): mixed` — Smart Resource Transformer
+- `static ok(mixed $data = [], string $msg = "Success"): void` — Quick Success Response (200 OK)
+- `static fail(string $msg = "Action Failed", int $code = 400): void` — Quick Failure Response
+- `static valid(array $rules, array $customData = []): array` — Auto-Validate Request and Exit on Failure
+- `static page(string $table, array $where = [], int $limit = 15, ?callable $callback = null): void` — Smart Database Pagination Response
+- `static auth(string $table = 'users'): array` — Quick Auth Check (Returns user data or fails)
+- `static send(mixed $data = [], string $message = "Success", int $code = 200, bool $status = true): void` — Standardized JSON Response
+- `static item(mixed $data, ?callable $callback = null): array` — Transforms a single item.
+- `static collection(array $data, ?callable $callback = null): array` — Transforms a collection of items.
+- `static clean(mixed $data, array $extraFields = []): mixed` — Cleans sensitive fields from data.
+
+### PHAU — library/PHAU.php
+- `static identityLib($url = '/identity-lib', array $options = [])` — Registers identity library routes and JS.
+- `static make(string $table, array $dbMap = [], array $inputData = [], array $options = []): array`
+- `static check(string $table, string|array $tokenCol = "token", ?string $inputToken = null, string|null $identyCol = null): array`
+- `static verifyMake($account = [], $accountRequired = [], $mode = 'OTP', $length = 24, $digits = 6, $time = 180, $offset = 0, $algo = 'sha1', $from = null, $name = null, $cc = '', $bcc = '')`
+- `static verifyCheck($table = null, $account = [], $setData = [], $secret = null, $code = 400, $mode = 'OTP', $digits = 6, $time = 180, $offset = 0, $algo = 'sha1')`
+- `static socialProviders(): array` — List built-in sign-in providers; custom OAuth/OIDC is config-driven.
+- `static socialUrl(string $provider, array $config): array` — Generate Provider Login URL
+- `static listenCallback(string $route, array $configs, callable $onSuccess)` — UNIVERSAL ROUTER CALLBACK (`/callback`)
+
+### PHCD — library/PHCD.php
+- `static initialize($state = '/cdn', $css = __DIR__ . '/../src/css/', $js = __DIR__ . '/../src/js/', ?callable $authorize = null)` — Initializes the PHCD class with custom paths and state.
+- `static handleRequest()` — Handles incoming POST requests related to CDN operations.
+- `static get($package = true, $type = true, $skipPKG = true, $skipFILE = true)` — Retrieves a list of files for specified packages based on their type (JavaScript or CSS).
+
+### PHCO — library/PHCO.php
+- `static isSecure(): bool` — http or https
+- `static path(): string` — Get the project-specific base path for cookies
+- `static pre(): string` — Auto-generate project-specific cookie prefix from PHRO::root()
+- `static add(string $name, $value, int $expireMinutes = 0): bool` — Adds a new cookie or updates an existing one.
+- `static update(string $name, $value, int $expireMinutes = 0): bool` — Updates a cookie. Since setcookie overwrites, this is an alias for add.
+- `static remove(string $name): bool` — Removes a cookie ONLY from the current project's path.
+- `static get(string $name)` — Retrieves the ACTUAL value of the cookie.
+- `static exists(string $name): bool` — Checks if a cookie exists.
+- `static expired(string $name): bool` — Checks if a cookie has theoretically expired based on stored metadata.
+- `static active(string $name): bool` — Checks if a cookie is active.
+- `static getExpiredDetails(string $name): ?int` — Retrieves remaining seconds until expiration.
+- `static makeExpired(string $name): bool` — Forces a cookie to expire immediately.
+- `static getAll(): array` — Retrieves all cookies (decoded values).
+
+### PHCS — library/PHCS.php
+- `__construct(array $customConfig = [])`
+- `static config(array $config): void`
+- `static HTML(string $htmlContent): void`
+- `addHtml(string $htmlContent): self`
+- `static CSS(string $cssContent): void`
+- `addCss(string $cssContent): self`
+- `static process(string $content, string $type = 'html'): string`
+- `static build(bool $modular = false): string`
+- `registerUtilityHandler(string $pattern, callable|string $handlerMethod, int $priority = 0): void`
+- `processHtml(string $html): string`
+- `processCss(string $cssContent): string`
+- `generateCss(array $classes): string`
+- `buildCss(bool $modular = false): string`
+
+### PHDB — library/PHDB.php
+- `static error()` — Retrieve the last error message encountered.
+- `static id()` — Get the ID generated from the last INSERT query.
+- `static affected()` — Get the number of affected rows in the last query.
+- `static checker(): array` — Performs a read-only database availability check without creating or
+- `static connect()` — Connect to the database.
+- `static disconnect()` — Disconnect from the database.
+- `static query(string $query, array $params = [], bool $single = false)` — The Ultimate Auto-Healing, Bulletproof Query Executor.
+- `static fast(string $query, array $params = [], string|array $columns = '*'): \Generator` — Stream a database result one row at a time without buffering the full
+- `static first(string $query, array $params = []): ?array` — Execute a SELECT and return its first row, or null when no row matches.
+- `static scalar(string $query, array $params = []): mixed` — Execute a SELECT and return the first value from its first row.
+- `static save(string $table, array $data, mixed $uniqueKeys = null)` — Smart Save: Insert, Update, or Skip.
+- `static insert(string $table, array $data, bool $overwrite = false)` — Insert a record into the database.
+- `static batchInsert(string $table, array $data, bool $overwrite = false)` — Insert multiple records in a single query with optional overwrite
+- `static update(string $table, array $data, array $where = [])` — Update records in the database based on specified conditions.
+- `static delete(string $table, array $where = [], bool $allow_all = false)` — Delete records from the database based on specified conditions.
+- `static select(string $table, string $columns = '*', array $where = [], ?int $limit = null, ?int $offset = null, ?string $orderBy = null, ?string $groupBy = null, ?array $joins = null, bool $distinct = false)` — Select records from the database based on specified conditions.
+- `static find(string $table, $id, string $columns = '*')` — Find a record by its primary key (ID).
+- `static specificSelect(string $query, array $params = [])` — Perform a specific selection from the database.
+- `static getValue(string $table, string $column, array $where = [])` — Get a single value from the database.
+- `static getSpecificValue(string $query, array $params = [])` — Get a specific value from the database.
+- `static addDB(string $dbname, string $collation = 'utf8mb4_unicode_ci')` — Create a database manually (Utility function).
+- `static createTable(string $table_name, array $columns, mixed $sync = true)` — Create or fully synchronize a table from one schema definition.
+- `static dropTable(string $table_name)` — Drop a table from the database.
+- `static alterTable(string $table_name, array $changes)` — Alter a table in the database.
+- `static truncateTable(string $table_name)` — Truncate a table in the database.
+- `static findBy(string $table, string $columns = '*', array $conditions = [], ?int $limit = null, ?int $offset = null)` — Find records in the database based on specific conditions.
+- `static search(string $table, string $columns = '*', array|string $conditions = [], ?int $limit = null, ?int $offset = null, ?string $orderBy = null, ?string $groupBy = null, ?array $joins = null)` — Search records in the database based on specified conditions.
+- `static columns(string $table, string|array|null $filter = null, string|array|null $skip = null)` — Get the available columns from a specified table in the database.
+- `static deleteBy(string $table, array $conditions)` — Delete records from the database based on specific conditions.
+- `static paginate(string $table, string $columns = '*', array $where = [], int $page = 1, int $per_page = 10)` — Paginate results with total count information
+- `static sum(string $table, string $column, array $where = [])` — Get sum of a column safely.
+- `static avg(string $table, string $column, array $where = [])` — Get average of a column safely.
+- `static max(string $table, string $column, array $where = [])` — Get maximum value of a column safely.
+- `static min(string $table, string $column, array $where = [])` — Get minimum value of a column safely.
+- `static count(string $table, string|array|null $column = null, array|null $conditions = null): int` — Count records safely.
+- `static exists(string $table, array $where = [])` — Check if a record exists in the database.
+- `static api(string $table, string|array $columns = '*', array $where = [], array $options = [], bool $return = false)` — Serving JSON API responses instantly with Smart Pagination & Formatting.
+- `static transaction(callable $callback)` — Execute operations within a database transaction.
+- `static clean(string $table, array $options = [])` — Clean database records with various options
+- `static array_get(string $table, string $column, array $where, $key = null, $default = null)` — Gets a value from a column containing array-like data.
+- `static array_set(string $table, string $column, array $where, $key = null, $value = null, bool $force = false)` — Sets a value in a column containing array-like data.
+- `static close()` — Close the database connection.
+
+### PHDE — library/PHDE.php
+- `__construct($state = false)` — Initializes the error reporting settings.
+- `static enableErrorReporting()` — Enables comprehensive error reporting and sets custom handlers.
+- `static disableErrorReporting()` — Disables error reporting and hides all errors.
+- `static customErrorHandler($errno, $errstr, $errfile, $errline)` — Custom error handler to capture errors into a buffer.
+- `static debug($state = true)` — Initialize error reporting settings.
+- `static isDebug(): bool`
+- `static errors($state = true)` — Get collected error messages as a string.
+- `static errorJSON()` — Processes errors from the error buffer and returns a structured JSON representation of the errors.
+- `static getType()` — Retrieves the content type from HTTP headers.
+- `static displayErrors($state = true)` — Display captured errors from the error buffer.
+- `static api($method = 'application/json')` — Set HTTP response headers for API responses.
+- `static apibar($url = '/apibar')` — Initializes the API testing tool (APIBAR) with a specified URL path.
+- `static file($name, $length)` — Set HTTP response headers for file downloads.
+- `static memory($limit)` — Set memory limit for PHP script.
+
+### PHED — library/PHED.php
+- `hide($string, $key, $action)` — Encrypts or decrypts the string based on the provided action.
+- `static make($string, $action)` — Public interface to encrypt or decrypt a string using the default key.
+- `static score()` — Evaluates the security score based on key length, algorithm, and integrity measures.
+- `static key($new_key)` — Updates the default encryption key.
+
+### PHEM — library/PHEM.php
+- `static smtp($smtpHost, $smtpPort, $smtpSecure)` — Configure SMTP settings.
+- `static imap($imapHost, $imapPort, $imapSecure, $folder = 'INBOX')` — Configure IMAP settings.
+- `static pop($popHost, $popPort, $popSecure, $folder = 'INBOX')` — Configure POP3 settings.
+- `static smtpLogin($username, $password)` — Set SMTP login credentials.
+- `static imapLogin($username, $password)` — Set IMAP login credentials.
+- `static popLogin($username, $password)` — Set POP3 login credentials.
+- `static smtpGet($filter, $limit)` — Retrieve emails using SMTP settings (alias for IMAP get).
+- `static imapSend($from, $name, $to, $cc, $bcc, $subject, $message)` — Send an email using IMAP settings (alias for SMTP send).
+- `static popSend($from, $name, $to, $cc, $bcc, $subject, $message)` — Send an email using POP3 settings (alias for SMTP send).
+- `static imapGet($filter, $limit)` — Retrieve emails using IMAP settings.
+- `static popGet($filter, $limit)` — Retrieve emails using POP3 settings.
+- `static smtpSend($from, $name, $to, $cc, $bcc, $subject, $message)` — Send an email using SMTP settings.
+- `static showLog()` — Display the SMTP log.
+
+### PHEV — library/PHEV.php
+- `static allowWebWorker(bool $allow = true): void` — Explicit compatibility switch for hosts that intentionally run a socket loop in a web worker.
+- `static initialize($path = '/websocket', $address = '0.0.0.0', $port = 8000)`
+- `static start()`
+- `static restart()`
+- `static stop()`
+- `static running(): bool`
+- `static clients()`
+- `static debugClients()`
+- `static getHandler($message)`
+- `static handler($requestPath, $action, $handler)`
+- `static message($clientId, $message)`
+- `static broadcast($message)`
+- `static disconnect($clientId = null)`
+- `static initHeaders()` — Initialize SSE headers
+- `static sendSE($data, $event = null, $id = null)` — Send data to the client
+- `static setRetry($milliseconds)` — Set a retry interval for the client
+- `static stream(callable $callback, int $interval = 10000)` — Start streaming data continuously
+- `static streamUInew(string $key, int $interval = 10000)`
+- `static streamUI(string $name = '/streamui', int $interval = 10000)`
+
+### PHFY — library/PHFY.php
+- `static configure(array $options = []): array`
+- `static config(): array`
+- `static send(string $message, array $options = []): array`
+- `static clientConfig(array $context = []): array`
+- `static webPushCapability(): array`
+- `static cryptoCapability(): array` — Performs an in-memory hosting capability test without storing keys.
+- `static registerRoutes(): void`
+- `static privateFeed(): void`
+
+### PHJC — library/PHJC.php
+- `static fastUI(): void`
+- `static ui(string $type, array $attr = [], string $content = ''): string`
+- `static icon(string $name, string $style = ''): string`
+- `static slot(string $name, ?string $content = null)`
+- `static layout(string $title, string $bodyContent): string`
+- `static clearCache(): bool` — ক্যাশ পরিষ্কার করার মেথড
+- `static view(string $view, array $data = [], ?string $fragment = null): string` — মূল রেন্ডার মেথড
+- `static includeView(string $view, array $data = []): string`
+- `static startLoop($array): void`
+- `static currentLoop(): object`
+- `static endLoop(): void`
+- `static share($key, $value = null): void`
+- `static directive(string $name, callable $handler): void`
+- `static minify(bool $state = true): void`
+- `static metaPreset(string $type, array $data = []): void`
+- `static breadcrumb(array $crumbs): void`
+- `static reset()`
+- `static head(array $data)`
+- `static buildHead()`
+- `static newHTML($tag = null, $attributes = [], $content = '')`
+- `static singleHTML($html = [])`
+- `static mergeHTML(array $htmlParts)`
+- `static p2j($php, $json = true)`
+- `static h2p($html, $json = true, $echo = false, $pre = false)`
+- `static css($rules)`
+- `static countElements($input)`
+- `static generateId($fullTag, $attributeString, $content)`
+- `static import($type, $source, $location = 'head', $version = null)`
+- `static header($content)`
+- `static body($content, $bodyPram = [])`
+- `static streamJS($thisPath = '', $stream = '', $rootPath = '')`
+- `static newJS($js)`
+- `static phjs($js): void`
+- `static render_h(): string`
+- `static render_c(): string`
+- `static render_b(): string`
+- `static render_j($state = true)`
+- `static app(string $stream, callable $producer)`
+- `static render(): string`
+- `__call(string $name, array $arguments)`
+- `static __callStatic(string $name, array $arguments)`
+- `static set(string $varName, string $value, string $type = 'var'): string`
+- `static op(string $f1, string $op, string $f2): string`
+- `static get(string ...$varNames): string`
+- `static endFun(): string`
+- `static endCod(): string`
+
+### PHJS — library/PHJS.php
+- `__construct(private readonly string $code)`
+- `code(): string`
+- `__toString(): string`
+- `static assets(array $options = []): string` — Smart Asset Manager
+- `static js(): PHJS_Chain` — Fluent Entry Point
+- `static __callStatic($name, $args)` — Magic Static Caller for full JS support
+- `static render(string $html): string` — Smart HTML Renderer
+- `static parse(string $dsl): string`
+- `static alpineData(string $name, array $obj): string`
+- `static alpineStore(string $name, array $obj): string`
+- `static alpineBind(string $name, array $obj): string`
+- `static el(): string`
+- `static refs(string $name = ''): string`
+- `static store(string $name): string`
+- `static watch(string $prop, string $callback): string`
+- `static dispatch(string $event, array $detail = []): string`
+- `static nextTick(string $callback): string`
+- `static root(): string`
+- `static data(): string`
+- `static id(string $name): string`
+- `static state_magic(): string`
+- `static params_magic(): string`
+- `static route_magic(): string`
+- `static ui_magic(): string`
+- `static os_magic(): string`
+- `static t_magic(): string`
+- `static router_magic(): string`
+- `static clipboard_magic(): string`
+- `static hxProcess(string $sel): string`
+- `static hxTrigger(string $sel, string $event): string`
+- `static hxAjax(string $method, string $url, string $target): string`
+- `static hxRemove(string $sel): string`
+- `static hxAddClass(string $sel, string $cls): string`
+- `static hxRemoveClass(string $sel, string $cls): string`
+- `static hxToggleClass(string $sel, string $cls): string`
+- `static hxConfig(array $config): string`
+- `static let($name, $value = null): string`
+- `static log($msg): string`
+- `static error($msg): string`
+- `static warn($msg): string`
+- `static table($msg): string`
+- `static localSet(string $key, $val): string`
+- `static localGet(string $key): string`
+- `static localRemove(string $key): string`
+- `static sessionSet(string $key, $val): string`
+- `static sessionGet(string $key): string`
+- `static cookieSet(string $name, string $value, int $days = 7): string`
+- `static html(string $sel, string $html): string`
+- `static text(string $sel, string $text): string`
+- `static val(string $sel, $val): string`
+- `static addClass(string $sel, string $cls): string`
+- `static removeClass(string $sel, string $cls): string`
+- `static toggleClass(string $sel, string $cls): string`
+- `static css(string $sel, string $prop, string $val): string`
+- `static attr(string $sel, string $attr, string $val): string`
+- `static remove(string $sel): string`
+- `static event(string $sel, string $evt, string $code): string`
+- `static onReady(string $code): string`
+- `static redirect(string $url): string`
+- `static reload(): string`
+- `static alert($msg): string`
+- `static fetch(string $url, array $opts = []): string`
+- `static raw(string $code): string`
+- `static appReady(string $code): string`
+- `static appNavigate(string $url): string`
+- `static appLink(string $url): string`
+- `static appApi(string $url): string`
+- `static appRoutePath(string $url = ''): string`
+- `static appToast(string $msg, string $type = 'info'): string`
+- `static appModal(string $id, string $action = 'open'): string`
+- `static appProgress(bool $start = true): string`
+- `static appTheme(string $name): string`
+- `static appThemeToggle(): string`
+- `static appValidate(string $selector): string`
+- `static appCheck(string $selector, ?string $successMsg = null): string`
+- `static appSeo(array $config): string`
+- `static appI18n(string $lang): string`
+- `static appStoreGet(string $name): string`
+- `static appStoreSet(string $name, $value): string`
+- `static appStoreDispatch(string $action, $payload = null): string`
+- `static appDbStorageSet(string $key, $val): string`
+- `static appDbStorageGet(string $key): string`
+- `static appDbStorageDel(string $key): string`
+- `static appDbSync(string $namespace, string $url): string`
+- `static appRequest(string $url, array $opts = []): string`
+- `static appUpload(string $fileVar, string $endpoint, array $options = []): string`
+- `static appSearch(string $indexName, string $query): string`
+- `static appSearchIndex(string $indexName, array $data): string`
+- `static appHardware(string $type, string $action = 'connect', array $args = []): string`
+- `static appDrmProtect(string $selector, array $config = []): string`
+- `static appFsRead(string $accept = '.txt,.json,.md'): string`
+- `static appFsSave(string $content, string $defaultName = 'export.txt'): string`
+- `static appMediaInit(string $selector, array $options = []): string`
+- `static appChartInit(string $selector, array $options = []): string`
+- `static appWorker(string $task, array $data = []): string`
+- `static appInspector(): string`
+- `static appPalette(): string`
+- `static appA11yTrap(string $selector): string`
+- `static appDesignSet(string $name, string $value): string`
+- `static appDesignGet(string $name): string`
+- `static appTimeFormat(string $dateVar = 'new Date()', string $pattern = 'YYYY-MM-DD HH:mm:ss'): string`
+- `static appTimeAgo(string $dateVar): string`
+- `static appAuthTotp(string $secret, array $options = []): string` — Local enrollment-preview helper only; server-side PHTP must verify codes.
+- `static appOAuthStart(string $url, array $options = []): string`
+- `static appOAuthCallback(array $result = [], array $options = []): string`
+- `static appTwoFactorSubmit(string $endpoint, string $codeExpression, array $options = []): string`
+- `static appPaymentStart(string $endpoint, array $data = [], array $options = []): string`
+- `static appPaymentStatus(string $endpoint, array $options = []): string`
+- `static appHeroUpdate(string $selector): string`
+- `static appAnimateTo(string $selector, array $props, array $options = []): string`
+- `static appAnimateSpring(string $selector, array $props): string`
+- `static appFontLoad(string $name, string $url): string`
+- `static appAi(string $prompt, array $opts = []): string`
+- `static appXrInit(array $opts = []): string`
+- `static appPwaEnable(array $opts = []): string`
+- `static appHydrate(): string`
+- `static expr(string $code): PHJSExpression` — Mark trusted input as executable JavaScript instead of a JS string.
+- `static value(mixed $value): string` — Translate a PHP value into a JavaScript value.
+- `static translate(mixed $value): string`
+- `static arrayValue(array $values): PHJSExpression`
+- `static object(array|object $values): PHJSExpression`
+- `static template(string $template, array $values = []): PHJSExpression` — Build a JavaScript template literal.
+- `static statement(string|PHJSExpression $code): string`
+- `static program(mixed ...$parts): string`
+- `static compile(mixed $definition): string`
+- `static module(array $definitions): string`
+- `static build(mixed $definition): string` — Declarative JavaScript compiler.
+- `static arrow(array|string $params, mixed $body, bool $async = false, bool $expression = false): PHJSExpression`
+- `static functionDef(string $name, array $params, mixed $body, bool $async = false, bool $generator = false): string`
+- `static assign(string $target, mixed $value, string $operator = '='): string`
+- `static returnValue(mixed $value = null): string`
+- `static throwValue(mixed $value): string`
+- `static awaitValue(mixed $value): PHJSExpression`
+- `static invoke(string|PHJSExpression $callable, mixed ...$args): PHJSExpression`
+- `static construct(string $className, mixed ...$args): PHJSExpression`
+- `static dynamicImport(string $from): PHJSExpression`
+- `static ternary(mixed $test, mixed $truthy, mixed $falsy): PHJSExpression`
+- `static ifBlock(mixed $test, mixed $then, mixed $else = null): string`
+- `static forOf(string $value, mixed $iterable, mixed $body, string $key = ''): string`
+- `static whileBlock(mixed $test, mixed $body): string`
+- `static doWhileBlock(mixed $body, mixed $test): string`
+- `static forBlock(mixed $init, mixed $test, mixed $update, mixed $body): string`
+- `static switchBlock(mixed $test, array $cases, mixed $default = null): string`
+- `static tryCatch(mixed $try, string $catch, mixed $catchBody, mixed $finally = null): string`
+- `static classDef(string $name, array $methods, ?string $extends = null): string`
+- `static importModule(string $from, ?string $default = null, array $named = []): string`
+- `static exportDefault(mixed $value): string`
+- `static exportNamed(array $names): string`
+- `static call(string $name, ...$args): string` — Explicit JS Function Caller
+- `static script(string $js, bool $module = false): string` — Wrap JS in Script Tag
+- `static moduleScript(array|string $definition): string`
+- `static gen(string $humanLanguage): string`
+- `__call($name, $args)`
+- `render(): string`
+- `__toString(): string`
+
+### PHJT — library/PHJT.php
+- `static key(string $new_key): array` — Updates the encryption key.
+- `static rotate(string $newSecretKey): array` — Rotate the secret key.
+- `static algorithm(string $newAlgorithm): array` — Set a new default algorithm for signing
+- `static create(array $payload, int $expiresIn = 3600, ?string $algorithm = null): array` — Create a JWT token with claims
+- `static verify(string $jwt, ?string $algorithm = null): array` — Verify and decode the JWT token
+
+### PHLS — library/PHLS.php
+- `static disconnect()` — Closes the database connection. Intended for use with register_shutdown_function.
+- `static setFile(string $path)` — Sets the storage file path. Must be called before any other method.
+- `static checker(bool $write_test = false): array` — Checks storage availability and optionally verifies an actual write/read/delete cycle.
+- `static add(string $key, $value, ?int $expiration = null, array $tags = []): bool` — Adds or updates a key-value pair, wrapping the operation in a transaction.
+- `static addIfAbsent(string $key, $value, ?int $expiration = null, array $tags = []): bool` — Stores a value only when the key does not already exist.
+- `static update(string $key, $value, ?int $expiration = null, array $tags = []): bool` — Alias for add(). Included for API completeness.
+- `static remove(string $key)` — Removes a key-value pair. Handles nested keys automatically.
+- `static expire(string $key)` — Manually expires a specific key.
+- `static expireAllExpired()` — Manually expires all keys.
+- `static isExpired(string $key): bool` — Checks if a key exists and has expired.
+- `static getExpiredDetails(): array` — Gets details (value and expiration) of all expired keys.
+- `static getActiveDetails(): array` — Gets details (value and expiration) of all active (non-expired) keys.
+- `static limitizer(string $key, $value, int $limit = 20, ?int $expiration = null)` — Adds a value to an array, keeping the array size at a specified limit.
+- `static get(string $key)` — Retrieves a value by its key. Handles nested keys automatically.
+- `static getAll(): array` — Retrieves all active (non-expired) key-value pairs.
+- `static remember(string $key, int $expiration, callable $callback, array $tags = [])` — *** NEW: "Cache & Fetch" atomic operation. ***
+- `static increment(string $key, int $amount = 1, ?int $expiration = null): int` — Atomically increments a numeric value.
+- `static decrement(string $key, int $amount = 1, ?int $expiration = null): int` — Atomically decrements a numeric value.
+- `static flushByTag(string $tag)` — Flushes (removes) all cache entries associated with a given tag.
+- `static removeAll(bool $shrink = true)` — Removes all entries from the database. Use with caution!
+
+### PHML — library/PHML.php
+- `static share(array $data)` — Share data globally across all PHML renders.
+- `static partial(string $filePath, array $localData = []): string` — Render DSL from a file.
+- `static layout(string $dsl, array $data = [])` — Set the layout for the current page.
+- `static block(string $name, string $content)` — Define a block of content for a layout.
+- `static yieldBlock(string $name, string $default = ''): string` — Output a block in a layout.
+- `static component(string $name, $template, array $assets = [])` — Register a new UI component with optional assets.
+- `static hasComponent(string $name): bool` — Check if a component exists.
+- `static getFlatAttrMap()` — Get the flattened attribute alias map.
+- `static render(string $dsl, array $localData = []): string` — Main render function for PHML DSL.
+- `static __callStatic($name, $arguments)` — Magic call for static tag functions and components.
+- `__construct(protected string $tag, protected array $attrs, protected array $children)` — PHML Constructor.
+- `__toString(): string` — Convert PHML object to HTML string.
+- `static init()` — Initialize PHML output buffering.
+- `static autoAssets(bool $enabled = true): void` — Enable or disable the automatic application-script tag.
+- `static meta(array $config)` — Set global meta configuration.
+- `static title($text)` — Set the page title.
+- `static js(...$codes)` — Add JavaScript code to the stack.
+- `static css(...$codes)` — Add CSS code to the stack.
+- `static uiConfig(array $config)` — Set UI configuration for PHCS.
+- `static head(...$codes)` — Add content to the head section stack.
+- `static footer(...$codes)` — Add content to the footer section stack.
+- `static html(array $attributes)` — Set attributes for the <html> tag.
+- `static body(array $attributes)` — Set attributes for the <body> tag.
+- `static clearCache()` — Clear the generated cache files.
+- `static process($htmlContent)` — Post-process HTML content for output buffering.
+
+### PHMO — library/PHMO.php
+- `static configure(array $options = []): array`
+- `static config(): array`
+- `static requestId(): string`
+- `static traceId(): string`
+- `static isProbeRequest(): bool`
+- `static registerRoutes(): void`
+- `static dashboard(string $url = '/monitor'): void` — Registers a self-contained, read-only observability dashboard.
+- `static report(?string $date = null, int $limit = 500, string $level = '', string $search = ''): array` — Builds a bounded log report suitable for dashboards and local tooling.
+- `static health(bool $withDependencies = false): array`
+- `static metrics(?string $date = null): array` — Returns today's request metrics by reading PHMO's own structured logs.
+- `static log(string $level, string $event, array $context = []): bool`
+- `static finishRequest(): void`
+
+### PHOB — library/PHOB.php
+- `static capability(): array`
+- `static build(string|array $input, string|array $output, array $skip = [], array $skipName = [], array $customName = [], array $config = [])` — Protect a PHP file by generating a secure, obfuscated output file
+- `static deviceID()` — Get the unique device ID for the current machine
+
+### PHOP — library/PHOP.php
+- `static img($source, $output = 'preview', $options = [])` — 🌟 THE MAIN IMAGE OPTIMIZER ENGINE (With Target Size AI) 🌟
+- `static video($source, $output = 'preview', $options = [])` — 🎬 FULL POTENTIAL VIDEO ENGINE (Video to High-Quality GIF / Single Image)
+- `static zip($source, $output_path)` — 🗜️ ZIP Compressor
+- `static text($data, $action = 'compress')` — 📝 Text & Data Optimizer
+
+### PHPA — library/PHPA.php
+- `setKeys(string $key1, string $key2 = '', string $key3 = '', string $key4 = ''): self`
+- `setLogic(?callable $chargeCallback = null, ?callable $verifyCallback = null): self`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `setLogic(?callable $chargeCallback = null, ?callable $verifyCallback = null): self`
+- `setRefundLogic(?callable $callback): self`
+- `setWebhookLogic(?callable $callback): self`
+- `setTransport(?callable $callback): self` — Injectable transport for deterministic tests and private gateway adapters.
+- `timeout(int $seconds, ?int $connectSeconds = null): self`
+- `expect(string $orderId, ?float $amount = null, ?string $currency = null): self`
+- `setKeys(string $key1, string $key2 = '', string $key3 = '', string $key4 = ''): self`
+- `sandbox(bool $status = true): self`
+- `capabilities(): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `setKeys(string $key1, string $key2 = '', string $key3 = '', string $key4 = ''): self`
+- `configure(array $options): self`
+- `sandbox(bool $status = true): self`
+- `setTransport(?callable $callback): self`
+- `create(array $shipment): array`
+- `track(string $trackingId, array $options = []): array`
+- `rate(array $shipment): array`
+- `cancel(string $trackingId, array $options = []): array`
+- `label(string $trackingId, array $options = []): array`
+- `pickup(array $pickup): array`
+- `call(string $operation, array $payload = [], array $options = []): array`
+- `capabilities(): array`
+- `__construct(array $profile)`
+- `setKeys(string $key1, string $key2 = '', string $key3 = '', string $key4 = ''): self`
+- `configure(array $options): self`
+- `sandbox(bool $status = true): self`
+- `setTransport(?callable $callback): self`
+- `profile(): array`
+- `name(): string`
+- `capabilities(): array`
+- `create(array $shipment): array`
+- `track(string $trackingId, array $options = []): array`
+- `rate(array $shipment): array`
+- `cancel(string $trackingId, array $options = []): array`
+- `label(string $trackingId, array $options = []): array`
+- `pickup(array $pickup): array`
+- `call(string $operation, array $payload = [], array $options = []): array`
+- `static courier(string $name): PHPACourierInterface`
+- `static extendCourier(string $name, callable $factory): void`
+- `static courierAvailable(?string $region = null): array`
+- `static courierProfile(string $name): array`
+- `static extend(string $name, string $className): void`
+- `static available(): array`
+- `static gatewayCapabilities(string $name): array`
+- `static __callStatic($name, $arguments): PHPAGatewayInterface`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `capabilities(): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `capture(string $orderId): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `verifySignature(string $orderId, string $paymentId, string $signature): bool`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $paymentId): array`
+- `execute(string $paymentId): array`
+- `refundPayment(string $paymentId, string $trxId, float $amount, string $sku = 'refund', string $reason = 'Customer refund'): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $paymentRefId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `webhook(string $payload, array $headers = [], array $context = []): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+- `charge(float $amount, string $currency, string $orderId, array $options = []): array`
+- `verify(string $transactionId): array`
+- `refund(string $transactionId, ?float $amount = null): array`
+
+### PHQR — library/PHQR.php
+- `static make($data, int $size = 8, int $margin = 4): string` — Generate a memory-safe PNG data URI.
+- `__construct()`
+- `getTypeNumber()`
+- `setTypeNumber($typeNumber)`
+- `getErrorCorrectLevel()`
+- `setErrorCorrectLevel($errorCorrectLevel)`
+- `addData($data, $mode = 0)`
+- `clearData()`
+- `addDataImpl($qrData)`
+- `getDataCount()`
+- `getData($index)`
+- `isDark($row, $col)`
+- `getModuleCount()`
+- `hex2rgb($hex = 0x0)`
+- `make()`
+- `getBestMaskPattern()`
+- `createNullArray($length)`
+- `makeImpl($test, $maskPattern)`
+- `mapData(&$data, $maskPattern)`
+- `setupPositionAdjustPattern()`
+- `setupPositionProbePattern($row, $col)`
+- `setupTimingPattern()`
+- `setupTypeNumber($test)`
+- `setupTypeInfo($test, $maskPattern)`
+- `createData($typeNumber, $errorCorrectLevel, $dataArray)`
+- `createBytes(&$buffer, &$rsBlocks)`
+- `static getMinimumQRCode($data, $errorCorrectLevel)`
+- `createImage($size = 2, $margin = 2, $fg = 0x000000, $bg = 0xFFFFFF, $bgtrans = false)`
+- `printHTML($size = "2px")`
+- `printSVG($size = 2)`
+- `static getPatternPosition($typeNumber)`
+- `static getMaxLength($typeNumber, $mode, $errorCorrectLevel)`
+- `static getErrorCorrectPolynomial($errorCorrectLength)`
+- `static getMask($maskPattern, $i, $j)`
+- `static getLostPoint($qrCode)`
+- `static getMode($s)`
+- `static isNumber($s)`
+- `static isAlphaNum($s)`
+- `static isKanji($s)`
+- `static toCharCode($s)`
+- `static getBCHTypeInfo($data)`
+- `static getBCHTypeNumber($data)`
+- `static getBCHDigit($data)`
+- `__construct($totalCount, $dataCount)`
+- `getDataCount()`
+- `getTotalCount()`
+- `static getRSBlocks($typeNumber, $errorCorrectLevel)`
+- `static getRsBlockTable($typeNumber, $errorCorrectLevel)`
+- `__construct($data)`
+- `write(&$buffer)`
+- `static parseInt($s)`
+- `static parseIntAt($c)`
+- `__construct($data)`
+- `write(&$buffer)`
+- `getLength()`
+- `__construct($data)`
+- `write(&$buffer)`
+- `static getCode($c)`
+- `__construct($data)`
+- `write(&$buffer)`
+- `__construct($mode, $data)`
+- `getMode()`
+- `getData()`
+- `getLength()`
+- `write(&$buffer)`
+- `getLengthInBits($type)`
+- `static init()`
+- `static createNumArray($length)`
+- `static glog($n)`
+- `static gexp($n)`
+- `__construct($num, $shift = 0)`
+- `get($index)`
+- `getLength()`
+- `__toString()`
+- `toString()`
+- `toLogString()`
+- `multiply($e)`
+- `mod($e)`
+- `__construct()`
+- `getBuffer()`
+- `getLengthInBits()`
+- `__toString()`
+- `get($index)`
+- `put($num, $length)`
+- `putBit($bit)`
+
+### PHRO — library/PHRO.php
+- `__construct(string $message = "", int $code = 403, ?\Throwable $previous = null)`
+- `inspect(array $request_data, array $config)`
+- `__construct(array $config, array $request_data)`
+- `addShield(string $key, PhroShield $shield)` — Adds a custom shield to the guard.
+- `getShield(string $key): ?PhroShield` — Retrieves a shield instance by its key.
+- `removeShield(string $key)` — Removes a shield from the guard.
+- `protect()` — Executes all enabled shields to protect the application.
+- `static block(string $message = 'Forbidden', int $code = 403)` — Blocks the request immediately and displays a forbidden message.
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `checkAndIncrementAttempt(string $event_name, int $max_attempts, int $block_duration_minutes, int $reset_after_minutes, string $block_message): array`
+- `performAttemptReset(string $event_name): void`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `inspect(array $request_data, array $config)`
+- `__construct(string $channel_id)`
+- `authorize(callable $callback): self`
+- `worker(string $name, callable $handler, int $max_runs = 0, int $interval_seconds = 0): self`
+- `listen(): void`
+- `static initialize($custom_base_path = null)` — Initializes the router. This can be called manually to set a custom base path,
+- `static guard(array $config = [])` — Configures and enables the security guard (WAF).
+- `static secure(): bool` — Public proxy-aware HTTPS check for framework components such as PHCO.
+- `static getToken(): string` — Return the session CSRF token, creating it when necessary.
+- `static csrfField(): string` — Return a ready-to-render hidden CSRF field.
+- `static regenerateToken(): string` — Rotate and return the current session CSRF token.
+- `static trustProxies(array $ipAddresses): void` — Trust forwarding headers only from these reverse-proxy IP addresses.
+- `static root()` — Get the root URL for the application.
+- `static getCallbackContext(): array` — Public accessor to get the variables from the current route's callback context.
+- `static get(string $url, $callback): self` — Define a route for GET method.
+- `static post(string $url, $callback): self` — Define a route for POST method.
+- `static put(string $url, $callback): self` — Define a route for PUT method.
+- `static patch(string $url, $callback): self` — Define a route for PATCH method.
+- `static delete(string $url, $callback): self` — Define a route for DELETE method.
+- `static head(string $url, $callback): self` — Define a route for HEAD method.
+- `static options(string $url, $callback): self` — Define a route for OPTIONS method.
+- `static group(string $prefix, callable $callback): self` — Creates a route group with shared attributes that can be chained.
+- `static crud(string $uri, string|array $controller, array $options = []): self` — Registers a full set of CRUD routes.
+- `static gap(string $uri, string|array $controller, array $options = []): self` — Registers a common set of routes for a resource using only GET and POST methods.
+- `static sgap(string $uri, string|array $controller, array $options = []): self` — Registers two essential routes for a single resource URI: a GET and a POST.
+- `static add($method, $url, $callback)` — Define a route for custom HTTP method.
+- `name(string $name): self` — Assigns a name to the most recently defined route or group of routes.
+- `middleware($middleware): self` — Attach middleware(s) to the most recently defined route.
+- `header($header, ?string $value = null): self` — Attaches response headers to the most recently defined route or group.
+- `mcp(string $type, string $name, string $description, array $schema = []): self` — ⚡ THE ULTIMATE AI BRIDGE (MCP INTEGRATION) ⚡
+- `static gatherRequestData(): array` — Gets the full filesystem path for a given resource using colon notation.
+- `static attempt($config_or_message = 'generic_attempt_fail', bool $return_details_override = false)` — Tracks failed attempts and enforces a block if the limit is exceeded.
+- `static resetAttempt(string $event_name): void` — Resets the failed attempt count for a specific event and client.
+- `static task(...$tasks): void` — ⚡ PHOP Ultimate Async & Parallel Engine (Simplified SSL Auto - Final) ⚡
+- `static stream(callable $messageProvider): void` — ⚡ PHOP Real-Time SSE Engine (Final - Heartbeat + Last-Event-ID Support) ⚡
+- `static channel(string $channel_id): PhroChannel` — Open a Real-Time Channel (Receiver Route Setup).
+- `static publish(string $channel_id, string $command_name, $data = null): bool` — Publish data/command to a specific channel (Sender Route Setup).
+- `static routes($path = null, $method = 'GET')` — Get all defined routes or filter by short, link, and method.
+- `static route(?string $identifier = null, ?array $params = [])` — Finds routes, generates URLs, or returns the current route details.
+- `static source($short, $method = 'GET')` — Get the source code of the callback for the specified route.
+- `static getUserIP()` — Get the user's IP address.
+- `static gatherHeaders()` — Gathers all HTTP request headers.
+- `static getGeolocationData()` — Fetches Server/Caller Geolocation with multiple fallbacks.
+- `static extractIdentityFromCookie()` — Extracts client identity data from the cookie if available.
+- `static netKey($data): string` — Create an unchangeable network identity key.
+- `static deviceKey($data): string` — Create an unchangeable device identity key (The Fingerprint Master).
+- `static decrypt($encryptedData)` — Decrypt the encrypted data
+- `static key($new_key, $dataPrint = false)` — Updates the default encryption key.
+- `static track($footprint = false)` — Init the footprint/track.
+- `static footprint(): array` — Collects and processes exhaustive request data, generates robust unique identifiers,
+- `static setIdentityCookie($params, $expiryTime = 525600): bool` — Sets the identity cookie with encrypted user identity data.
+- `static userAgentInfo()` — Extract comprehensive information from the HTTP_USER_AGENT string and store it in $params.
+- `static createSlug(string $string, string $separator = '-'): string` — Creates a clean, URL-safe, SEO-friendly slug from ANY language.
+- `sitemap($options = true): self` — The Ultimate AI-Aware Sitemap Configuration Engine.
+- `disallow($user_agents = '*'): self` — Marks a route to be "Disallowed" in robots.txt for specific user agents.
+- `allow($user_agents = '*'): self` — Marks a route to be "Allowed" in robots.txt.
+- `static getSitemapRoutes(): array` — Generates a complete list of URLs for the sitemap.
+- `static manifest(array $config): void` — Configures and enables a universally compatible, auto-generated manifest.json.
+- `static addSitemapEntry(string $loc, array $options = []): void` — Adds a custom URL entry to the sitemap.
+- `static addRobotsRule(string $rule): void` — Adds a custom line to the robots.txt file.
+- `static listen($error_handler = null)` — Listen for incoming HTTP requests and execute matching route callback.
+
+### PHRQ — library/PHRQ.php
+- `static php($method, $url, $headers = [], $body = null, $options = [])` — Send an HTTP request from PHP using cURL.
+- `static js($method, $url, $headers = [], $body = null, $options = [])` — Generate JavaScript code for sending an HTTP request using XHR.
+- `static header($method = 'GET', $origin = '*', $contentType = 'application/json', $additionalHeaders = [])` — Set HTTP response headers for API responses.
+- `static cross($enable = true, string|array $origin = '*', bool $credentials = false)` — Enable or disable CORS for API responses.
+- `static status(int $code = 200, ?string $msg = null)` — Set HTTP response headers for API responses.
+- `static file($name, $length)` — Set HTTP response headers for file downloads.
+- `static livemap($url = '/livemap', $skipList = [], $limit = 10, $time = 60 * 24)` — Handle live map data collection and processing based on the request.
+- `static stream(int $sleep = 1, string $type = "text", ?callable $callback = null)` — Stream data to the client.
+
+### PHSE — library/PHSE.php
+- `static start()` — সেশন স্টার্ট করার সময় ডিফল্ট সিকিউরিটি কনফিগারেশন চেক করা।
+- `static add($key, $value, $expiry = null)` — সেশন ভেরিয়েবল সেট করা।
+- `static update($key, $value)` — সেশন ভ্যালু আপডেট করা (শুধু যদি আগে থেকে সেট করা থাকে)।
+- `static remove($key)` — সেশন ভ্যালু ডিলিট করা।
+- `static get($key, $default = null)` — সেশন ভ্যালু পাওয়া।
+- `static isActive($key)` — সেশন ভেরিয়েবলটি ?
+- `static expireAll()` — সব সেশন ভেরিয়েবল ক্লিন করা।
+- `static removeAll()` — সেশন ধ্বংস করা (Logout বা Reset এর জন্য)।
+- `static regenerateId()` — সিকিউরিটির জন্য সেশন আইডি রি-জেনারেট করা।
+- `static getAll()` — সমস্ত ভ্যালিড সেশন ডাটা রিটার্ন করা।
+- `static getExpiryTime($key)` — ডিবাগিং মেথড: সেশন কখন এক্সপায়ার হবে তা দেখার জন্য।
+
+### PHTM — library/PHTM.php
+- `static setZone($timezone)` — Set the default timezone.
+- `static getZone()` — Get the current default timezone.
+- `static getTime($format = 'Y-m-d H:i:s')` — Get the current date and time in the specified format.
+- `static setTime($timestamp, $format = 'Y-m-d H:i:s')` — Format a given timestamp according to the specified format.
+- `static calculate($datetime1, $datetime2 = null)` — Calculate the difference between two date/times.
+- `static modify($datetime, $modifier, $format = 'Y-m-d H:i:s')` — Modify a date/time string by adding or subtracting a specified interval.
+- `static format($datetime, $outputFormat)` — Change the format of a date/time string.
+- `static to12h($datetime, $outputFormat = 'g:i:s A')` — Convert a date/time string from 24-hour format to 12-hour format with a custom output format.
+- `static to24h($datetime, $outputFormat = 'H:i:s')` — Convert a date/time string from 12-hour format to 24-hour format with a custom output format.
+
+### PHTP — library/PHTP.php
+- `static configure(array $config = []): array` — Configure the account-level Authenticator service.
+- `static key($length = 24, $mode = 'TOTP')` — Generate a Base32 secret.
+- `static code($secret, $mode = 'TOTP', $digits = 6, $time = 30, $offset = 0, $algo = 'sha1')` — Generate an OTP/TOTP code. Offset is expressed in seconds.
+- `static verify($otp, $secret, $mode = 'TOTP', $digits = 6, $time = 30, $offset = 0, $algo = 'sha1', $window = 0)` — Verify an OTP/TOTP. The optional window checks adjacent TOTP periods.
+- `static url($account, $secret, $digits = null, $time = null, $issuer = null, $algo = null)` — Build a standards-compatible otpauth URI.
+- `static enroll(string|int $account, array $options = []): array` — Begin enrollment or rotation without replacing an active factor yet.
+- `static confirm(string|int $account, string|int $code): array` — Confirm a pending enrollment and atomically activate it for the account.
+- `static authenticate(string|int $account, string|int $code): array` — Verify an Authenticator or one-time recovery code for an active account.
+- `static status(string|int $account): array` — Return non-sensitive enrollment status.
+- `static recovery(string|int $account, string|int $currentCode): array` — Replace recovery codes after proving possession of the current factor.
+- `static disable(string|int $account, string|int|null $code = null, bool $force = false): array` — Disable the factor. Force mode is intended only for an already-authorized administrator.
+
+### PHTR — library/PHTR.php
+- `static translate($input, $serverName = 'google', $source = 'auto', $target = 'English')` — Translate a given input using a specified translation server.
+- `static auto($input, $targetLanguage = 'en')` — Automatically detect and translate using all available servers.
+- `static buildUrl($serverName, $text, $sourceLang, $targetLang)` — Build the appropriate translation URL based on the server name.
+- `static parseResponse($response, $serverName)` — Parses the response from the translation server based on the server name.
+
+### PHUI — library/PHUI.php
+- `static ui(string $slug, array $data = []): string`
+- `static element(string $slug, array $data = []): string`
+- `static section(string $slug, array $data = []): string`
+- `static layout(string $slug, array $data = []): string`
+- `static page(string $slug, array $data = []): string`
+- `static exists(string $slug): bool`
+- `static register(string $slug, string|callable $template, array $meta = [], bool $replace = false): bool`
+- `static registerMany(array $components, bool $replace = false): int`
+- `static alias(string $alias, string $target, bool $replace = false): bool`
+- `static search(string $query = '', ?string $group = null, int $limit = 50): array`
+- `static categories(): array`
+- `static count(): int`
+- `static attributes(array|string|null $attributes): string`
+- `static check(string $value): array` — Inspect dynamic component content without changing the component template.
+- `static render(string $slug, array $data = []): string`
+- `static boot(): void`
+- `static catalog(): array`
+
+### PHVD — library/PHVD.php
+- `static unique(string $table, string $column, $except = null): string`
+- `static exists(string $table, string $column): string`
+- `static check(array $rules, array|bool|null $data = null, bool $debug = false): array`
+
+### library — library/library.php
+- `static initialize(array $options = [])` — Initializes the DIR class with root directory and base URL.
+- `static path($key)` — Gets the absolute filesystem path for a given resource using colon notation.
+- `static link($key, $cacheBust = false)` — Gets the full web URL for a given resource using colon notation.
+- `static raw($key)` — Gets the raw content of a given resource using colon notation.
+- `static secureRequire($key, array $data = [])` — Safely requires a PHP file and passes data to it.
+- `static getRootDir()` — Returns the detected or set project root directory.
+- `static getBaseUrl()` — Returns the detected or set project base URL.
+- `static getInstance(): self` — Gets the single instance of the Importer.
+- `setContext(array $vars): void` — Sets the variables from the caller's context (e.g., from the router).
+- `clearContext(): void` — Clears the context to prevent data leaks.
+- `load(...$args)` — The main method to load files, replacing the old import() function.
+
+
+---
+
+# Embedded README.md
+
+# MyStack Framework
+
+MyStack is a portable, zero-Composer PHP application framework that combines routing and security, prepared database access, component UI, PHP-native utility CSS, a self-contained browser runtime, authentication, payments, couriers, notifications, observability, real-time events, AI/MCP integration, and an intelligent CLI in one deployable codebase.
+
+The framework is designed to run from a domain root or any subdirectory on Apache/LiteSpeed-compatible hosting without hardcoded project paths. This documentation describes only the reusable MyStack framework and its public contracts.
+
+## Highlights
+
+- Zero Composer/NPM runtime dependency
+- Portable root/subfolder routing via `DIR`, `PHCO`, and `PHRO`
+- Fluent HTTP router, middleware, CSRF and layered request guard
+- MySQL/MariaDB CRUD, transactions, analytics, schema sync, and unbuffered streaming
+- SQLite-backed local state with TTL, counters, tags, bounded locking, and recovery
+- PHUI registry with 1,300+ reusable entries and PHML composition
+- PHP-native Tailwind-style PHCS utility processing
+- Self-contained PHJS SPA/reactivity/directive runtime served as `/app.js`
+- Service Worker, page/cache de-duplication, offline and Web Push support
+- OAuth/OIDC provider matrix, JWT, encryption, OTP/TOTP and Authenticator lifecycle
+- Payment gateway and Bangladesh/international courier facades
+- ntfy public/private delivery plus VAPID Web Push through PHFY
+- WebSocket, SSE and StreamUI support
+- Health/readiness probes, request/trace IDs, JSON logs, metrics and debug dashboards
+- AI provider bridge and MCP tools/resources/prompts through PHAI
+- Extensible console kernel with generators, inspection, migrations, local queue/scheduler, service checks, doctor, audit, smoke test and transactional updater
+
+## Requirements
+
+Minimum:
+
+- PHP 8.1+
+- `json`, `openssl`, `PDO`, and `pdo_sqlite`
+- `mysqli` for PHDB/MySQL operations
+- Writable `.mystack/` and `src/cache/{css,js,php}/` directories
+
+Recommended/feature-specific:
+
+- `curl` for remote HTTP, OAuth, AI, payment, courier and notification integrations
+- `mbstring` for complete Unicode handling
+- `zip`/`ZipArchive` for the MyStack updater and ZIP/package workflows
+- `sockets` for native WebSocket serving
+- HTTPS for secure cookies, OAuth, payment callbacks, Service Workers and Web Push
+- Apache or LiteSpeed with rewrite/header support; PHP's built-in server works for development
+
+No Composer or NPM installation is required.
+
+## Project map
+
+```text
+/
+├── index.php                 Application bootstrap and routes
+├── mystack                   CLI, diagnostics and updater
+├── mystack.cmd               Windows CMD/PowerShell launcher; `php mystack` remains supported
+├── library/                  30 framework libraries + loader
+├── app/                      Flat backend/controller/model directory
+├── component/                Flat view/component directory
+├── src/
+│   ├── js/                   PHJS and Service Worker sources/builds
+│   └── cache/{css,js,php}/   Named compiled component cache
+├── .mystack/                 Private local state and structured logs
+├── .github/CODEOWNERS        Official review ownership
+├── AGENTS.md                 Agent engineering contract
+├── CONTRIBUTING.md           Public request and contribution workflow
+├── NOTICE                    Ownership, attribution and official-brand notice
+├── LICENSE                   Apache License 2.0
+└── MANUAL_BN.md              Full Bengali manual
+```
+
+Do not create subdirectories inside `app/` or `component/`. Use framework path resolution instead of hardcoded hosting paths.
+
+## Quick start
+
+1. Copy/clone the project to a web-accessible directory.
+2. Confirm PHP and folder health:
+
+```bash
+php mystack doctor
+php mystack smoke
+```
+
+3. Configure `index.php`:
+
+```php
+<?php
+require_once 'library/library.php';
+
+PHDE::debug(true);                 // false in production
+PHDE::memory('512M');
+PHTM::setZone('Asia/Dhaka');
+
+PHMO::configure(['enabled' => true]);
+
+PHRO::guard();
+PHRO::key('replace-with-a-long-application-secret', false);
+PHRO::track(false);
+
+PHJT::key('replace-with-a-separate-jwt-secret');
+PHJT::algorithm('HS512');
+
+PHDB::$host = 'localhost';
+PHDB::$username = 'root';
+PHDB::$password = 'secret';
+PHDB::$dbname = 'mystack_app_db';
+
+import('app:HomeController');
+
+PHRO::get('/', [HomeController::class, 'index']);
+PHRO::listen();
+```
+
+MyStack does not automatically depend on `.env`, `APP_ENV`, or `APP_DEBUG`. If deployment secrets come from environment variables, read them explicitly in project bootstrap code and pass them to the appropriate MyStack APIs.
+
+4. Run locally:
+
+```bash
+php mystack serve 8000
+```
+
+Open `http://127.0.0.1:8000`.
+
+## Minimal controller and view
+
+Generate files:
+
+```bash
+php mystack make:controller Home
+php mystack make:view HomeView
+```
+
+Or create `app/HomeController.php`:
+
+```php
+<?php
+final class HomeController
+{
+    public static function index(): void
+    {
+        PHML::init();
+        echo PHJC::view('HomeView', ['title' => 'MyStack']);
+    }
+}
+```
+
+Then import and route it from `index.php`:
+
+```php
+import('app:HomeController');
+
+PHRO::get('/', [HomeController::class, 'index'])
+    ->name('home')
+    ->header('Cache-Control', 'private, max-age=300')
+    ->allow()
+    ->sitemap(['priority' => '1.0', 'changefreq' => 'weekly']);
+```
+
+## Database
+
+PHDB uses prepared operations:
+
+```php
+PHDB::createTable('users', [
+    'id' => 'BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+    'name' => 'VARCHAR(120) NOT NULL',
+    'email' => 'VARCHAR(190) NOT NULL UNIQUE',
+    'status' => "VARCHAR(30) NOT NULL DEFAULT 'active'",
+    'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+]);
+
+$id = PHDB::insert('users', [
+    'name' => 'Sakib',
+    'email' => 'sakib@example.com',
+]);
+
+$user = PHDB::find('users', $id);
+```
+
+Stream very large result sets without buffering all rows:
+
+```php
+foreach (PHDB::fast('SELECT id, email FROM users WHERE status = ?', ['active']) as $row) {
+    // Consume one row at a time. Do not issue another query until iteration ends.
+}
+```
+
+Schema synchronization can add, modify, and remove columns to match the declaration. Review destructive schema changes before deploying them to production and maintain verified backups.
+
+## UI and browser runtime
+
+Render registered UI:
+
+```php
+echo PHUI::element('button:primary', [
+    'slot' => 'Get notified',
+    'class' => 'w-full sm:w-auto',
+    'phjs' => ['click' => 'toast "Notifications enabled"'],
+]);
+```
+
+PHCS processes utility classes without a Node build. PHJS is served by PHRO as `/app.js`; `src/js/PHJS-min.php` is its canonical PHP-aware source. PHJS provides directives, state, components, requests, SPA navigation, forms, keymaps, accessibility, storage, UI helpers, OAuth/2FA/payment bridges, devtools, prefetch, cache and Service Worker integration without requiring Alpine, HTMX, React, or Vue.
+
+When changing PHJS runtime behavior, synchronize all related builds and run `php mystack smoke`.
+
+## Security and production
+
+Production baseline:
+
+```php
+PHDE::debug(false);
+PHRO::guard();
+PHRQ::cross(true); // self-aware restrictive policy; pass explicit origins for cross-site access
+
+PHMO::configure(['enabled' => true]);
+PHMO::registerRoutes();
+```
+
+- Use separate strong secrets for PHRO, PHJT, PHED, OAuth, payments and VAPID.
+- Keep debug dashboards and detailed errors disabled in production.
+- Never trust forwarded client-IP headers unless the immediate proxy is explicitly trusted.
+- Use HTTPS and `no-store, private` on auth/payment/account routes.
+- Verify OAuth state/PKCE/nonce, payment webhooks and idempotency at every external boundary.
+- `.mystack/` is private runtime state; retain its access guard and exclude its data from source control.
+
+`PHMO::registerRoutes()` exposes `/health` and `/ready` by default. The readiness endpoint checks PHLS/database dependencies and may return HTTP 503. `PHMO::dashboard('/monitor')`, `PHDE::apibar('/apibar')`, and `PHRQ::livemap('/livemap', ...)` remain debug-only interfaces.
+
+## Notifications
+
+Enable the automatic PHFY configuration:
+
+```php
+PHFY::configure(['enabled' => true]);
+PHFY::registerRoutes();
+
+PHFY::public('A public update is available');
+PHFY::private('Your report is ready', ['users' => ['user@example.com']]);
+```
+
+PHFY supports ntfy public/private delivery, user/permission/keyword filtering, PHLS subscription storage, browser permission, Service Worker delivery and self-contained VAPID/Web Push capability detection. Browser-closed delivery still depends on platform/browser push support.
+
+## CLI
+
+```text
+php mystack help
+php mystack cli:status
+php mystack cli:install
+php mystack list
+php mystack about --json
+php mystack get:started
+php mystack make:controller User
+php mystack make:model Product
+php mystack make:middleware Auth
+php mystack make:component Alert
+php mystack make:view Dashboard
+php mystack make:command Report
+php mystack make:api Product
+php mystack make:service Billing
+php mystack make:job SendReceipt
+php mystack make:request StoreProduct
+php mystack make:resource Product
+php mystack make:factory Product
+php mystack make:migration CreateProducts
+php mystack make:seeder Product
+php mystack make:crud Product
+php mystack serve 8000
+php mystack cache:clear
+php mystack cache:status
+php mystack build:check
+php mystack route:list
+php mystack library:check PHDB
+php mystack ui:search commerce
+php mystack db:check
+php mystack migrate:status
+php mystack migrate
+php mystack db:seed all
+php mystack queue:push SendReceiptJob --payload='{"order_id":42}'
+php mystack queue:work
+php mystack schedule:add hourly-report hourly "report:hourly"
+php mystack schedule:run
+php mystack monitor:status
+php mystack doctor
+php mystack doctor --fix
+php mystack audit
+php mystack smoke
+php mystack update --check
+php mystack update [path]
+php mystack update [path] --yes
+```
+
+Application commands are flat `app/*Command.php` classes generated by `make:command` and discovered automatically. Migrations, seeders, jobs and schedules are opt-in: no web request starts a blocking worker. Queue/scheduler state lives privately in `.mystack/console.sqlite`, uses WAL and atomic reservation, and is intended for one application host. Run daemon workers through the hosting platform's process supervisor. Destructive rollback, pruning and flush operations require `--yes` or interactive confirmation.
+
+Both invocation styles are supported: `php mystack ...` always works when PHP is available, while `mystack ...` works directly on Unix/macOS through the executable shebang and on Windows CMD/PowerShell through `mystack.cmd` without PowerShell execution-policy dependency. Run `php mystack cli:install` once to create a user-level launcher; if its directory is not already in `PATH`, the command prints the exact directory to add. `--json` keeps machine output free from TUI decoration; `NO_COLOR=1` or `--no-ansi` disables terminal colors.
+
+Interactive output uses the adaptive MyStack TUI: ASCII brand header, semantic status badges, framed comparisons and real operation-stage progress. `update --check` focuses on changed files and summarizes unchanged files; add `--verbose` to display the complete comparison.
+
+The updater reads the rolling official GitHub `main` branch rather than Releases or versions, compares SHA-256 and exact bytes, and allows only `library/*`, `src/js/*`, `docs/*`, the two `llms` files, framework governance/documentation files, `.htaccess`, the Pages workflow, and CLI launchers. It asks before applying, stages and validates every change, runs smoke tests, and rolls back on failure. The root access guard explicitly denies HTTP access to private framework PHP/metadata and both CLI files. The updater never removes unmatched local files merely because they are absent upstream.
+
+## Verification
+
+Before deployment:
+
+```bash
+php mystack doctor
+php mystack audit
+php mystack smoke
+```
+
+Also perform environment-specific tests that a local smoke suite cannot guarantee: live database permissions, HTTPS/rewrite behavior, OAuth callbacks, payment/courier sandbox credentials, SMTP, ntfy/Web Push on target browsers, backup restoration, browser regression, and expected load/soak capacity.
+
+## Documentation
+
+- [Searchable documentation portal](docs/index.html)
+- [Source-generated API index](docs/index.md)
+- [Machine-readable API catalog](docs/api.json)
+- [Concise AI context](llms.txt)
+- [Complete AI context](llms-full.txt)
+
+- [বাংলা পূর্ণাঙ্গ ম্যানুয়াল](MANUAL_BN.md)
+- [AI/Agent engineering contract](AGENTS.md)
+- [Apache License 2.0](LICENSE)
+- [Ownership and attribution notice](NOTICE)
+- [Contribution policy](CONTRIBUTING.md)
+
+## License
+
+Regenerate and verify source-linked documentation whenever a public framework API changes:
+
+```bash
+php mystack docs:build
+php mystack docs:check
+```
+
+The builder scans `library/*.php` without executing library code, creates one reference page per source file, and refreshes the searchable portal, API JSON and both `llms` discovery files. Executable code remains authoritative for runtime behavior. MyStack uses a rolling `main` branch and does not declare a fixed framework version.
+
+`.github/workflows/docs.yml` publishes only the generated `docs/` artifact to GitHub Pages. Enable GitHub Pages with **GitHub Actions** as its source once; subsequent pushes to `main` publish documentation automatically without exposing executable PHP source through the documentation site.
+
+MyStack is licensed under the Apache License 2.0. Copyright © 2026 Sakibur Rahman (`sakibweb`). You may use, copy, modify and distribute the code under the License, but must preserve the License, applicable copyright/attribution notices and the [NOTICE](NOTICE), and must identify modified files. The license grants no right to claim authorship of the original framework or present an unofficial modified distribution as the official MyStack Framework.
+
+Official organization: [mystack-framework](https://github.com/mystack-framework)  
+Official repository: [mystack-framework/mystack](https://github.com/mystack-framework/mystack)
+
+Public issues, requests and pull requests are welcome under [CONTRIBUTING.md](CONTRIBUTING.md). Direct write, merge, release and official-update authority remains with Sakibur Rahman and explicitly authorized maintainers.
+
+
+---
+
+# Embedded MANUAL_BN.md
+
+# MyStack Framework — পূর্ণাঙ্গ বাংলা ম্যানুয়াল
+
+এই ম্যানুয়ালটি বর্তমান executable codebase, ৩০টি framework library, `library.php` loader, canonical PHJS runtime এবং `mystack` CLI যাচাই করে লেখা। এটি শুধু reusable MyStack framework, তার public contract এবং framework-level ব্যবহার বর্ণনা করে।
+
+> গুরুত্বপূর্ণ: framework-এর বাস্তব code সর্বশেষ source of truth। কোনো live payment, courier, OAuth, mail, AI বা push provider ব্যবহার করার আগে সংশ্লিষ্ট provider-এর বর্তমান credential, sandbox এবং production approval দিয়ে end-to-end test করতে হবে।
+
+## সূচিপত্র
+
+1. [পরিচিতি ও ক্ষমতা](#1-পরিচিতি-ও-ক্ষমতা)
+2. [প্রয়োজনীয় পরিবেশ ও installation](#2-প্রয়োজনীয়-পরিবেশ-ও-installation)
+3. [Project structure ও portable path](#3-project-structure-ও-portable-path)
+4. [Bootstrap ও configuration order](#4-bootstrap-ও-configuration-order)
+5. [MyStack CLI](#5-mystack-cli)
+6. [DIR ও dynamic importer](#6-dir-ও-dynamic-importer)
+7. [PHRO routing, middleware ও security](#7-phro-routing-middleware-ও-security)
+8. [PHDB database ও PHLS local state](#8-phdb-database-ও-phls-local-state)
+9. [PHML, PHJC, PHUI ও PHCS frontend](#9-phml-phjc-phui-ও-phcs-frontend)
+10. [PHJS self-contained browser runtime](#10-phjs-self-contained-browser-runtime)
+11. [Authentication, JWT, encryption ও 2FA](#11-authentication-jwt-encryption-ও-2fa)
+12. [HTTP, API, mail, realtime ও translation](#12-http-api-mail-realtime-ও-translation)
+13. [Payment ও courier](#13-payment-ও-courier)
+14. [PHFY notification ও Web Push](#14-phfy-notification-ও-web-push)
+15. [PHAI ও MCP](#15-phai-ও-mcp)
+16. [PHMO monitoring ও debug UI](#16-phmo-monitoring-ও-debug-ui)
+17. [সব library-র পূর্ণ catalog](#17-সব-library-র-পূর্ণ-catalog)
+18. [Deployment, cache ও production checklist](#18-deployment-cache-ও-production-checklist)
+19. [Troubleshooting ও verification](#19-troubleshooting-ও-verification)
+
+## 1. পরিচিতি ও ক্ষমতা
+
+MyStack একটি zero-Composer, zero-NPM-runtime PHP framework। এর প্রধান বৈশিষ্ট্য:
+
+- domain root, hosting root, subdomain এবং nested subfolder-এ portable routing;
+- fluent router, middleware, CSRF, rate limit, XSS/SQLi/open-redirect/file/header shields;
+- prepared database CRUD, analytics, transaction, schema sync এবং unbuffered streaming;
+- SQLite local state, TTL, counter, tag, lock retry এবং corruption recovery;
+- PHP component/markup system, ১,৩০০+ PHUI registry entry এবং PHP-native utility CSS;
+- Alpine/HTMX/React/Vue ছাড়া self-contained PHJS reactivity, directive, SPA ও request runtime;
+- OAuth/OIDC, JWT, encryption, OTP/TOTP এবং full Authenticator lifecycle;
+- payment gateway ও ১০টি বাংলাদেশি + ১০টি international courier profile/facade;
+- ntfy public/private notification এবং VAPID Web Push;
+- WebSocket, SSE, StreamUI, AI provider bridge ও MCP server;
+- request/trace ID, JSON log, health/ready, metrics, alert এবং debug dashboard;
+- generator, folder repair, doctor, audit, smoke এবং rollback-capable updater।
+
+## 2. প্রয়োজনীয় পরিবেশ ও installation
+
+### আবশ্যিক
+
+- PHP 8.1 বা নতুন
+- `json`, `openssl`, `PDO`, `pdo_sqlite`
+- MySQL/MariaDB ব্যবহার করলে `mysqli`
+- `.mystack/` এবং `src/cache/css`, `src/cache/js`, `src/cache/php` writable
+
+### Feature অনুযায়ী প্রয়োজন
+
+- `curl`: OAuth, payment, courier, AI, mail-adjacent HTTP, ntfy এবং remote API
+- `mbstring`: সম্পূর্ণ Unicode/Bengali handling
+- `zip`/`ZipArchive`: updater, PHCD/ZIP workflow
+- `sockets`: native PHEV WebSocket server
+- HTTPS: secure cookie, OAuth, payment callback, Service Worker এবং Web Push
+
+Composer বা NPM install করার প্রয়োজন নেই। PHCD দিয়ে browser-side package install করা optional; এটি server runtime dependency নয়।
+
+### প্রথম verification
+
+```bash
+php mystack doctor
+php mystack smoke
+php mystack serve 8000
+```
+
+`doctor` read-only। Safe auto-fix চাইলে স্পষ্টভাবে চালান:
+
+```bash
+php mystack doctor --fix
+```
+
+## 3. Project structure ও portable path
+
+```text
+/
+├── index.php                  bootstrap, config, import, route, listen
+├── mystack                    intelligent CLI
+├── library/
+│   ├── library.php            DIR, Importer, import(), 30 library loader
+│   └── PH*.php                framework modules
+├── app/                       flat backend files
+├── component/                 flat UI/view files
+├── src/
+│   ├── js/                    PHJS/SW source ও synchronized builds
+│   └── cache/{css,js,php}/    নাম-সংরক্ষিত compiled cache
+├── .mystack/                  private PHLS/PHMO state ও logs
+├── README.md
+├── MANUAL_BN.md
+├── .github/CODEOWNERS        official review ownership
+├── AGENTS.md
+├── CONTRIBUTING.md           contribution policy
+├── NOTICE                    ownership/attribution/brand notice
+└── LICENSE                   Apache License 2.0
+```
+
+`app/` ও `component/`-এর ভেতরে subfolder ব্যবহার করা হয় না। Hosting path hardcode করবেন না:
+
+```php
+$component = DIR::path('component:HomeView');
+$assetUrl  = DIR::link('js:custom.js', true);
+$basePath  = PHCO::path(); // যেমন /projects/shop অথবা root হলে ''
+$prefix    = PHCO::pre();  // যেমন shop_
+```
+
+এই path/prefix PHP থেকে PHJS-এ inject হয়। ফলে cookie, cache, Service Worker, `/app.js`, `/sw.js`, PHFY এবং SPA navigation একই project namespace অনুসরণ করে।
+
+## 4. Bootstrap ও configuration order
+
+Recommended `index.php` skeleton:
+
+```php
+<?php
+require_once 'library/library.php';
+
+PHDE::debug(true);              // production-এ false
+PHDE::memory('512M');
+PHTM::setZone('Asia/Dhaka');
+
+PHMO::configure(['enabled' => true]);
+
+PHRO::guard();
+PHRO::key('replace-with-long-application-secret', false);
+PHRO::track(false);
+
+PHJT::key('replace-with-separate-jwt-secret');
+PHJT::algorithm('HS512');
+
+PHRQ::cross(true);
+
+PHDB::$host = 'localhost';
+PHDB::$username = 'root';
+PHDB::$password = 'secret';
+PHDB::$dbname = 'mystack_app_db';
+
+PHFY::configure(['enabled' => true]);
+PHFY::registerRoutes();
+
+PHMO::registerRoutes();
+PHMO::dashboard('/monitor');    // debug false হলে route তৈরি হয় না
+
+import('app:HomeController', 'app:AuthMiddleware');
+
+PHRO::get('/', [HomeController::class, 'index'])->name('home');
+
+PHRO::listen(function (int $code, string $message, string $at): void {
+    http_response_code($code);
+    if ($code >= 500 && PHDE::isDebug()) {
+        echo htmlspecialchars($message . ' at ' . $at, ENT_QUOTES, 'UTF-8');
+    }
+});
+```
+
+Framework নিজে `.env`, `APP_ENV` বা `APP_DEBUG` parse/depend করে না। চাইলে deployment environment নিজে read করে value-গুলো MyStack API-তে দিন; debug-এর source of truth হলো:
+
+```php
+PHDE::debug(false);
+$debug = PHDE::isDebug();
+```
+
+## 5. MyStack CLI
+
+| Command | কাজ |
+| --- | --- |
+| `php mystack help [command]` / `list` | category অনুযায়ী সব built-in ও auto-discovered application command |
+| `cli:status` / `cli:install [--target=path]` | OS launcher/PATH অবস্থা দেখা এবং user-level `mystack` command atomically install |
+| `php mystack about --json` | framework, PHP, extension, path ও folder capability |
+| `php mystack get:started` | starter controller/route/view |
+| `php mystack make:controller User` | `app/`-এ controller |
+| `php mystack make:model Product` | PHDB demo-সহ model |
+| `php mystack make:middleware Auth` | middleware |
+| `php mystack make:component Alert` | reusable component |
+| `php mystack make:view Dashboard` | full page view |
+| `make:command`, `make:api`, `make:service`, `make:job` | custom console command/API/service/queue job |
+| `make:event`, `make:listener`, `make:mail`, `make:notification`, `make:policy`, `make:test` | application integration scaffold |
+| `make:request`, `make:resource`, `make:factory` | PHVD request, API transformer ও test-data factory |
+| `make:migration`, `make:seeder`, `make:crud`, `make:module` | schema/data scaffold বা atomic multi-file feature scaffold |
+| `php mystack serve 8000` | local server |
+| `cache:status`, `cache:warm`, `cache:clear`, `cache:prune` | named CSS/JS/PHP cache দেখা, প্রস্তুত বা explicit cleanup |
+| `build:check`, `phjs:check`, `optimize` | synchronized build এবং safe local readiness check |
+| `route:list`, `route:show`, `config:show` | executable source না চালিয়ে route ও safe literal config inspection |
+| `library:list`, `library:check`, `ui:list`, `ui:search` | framework/PHUI registry inspection |
+| `db:check`, `db:tables`, `schema:status` | read-only PHDB readiness ও schema inspection |
+| `migrate`, `migrate:status`, `migrate:rollback --yes`, `db:seed` | tracked opt-in migration/seeding; rollback explicit |
+| `queue:push`, `queue:work`, `queue:status`, `queue:failed/retry/forget/flush` | local durable job lifecycle, retry/backoff ও atomic reservation |
+| `schedule:add/list/remove/run/work` | isolated CLI schedule; daemon supervisor দিয়ে চালাতে হবে |
+| `websocket:start/status`, `mail:check`, `oauth:list`, `payment:list`, `courier:list` | service/provider capability inspection |
+| `phfy:check`, `vapid:check`, `health:check`, `monitor:status`, `logs:tail/report` | notification, crypto, dependency ও observability checks |
+| `php mystack doctor` | read-only structure/syntax/permission scan ও folder repair check |
+| `php mystack doctor --fix` | bounded safe fix |
+| `php mystack audit` | production-oriented read-only audit |
+| `php mystack smoke` / `test` | full framework regression suite |
+| `php mystack update --check` | GitHub `main` SHA/byte diff, কোনো change নয় |
+| `php mystack update [path]` | allowlisted path compare, confirm, apply |
+| `php mystack update [path] --yes` | prompt ছাড়া verified apply |
+
+`make:command Report` একটি flat `app/ReportCommand.php` বানায়; `commandName()`, `description()` ও `handle()` থাকলে পরের invocation-এ command auto-discover হয়। Queue/scheduler metadata `.mystack/console.sqlite`-এ WAL mode-এ থাকে এবং single-host application state—multi-server shared queue নয়। `queue:work --daemon`, `schedule:work --daemon` এবং `websocket:start` সাধারণ HTTP request-এ নয়, hosting supervisor/system service থেকে চালাতে হবে। Cleanup, rollback, forget ও flush-এ interactive confirmation বা `--yes` প্রয়োজন। Migration file আগে সফল `up()` চালায়, তারপর local applied registry-তে লিখে; `down()` ছাড়া rollback হয় না। Production schema change-এর আগে database backup/restore drill বাধ্যতামূলক।
+
+`php mystack` সব OS-এ মূল fallback। Unix/macOS executable shebang এবং Windows CMD/PowerShell-এর policy-independent `mystack.cmd` launcher দিয়ে `mystack`-ও ব্যবহার করা যায়। `php mystack cli:install` user-level launcher তৈরি করে এবং প্রয়োজন হলে কোন directory `PATH`-এ দিতে হবে তা জানায়; এটি নিজে system PATH silently বদলায় না। `--json` machine-readable output অপরিবর্তিত রাখে; `NO_COLOR=1` বা `--no-ansi` color/TUI escape code বন্ধ করে।
+
+Interactive mode-এ ASCII MyStack header, semantic INFO/SUCCESS/WARNING/ERROR badge, framed comparison এবং বাস্তব operation-stage progress দেখায়। `update --check` defaultভাবে changed file-এ focus করে এবং unchanged count দেখায়; সব file দেখতে `--verbose` দিন।
+
+Updater Release/version ব্যবহার করে না। এটি official rolling `main` snapshot থেকে `library/*`, `src/js/*`, `docs/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, `mystack.cmd` file-by-file নেয়। Root `.htaccess` private framework metadata ও CLI file-এর HTTP access deny করে। Stage, hash, text/PHP/JS validation এবং smoke pass না হলে rollback করে; upstream-এ অনুপস্থিত বলে local file delete করে না।
+
+### License, ownership ও contribution
+
+MyStack Apache License 2.0-এর অধীনে প্রকাশিত। Copyright © 2026 Sakibur Rahman (`sakibweb`)। অন্যরা code ব্যবহার, copy, modify এবং distribute করতে পারবে, তবে `LICENSE`, প্রযোজ্য copyright/attribution এবং `NOTICE` রাখতে হবে এবং পরিবর্তিত file স্পষ্টভাবে modified হিসেবে জানাতে হবে। নিজের modification-এর authorship দাবি করা যাবে, কিন্তু original MyStack framework নিজের সৃষ্টি বলে দাবি করা, owner attribution মুছে ফেলা বা unofficial modified distribution-কে official MyStack হিসেবে উপস্থাপন করা যাবে না।
+
+Official organization: https://github.com/mystack-framework  
+Official repository: https://github.com/mystack-framework/mystack
+
+Public issue, request এবং pull request দিতে পারবে। Direct write, merge, release ও official update authority Sakibur Rahman এবং explicitly authorized maintainer-এর নিয়ন্ত্রণে থাকবে। বিস্তারিত `NOTICE`, `CONTRIBUTING.md` ও `.github/CODEOWNERS`-এ আছে। Repository public হওয়া direct write permission নয়; GitHub-এ protected branch/ruleset আলাদাভাবে সক্রিয় রাখতে হবে।
+
+## 6. DIR ও dynamic importer
+
+এক বা একাধিক import:
+
+```php
+import('app:UserController');
+import('component:HomeView', 'js:custom.js', 'css:app.css');
+import('app:*');
+```
+
+Common path key:
+
+```php
+DIR::path('library:PHDB');
+DIR::path('app:UserController');
+DIR::path('component:HomeView');
+DIR::link('img:logo.svg');
+DIR::raw('js:custom.js');
+```
+
+`DIR::initialize()` custom hosting root প্রয়োজন হলে ব্যবহার করুন। User input সরাসরি path/import key হিসেবে দেবেন না।
+
+## 7. PHRO routing, middleware ও security
+
+### Basic এবং fluent route
+
+```php
+PHRO::get('/products', [ProductController::class, 'index'])
+    ->name('products.index')
+    ->header('Cache-Control', 'private, max-age=300')
+    ->allow()
+    ->sitemap(['priority' => '0.8', 'changefreq' => 'daily']);
+
+PHRO::post('/products', [ProductController::class, 'store'])
+    ->name('products.store')
+    ->middleware(AuthMiddleware::requireRole(['admin']))
+    ->header('Cache-Control', 'no-store, private')
+    ->disallow();
+```
+
+Supported method: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, generic `add`। Route group/CRUD helpers: `group`, `crud`, `gap`, `sgap`।
+
+### Route input ও CSRF
+
+```php
+echo '<form method="post" action="/profile">';
+echo PHRO::csrfField();
+echo '</form>';
+
+$data = PHRO::gatherRequestData();
+```
+
+Guard চালু করলে secure session defaults, project-scoped session name, CSRF এবং configured shields কাজ করে:
+
+```php
+PHRO::guard([
+    'rate_limit' => ['enabled' => true],
+]);
+```
+
+Default guard layer-এর মধ্যে content type, SQLi, XSS, rate limit, attempt, upload, header inspection, honeypot, open redirect ও CSRF protection আছে। Limit বাড়াতে হলে নিরাপদ সীমায় নির্দিষ্ট key override করুন; পুরো shield বন্ধ করবেন না।
+
+### Proxy/Cloudflare
+
+`REMOTE_ADDR` default source। `X-Forwarded-For`, `CF-Connecting-IP`, `X-Real-IP` কেবল trusted proxy validation-এর পরে ব্যবহারযোগ্য fallback:
+
+```php
+PHRO::trustProxies(['173.245.48.0/20', '103.21.244.0/22']);
+$ip = PHRO::getUserIP();
+```
+
+যে reverse proxy/CDN ব্যবহার করছেন তার official current CIDR list দিন। Blind forwarded header trust করবেন না।
+
+### CORS/CSP ও SEO
+
+```php
+PHRQ::cross(true); // self-aware restrictive policy
+// অথবা নির্দিষ্ট origin:
+PHRQ::cross(true, ['https://app.example.com'], true);
+
+PHRO::manifest(['name' => 'My App', 'short_name' => 'App']);
+PHRO::addSitemapEntry('/docs', ['priority' => '0.7']);
+PHRO::addRobotsRule('Disallow: /private');
+```
+
+`PHRO::listen()` `/app.js`, `/sw.js`, sitemap/robots/manifest এবং registered application routes সম্পন্ন করে।
+
+## 8. PHDB database ও PHLS local state
+
+### PHDB connection
+
+```php
+PHDB::$host = 'localhost';
+PHDB::$username = 'root';
+PHDB::$password = 'secret';
+PHDB::$dbname = 'shop';
+
+$status = PHDB::checker();
+```
+
+### CRUD
+
+```php
+$id = PHDB::insert('products', [
+    'name' => 'Keyboard',
+    'price' => 2500,
+    'status' => 'active',
+]);
+
+$product = PHDB::find('products', $id);
+$active = PHDB::select('products', '*', ['status' => 'active'], 20, 0, 'id DESC');
+PHDB::update('products', ['price' => 2400], ['id' => $id]);
+PHDB::delete('products', ['id' => $id]);
+```
+
+Raw SQL লাগলে placeholder বাধ্যতামূলক:
+
+```php
+$rows = PHDB::query(
+    'SELECT * FROM products WHERE price >= ? AND status = ?',
+    [1000, 'active']
+);
+```
+
+### খুব বড় result streaming
+
+```php
+foreach (PHDB::fast('SELECT id, email FROM users WHERE status = ?', ['active']) as $row) {
+    // একবারে একটি row memory-তে আসে
+}
+```
+
+Generator শেষ হওয়ার আগে একই connection-এ অন্য query চালাবেন না।
+
+### Transaction, analytics ও pagination
+
+```php
+PHDB::transaction(function (): void {
+    PHDB::insert('orders', ['total' => 500]);
+    PHDB::update('stock', ['quantity' => 9], ['product_id' => 1]);
+});
+
+$page = PHDB::paginate('products', '*', ['status' => 'active'], 1, 25);
+$total = PHDB::sum('orders', 'total', ['status' => 'paid']);
+$count = PHDB::count('users', null, ['status' => 'active']);
+```
+
+### Schema synchronization
+
+```php
+PHDB::createTable('products', [
+    'id' => 'BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+    'name' => 'VARCHAR(190) NOT NULL',
+    'price' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
+    'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+]);
+```
+
+Default sync declaration অনুযায়ী add/modify/remove করতে পারে এবং unchanged schema দ্রুত skip করে। Column বাদ বা type change production data-তে destructive হতে পারে—backup/restore drill ছাড়া deploy করবেন না।
+
+### PHLS
+
+```php
+// Default storage স্বয়ংক্রিয়ভাবে .mystack namespace ব্যবহার করে।
+// Custom file প্রয়োজন হলে অন্য PHLS call-এর আগেই দিন:
+// PHLS::setFile(__DIR__ . '/.mystack/custom-state.sqlite');
+PHLS::add('token', ['value' => 1], 15, ['auth']);
+$value = PHLS::get('token');
+
+$value = PHLS::remember('catalog', 300, fn() => loadCatalog());
+$attempts = PHLS::increment('login:' . $ip, 1, 300);
+PHLS::flushByTag('auth');
+```
+
+PHLS bounded SQLite retry/WAL, atomic transaction, checker এবং malformed-storage recovery ব্যবহার করে। এটি single-server local state; multiple server হলে shared DB/cache প্রয়োজন।
+
+## 9. PHML, PHJC, PHUI ও PHCS frontend
+
+### PHML DSL
+
+```php
+PHML::init();
+
+echo phml(<<<'PHML'
+main {
+    class: "max-w-6xl mx-auto p-6";
+    h1 { class: "text-3xl font-bold"; "Welcome" }
+    p { class: "text-slate-600"; "Built with MyStack" }
+}
+PHML);
+```
+
+PHML layout, partial, block/yield, registered component, shared data, head/body/css/js এবং compiled processing সমর্থন করে।
+
+### PHJC view
+
+```php
+echo PHJC::view('HomeView', ['title' => 'Home']);
+PHJC::share('currentUser', $user);
+PHJC::clearCache();
+```
+
+PHJC component PHP compile করে `src/cache/php`, CSS `src/cache/css`, JS `src/cache/js`-এ একই readable component name দিয়ে রাখে। Path না থাকলে auto-create হয়।
+
+### PHUI
+
+```php
+echo PHUI::element('button:primary', [
+    'slot' => 'Save',
+    'class' => 'w-full sm:w-auto',
+    'phjs' => ['click' => 'toast "Saved"'],
+]);
+
+echo PHUI::section('section:hero', [
+    'hero_title' => 'Next-generation commerce',
+    'hero_desc' => 'Portable and fast.',
+    'hero_buttons' => PHUI::element('button:primary', ['slot' => 'Get started']),
+]);
+```
+
+API family: `element`, `section`, `layout`, `page`, generic `ui`/`render`, `register`, `registerMany`, `alias`, `exists`, `search`, `categories`, `catalog`, `check`। Placeholder: `{{title|Default title}}`। Untrusted raw HTML সরাসরি দেবেন না; `PHUI::check()`/guarded rendering ব্যবহার করুন।
+
+### PHCS
+
+```php
+PHCS::config(['darkMode' => 'class']);
+PHCS::HTML('<button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Save</button>');
+$css = PHCS::build();
+```
+
+Responsive, state, dark mode, layout, color, typography, animation এবং advanced utility PHCS runtime/build-এ process হয়। কোনো Node build দরকার নেই।
+
+## 10. PHJS self-contained browser runtime
+
+`/app.js` সরাসরি `src/js/PHJS-min.php` থেকে PHRO serve করে। এটি canonical PHP-aware source। Runtime নিজে একবার init হয় এবং একই page/request পুনরায় অপ্রয়োজনীয়ভাবে fetch না করার জন্য in-flight request ও page cache de-duplication রাখে।
+
+### PHP থেকে JS
+
+```php
+echo PHJS::gen('toast "Saved"');
+echo PHJS::const('userId', 42);
+echo PHJS::fetch('/api/users', ['method' => 'GET']);
+
+$module = PHJS::module([
+    ['type' => 'const', 'name' => 'now', 'value' => PHJS::expr('Date.now()')],
+    ['type' => 'export', 'names' => ['now']],
+]);
+```
+
+### HTML-only directive layer
+
+PHJS-এর native directive prefix/config অনুসরণ করে state, show/hide, text/html/value/class/style/attribute binding, event, model, loop, conditional, transition, teleport, ref, request, swap, trigger, component, prop, slot, action, context, form, lazy mount, route mount, error/loading/empty fallback, keymap এবং hotkey declaratively ব্যবহার করা যায়। Project-এর existing syntax/aliases inspect করে ব্যবহার করুন; `hx-*` বা `Alpine.*` runtime-এর উপর নতুন dependency তৈরি করবেন না।
+
+### Request ও navigation behavior
+
+- same-origin HTML document link-ই SPA navigation পায়;
+- `mailto:`, `tel:`, download, target, external এবং non-HTML asset native থাকে;
+- destination DOM swap-এর আগে প্রয়োজনীয় CSS prepare/activate হয়;
+- hover intent এবং touchstart prefetch support আছে;
+- একই URL cache/in-flight থাকলে দ্বিতীয় request পাঠায় না;
+- back/forward, error response এবং full-document state safely restore হয়;
+- toast সবসময় body-level fixed layer-এ থাকে;
+- removed DOM-এর listener/effect/timer cleanup হয়।
+
+### Major runtime systems
+
+State/store, component lifecycle, async component, props/slots/context, forms, validation, router, request/upload, offline queue, storage/DB sync, theme, i18n, SEO, accessibility/focus trap, keyboard/keymap, PWA/SW, PHFY, OAuth/2FA/payment helpers, chart/media/file system, AI/XR, command palette, devtools, virtual list/table, data table, dashboard, mega menu, eCommerce UI, rich editor, file manager, Kanban, calendar এবং workflow helper অন্তর্ভুক্ত।
+
+Debug mode-এ `Ctrl+Shift+D` দিয়ে PHJS DevTools এবং `Ctrl+K` দিয়ে command palette খোলা যায়।
+
+### Synchronization
+
+PHJS behavior update করলে অন্তত এগুলো equivalent রাখতে হবে:
+
+- `src/js/PHJS-min.php` — main/canonical
+- `src/js/PHJS.php`
+- `src/js/phjs.js`
+- `src/js/phjs.min.js`
+- changed behavior-এর related runtime copy
+
+PHP interpolation plain JS-এ verbatim copy করবেন না; resolved equivalent রাখুন। শেষে `php mystack smoke`-এর synchronized build এবং Bengali UTF-8 test pass করান। Service Worker-এর canonical source `src/js/SW.php`; সংশ্লিষ্ট `sw.js` synchronized রাখুন।
+
+## 11. Authentication, JWT, encryption ও 2FA
+
+### PHAU identity ও verification
+
+```php
+$created = PHAU::make('users', $dbMap, $input, $options);
+$identity = PHAU::check('users', 'token', $token, 'email');
+
+PHAU::identityLib('/identity-lib'); // debug/config অনুযায়ী built-in UI/route
+```
+
+OAuth/OIDC:
+
+```php
+$providers = PHAU::socialProviders();
+$login = PHAU::socialUrl('google', $googleConfig);
+
+PHAU::listenCallback('/oauth/callback', [
+    'google' => $googleConfig,
+], function (array $identity): void {
+    // প্রয়োজনীয় normalized field-ই সংরক্ষণ করুন
+});
+```
+
+Provider config অনুযায়ী state, PKCE/nonce/callback validation বজায় রাখুন। Raw provider response বা access token অপ্রয়োজনে log/store করবেন না।
+
+### JWT
+
+```php
+PHJT::key('long-separate-jwt-secret');
+PHJT::algorithm('HS512');
+$created = PHJT::create(['sub' => 42, 'role' => 'admin'], 3600);
+if ($created['status']) {
+    $verified = PHJT::verify($created['data']);
+}
+```
+
+`PHJT::rotate()` key rotation support করে। Algorithm/key দুটোই server-controlled রাখুন।
+
+### Encryption
+
+```php
+PHED::key('long-encryption-secret');
+$encrypted = PHED::make($secretData, 'encrypt');
+$plain = PHED::make($encrypted, 'decrypt');
+```
+
+Encryption key, JWT key ও router key আলাদা রাখুন। Existing encrypted data migration test ছাড়া format/key পরিবর্তন করবেন না।
+
+### OTP/TOTP Authenticator
+
+```php
+PHTP::configure();
+$enrollment = PHTP::enroll($userId, ['issuer' => 'My App']);
+$confirmed = PHTP::confirm($userId, $code);
+$result = PHTP::authenticate($userId, $codeOrRecoveryCode);
+$status = PHTP::status($userId);
+```
+
+`recovery()` recovery code rotate করে এবং `disable()` 2FA বন্ধ করে। Enrollment confirm হওয়ার আগে active নয়; TOTP replay ও recovery code reuse প্রতিরোধ করা হয়। QR তৈরি করতে:
+
+```php
+$dataUri = PHQR::make($enrollment['url']);
+```
+
+## 12. HTTP, API, mail, realtime ও translation
+
+### PHRQ
+
+```php
+$response = PHRQ::php('GET', 'https://api.example.com/items', [
+    'Accept' => 'application/json',
+]);
+
+$browserCode = PHRQ::js('POST', '/api/items', [], ['name' => 'Book']);
+```
+
+TLS verification বন্ধ করবেন না। Timeout, allowed URL, response type এবং size limit নির্ধারণ করুন। `livemap()` debug-only request visualization UI, `stream()` streaming response, `file()` bounded output এবং `status()` HTTP status helper।
+
+### PHAP compact API
+
+```php
+PHAP::api(
+    'POST /api/users',
+    'auth',
+    ['email' => 'required|email'],
+    fn(array $data) => PHDB::insert('users', $data),
+    'User created'
+);
+```
+
+`all/get/add/up/rm` smart CRUD, `valid`, `auth`, `page`, `resource/item/collection/clean`, `ok/fail/send` standardized response দেয়।
+
+### PHEM
+
+```php
+PHEM::smtp('smtp.example.com', 465, 'ssl');
+PHEM::smtpLogin('sender@example.com', 'password');
+$sent = PHEM::smtpSend(
+    'sender@example.com', 'My App', 'user@example.com', '', '',
+    'Welcome', '<p>Your account is ready.</p>'
+);
+```
+
+IMAP/POP configuration/login/get/send APIs-ও আছে। Debug log-এ credential বা message secret প্রকাশ করবেন না।
+
+### PHEV
+
+```php
+PHEV::initialize('/websocket', '0.0.0.0', 8000);
+PHEV::handler('/chat', 'message', function ($clientId, $message): void {
+    PHEV::broadcast($message);
+});
+PHEV::start();
+```
+
+WebSocket loop web request-এর মধ্যে চালাবেন না; CLI/service supervisor ব্যবহার করুন। SSE: `sendSE`, `stream`, `setRetry`; live UI: `streamUI`।
+
+### PHTR
+
+```php
+$translated = PHTR::auto('স্বাগতম', 'en');
+```
+
+Remote translation provider availability/terms পরিবর্তনশীল; timeout/failure fallback দিন।
+
+## 13. Payment ও courier
+
+### Payment
+
+```php
+$gateway = PHPA::bkash()
+    ->setKeys('APP_KEY', 'APP_SECRET', 'USERNAME', 'PASSWORD')
+    ->sandbox(true);
+
+$payment = $gateway->charge(500.00, 'BDT', 'ORDER-1001');
+if (!empty($payment['success'])) {
+    $verified = $gateway->verify($payment['transaction_id']);
+}
+```
+
+প্রথমে capability দেখুন:
+
+```php
+$available = PHPA::available();
+$capability = PHPA::gatewayCapabilities('bkash');
+```
+
+Gateway অনুযায়ী `charge`, `verify`, `execute`, `refund`, `webhook` capability ভিন্ন। Live merchant account, keys, approval, callback URL ও official provider contract ছাড়া “adapter আছে” মানে live payment নিশ্চিত নয়। Webhook signature verify এবং order fulfillment idempotent করুন। Private gateway override:
+
+```php
+PHPA::extend('privatepay', fn() => $customGateway);
+```
+
+### Courier
+
+```php
+$profile = PHPA::courierProfile('pathao');
+$courier = PHPA::courier('pathao')
+    ->configure(['token' => 'merchant-token'])
+    ->sandbox(true);
+
+$result = $courier->track('CONSignment-ID');
+```
+
+Facade-এ ১০টি Bangladesh এবং ১০টি international courier profile রয়েছে। Exact operation/profile আগে `courierAvailable()` ও `courierProfile()` দিয়ে দেখুন। Merchant-specific contract `extendCourier()` দিয়ে inject করা যায়। Tracking UI PHUI/PHJS-এ same-origin secure helper ব্যবহার করে।
+
+## 14. PHFY notification ও Web Push
+
+সব default PHFY-তে আছে; minimal enable:
+
+```php
+PHFY::configure(['enabled' => true]);
+PHFY::registerRoutes();
+```
+
+Send:
+
+```php
+PHFY::public('A new product update is available', [
+    'title' => 'Application update',
+    'keywords' => ['product-update'],
+]);
+
+PHFY::private('Your export is ready', [
+    'users' => ['account@example.com'],
+    'permissions' => ['member'],
+    'data' => ['export_id' => 123],
+]);
+```
+
+Public topic ntfy SSE থেকে PHJS নেয়। Private token না থাকলে authorized private payload PHLS-এ থাকে এবং same-origin private endpoint poll করে। `users`, `permissions`, `keywords` client context অনুযায়ী filter হয়।
+
+Browser permission UI থেকে PHJS Service Worker/PushManager subscription তৈরি করে। `webpush_auto` true হলে OpenSSL EC/VAPID key auto-managed হয়। Hosting capability:
+
+```php
+$crypto = PHFY::cryptoCapability();
+$push = PHFY::webPushCapability();
+```
+
+Expected behavior:
+
+- active tab: notification event/browser notification;
+- অন্য page/tab বা minimized: browser permission থাকলে notification;
+- tab বন্ধ: Service Worker Web Push support থাকলে notification;
+- browser পুরো বন্ধ: OS/browser/platform policy-এর উপর নির্ভরশীল;
+- native Android/iOS app: একই PHP event থেকে app transport-এ পাঠানো সম্ভব, তবে app-এর push token/transport adapter আলাদা করে integrate করতে হয়—Web Push subscription নিজে native FCM/APNs token নয়।
+
+Public topic-এ secret/ব্যক্তিগত তথ্য দেবেন না।
+
+## 15. PHAI ও MCP
+
+```php
+PHAI::setAccounts([
+    'openai' => ['key' => '...'],
+    'gemini' => ['key' => '...'],
+]);
+PHAI::setPriority(['gemini', 'openai']);
+PHAI::setTimeout(30);
+
+$result = PHAI::cluster('Summarize this text', ['provider' => 'gemini']);
+```
+
+MCP:
+
+```php
+PHAI::tool(
+    'get_user',
+    'Get one user by ID',
+    ['id' => ['type' => 'integer']],
+    fn(int $id) => PHDB::find('users', $id)
+);
+
+PHAI::prompt('welcome', 'Welcome prompt', ['name' => 'string'], fn($name) => "Welcome {$name}");
+PHAI::resource('mystack://status', 'Status', 'Framework status', fn() => PHMO::health(true));
+PHAI::routes('/mcp');
+```
+
+`serve`, `clusterAPI`, `bridge`, resource template, middleware এবং alias support আছে। Remote bridge/URL অবশ্যই allowlist, HTTPS, timeout, size limit এবং SSRF protection-এর মধ্যে রাখুন। AI output untrusted data হিসেবে validate করুন।
+
+## 16. PHMO monitoring ও debug UI
+
+```php
+PHMO::configure(['enabled' => true]);
+PHMO::registerRoutes();
+PHMO::dashboard('/monitor');
+```
+
+- `/health`: lightweight liveness;
+- `/ready`: PHLS/database dependency readiness, failure হলে 503;
+- `requestId()` ও `traceId()`: request correlation;
+- `log()`: structured JSON log;
+- `metrics()`: request, error-rate, latency average/p95;
+- `report()`: bounded problem/detail report;
+- `.mystack/`: direct private storage, ৯০ দিনের log retention এবং size-bounded rotation;
+- `/monitor`: responsive read-only UI, কেবল debug true হলে route থাকে।
+
+```php
+PHMO::log('info', 'Order paid', ['order_id' => 1001]);
+$health = PHMO::health(true);
+$metrics = PHMO::metrics();
+```
+
+Debug tools:
+
+```php
+PHDE::apibar('/apibar');
+PHRQ::livemap('/livemap', ['POST' => '/livemap'], 5, 60 * 24);
+PHCD::initialize('/cdn', DIR::path('css'), DIR::path('js'));
+```
+
+এগুলো `PHDE::debug(false)` অবস্থায় public route/UI হিসেবে চালু রাখা যাবে না। PHCD remote install/update-এর জন্য application authorization callback ব্যবহার করুন।
+
+## 17. সব library-র পূর্ণ catalog
+
+নিচে primary public API inventory দেওয়া হলো। Dynamic gateway subclasses, QR internals, shield internals এবং magic-generated PHJS/PHJC chain method এখানে আলাদা করে তালিকাভুক্ত নয়; সেগুলো parent/facade contract অনুসরণ করে।
+
+| Library | দায়িত্ব | Primary public API |
+| --- | --- | --- |
+| `DIR` | path/URL resolver | `initialize`, `path`, `link`, `raw`, `secureRequire`, `getRootDir`, `getBaseUrl` |
+| `Importer` / `import()` | contextual dynamic loader | `getInstance`, `setContext`, `clearContext`, `load`, global `import` |
+| `PHAI` | AI/MCP | `setAccounts`, `setPriority`, `setModels`, `setTimeout`, `getModels`, `cleanup`, `serve`, `clusterAPI`, `cluster`, `routes`, `tool`, `prompt`, `resource`, `resourceTemplate`, `alias`, `middleware`, `bridge` |
+| `PHAP` | compact REST API | `api`, `all`, `get`, `add`, `up`, `rm`, `run`, `input`, `resource`, `ok`, `fail`, `valid`, `page`, `auth`, `send`, `item`, `collection`, `clean` |
+| `PHAU` | identity/OAuth | `identityLib`, `make`, `check`, `verifyMake`, `verifyCheck`, `socialProviders`, `socialUrl`, `listenCallback` |
+| `PHCD` | browser package manager | `initialize`, `handleRequest`, `get`, `use` |
+| `PHCO` | secure cookies/project namespace | `isSecure`, `path`, `pre`, `add`, `update`, `remove`, `get`, `exists`, `expired`, `active`, `getExpiredDetails`, `makeExpired`, `getAll` |
+| `PHCS` | utility CSS engine | `config`, `HTML`, `addHtml`, `CSS`, `addCss`, `process`, `build`, `registerUtilityHandler`, `processHtml`, `processCss`, `generateCss`, `buildCss` |
+| `PHDB` | database/ORM | `error`, `id`, `affected`, `checker`, `connect`, `disconnect`, `query`, `fast`, `first`, `scalar`, `save`, `insert`, `batchInsert`, `update`, `delete`, `select`, `find`, `specificSelect`, `getValue`, `getSpecificValue`, `addDB`, `createTable`, `dropTable`, `alterTable`, `truncateTable`, `findBy`, `search`, `columns`, `deleteBy`, `paginate`, `sum`, `avg`, `max`, `min`, `count`, `exists`, `api`, `transaction`, `clean`, `array`, `array_get`, `array_set`, `close` |
+| `PHDE` | debug/error | `enableErrorReporting`, `disableErrorReporting`, `customErrorHandler`, `debug`, `isDebug`, `errors`, `errorJSON`, `getType`, `displayErrors`, `api`, `apibar`, `file`, `memory` |
+| `PHED` | encryption | `hide`, `make`, `score`, `key` |
+| `PHEM` | SMTP/IMAP/POP3 | `smtp`, `imap`, `pop`, `smtpLogin`, `imapLogin`, `popLogin`, `smtpGet`, `imapSend`, `popSend`, `imapGet`, `popGet`, `smtpSend`, `showLog` |
+| `PHEV` | WebSocket/SSE/StreamUI | `allowWebWorker`, `initialize`, `start`, `restart`, `stop`, `running`, `clients`, `debugClients`, `getHandler`, `handler`, `message`, `broadcast`, `disconnect`, `initHeaders`, `sendSE`, `setRetry`, `stream`, `streamUInew`, `streamUI` |
+| `PHFY` | ntfy/Web Push | `configure`, `config`, `public`, `private`, `send`, `clientConfig`, `webPushCapability`, `cryptoCapability`, `registerRoutes`, `privateFeed` |
+| `PHJC` | component/view compiler | `fastUI`, `ui`, `icon`, `slot`, `layout`, `clearCache`, `view`, `includeView`, loop helpers, `share`, `directive`, `minify`, `metaPreset`, `breadcrumb`, `head`, `buildHead`, `newHTML`, `singleHTML`, `mergeHTML`, `p2j`, `h2p`, `css`, `generateId`, `import`, `header`, `body`, `streamJS`, `newJS`, `phjs`, `use`, `render`, builder magic methods |
+| `PHJS` | PHP→JS/PHJS bridge | typed values (`expr`, `value`, `arrayValue`, `object`, `template`), declarations, DOM, events, storage, network, application helpers, OAuth/2FA/payment helpers, control flow, function/class/module builders, `script`, `moduleScript`, `gen` |
+| `PHJT` | JWT | `key`, `rotate`, `algorithm`, `create`, `verify` |
+| `PHLS` | local SQLite state | `disconnect`, `setFile`, `checker`, `add`, `addIfAbsent`, `update`, `remove`, `expire`, `expireAllExpired`, `isExpired`, `getExpiredDetails`, `getActiveDetails`, `limitizer`, `get`, `getAll`, `remember`, `increment`, `decrement`, `flushByTag`, `removeAll` |
+| `PHML` | markup/composition | `share`, `partial`, `layout`, `block`, `yieldBlock`, `component`, `hasComponent`, `render`, `init`, `autoAssets`, `use`, `meta`, `title`, `js`, `css`, `uiConfig`, `head`, `footer`, `html`, `body`, `clearCache`, `process` |
+| `PHMO` | observability | `configure`, `config`, `requestId`, `traceId`, `isProbeRequest`, `registerRoutes`, `dashboard`, `report`, `health`, `metrics`, `log`, `finishRequest` |
+| `PHOB` | browser/device capability | `capability`, `build`, `use`, `deviceID` |
+| `PHOP` | file/media operation | `img`, `video`, `zip`, `text` |
+| `PHPA` | payment/courier facade | `courier`, `extendCourier`, `courierAvailable`, `courierProfile`, `extend`, `available`, `gatewayCapabilities`, dynamic gateway factories |
+| `PHQR` | QR | `make` |
+| `PHRO` | router/WAF | `initialize`, `guard`, `secure`, CSRF helpers, `trustProxies`, HTTP methods, `group`, `crud`, `gap`, `sgap`, `add`, fluent `name/middleware/header/mcp`, attempts, tasks, stream/channel/publish, route lookup, IP/device/tracking helpers, sitemap/robots/manifest, `listen` |
+| `PHRQ` | request/CORS/CSP/stream | `php`, `js`, `header`, `cross`, `status`, `file`, `livemap`, `stream` |
+| `PHSE` | session | `start`, `add`, `update`, `remove`, `get`, `isActive`, `expireAll`, `removeAll`, `regenerateId`, `getAll`, `getExpiryTime` |
+| `PHTM` | date/time | `setZone`, `getZone`, `getTime`, `setTime`, `calculate`, `modify`, `format`, `to12h`, `to24h` |
+| `PHTP` | OTP/Authenticator | `configure`, `key`, `code`, `verify`, `url`, `enroll`, `confirm`, `authenticate`, `status`, `recovery`, `disable` |
+| `PHTR` | translation | `translate`, `auto`, `buildUrl`, `parseResponse` |
+| `PHUI` | UI registry | `ui`, `element`, `section`, `layout`, `page`, `exists`, `register`, `registerMany`, `alias`, `search`, `categories`, `count`, `attributes`, `check`, `render`, `boot`, `catalog` |
+| `PHVD` | validation | `check`; database rule helpers `PhvdRule::unique`, `PhvdRule::exists` |
+
+### 17.1 বড় facade-গুলোর exact public method index
+
+এই তালিকা magic/dynamic call-এর বাইরে বর্তমানে ঘোষিত public entry point দ্রুত খুঁজতে ব্যবহার করুন। Method-এর argument/return signature পরিবর্তন হতে পারে, তাই implementation-এর আগে সংশ্লিষ্ট source method দেখুন।
+
+**PHJC**
+
+```text
+fastUI, ui, icon, slot, layout, clearCache, view, includeView,
+startLoop, currentLoop, endLoop, share, directive, minify, metaPreset,
+breadcrumb, reset, head, buildHead, newHTML, singleHTML, mergeHTML,
+p2j, h2p, css, countElements, generateId, import, header, body,
+streamJS, newJS, phjs, use, render_h, render_c, render_b, render_j,
+app, render, __call, __callStatic, set, op, get, endFun, endCod
+```
+
+**PHJS — bridge, DOM, storage ও application helper**
+
+```text
+assets, js, __callStatic, render, parse, alpineData, alpineStore,
+alpineBind, el, refs, store, watch, dispatch, nextTick, root, data,
+id, state_magic, params_magic, route_magic, ui_magic, os_magic,
+t_magic, router_magic, clipboard_magic, hxProcess, hxTrigger, hxAjax,
+hxRemove, hxAddClass, hxRemoveClass, hxToggleClass, hxConfig,
+const, let, var, log, error, warn, table, localSet, localGet,
+localRemove, sessionSet, sessionGet, cookieSet, html, text, val,
+addClass, removeClass, toggleClass, css, attr, remove, event, onReady,
+redirect, reload, alert, fetch, raw, appReady, appNavigate, appLink,
+appApi, appRoutePath, appToast, appModal, appProgress, appTheme,
+appThemeToggle, appValidate, appCheck, appSeo, appI18n, appStoreGet,
+appStoreSet, appStoreDispatch, appDbStorageSet, appDbStorageGet,
+appDbStorageDel, appDbSync, appRequest, appUpload, appSearch,
+appSearchIndex, appHardware, appDrmProtect, appFsRead, appFsSave,
+appMediaInit, appChartInit, appWorker, appInspector, appPalette,
+appA11yTrap, appDesignSet, appDesignGet, appTimeFormat, appTimeAgo,
+appAuthTotp, appOAuthStart, appOAuthCallback, appTwoFactorSubmit,
+appPaymentStart, appPaymentStatus, appHeroUpdate, appAnimateTo,
+appAnimateSpring, appFontLoad, appAi, appXrInit, appPwaEnable,
+appHydrate
+```
+
+`alpine*` ও `hx*` নামগুলো compatibility bridge; এগুলো external Alpine/HTMX runtime বাধ্যতামূলক করে না। নতুন application code-এ PHJS-native directive/style অগ্রাধিকার দিন।
+
+**PHJS — typed JavaScript/compiler API**
+
+```text
+expr, value, translate, arrayValue, object, template, statement,
+program, compile, module, build, arrow, functionDef, assign,
+returnValue, throwValue, awaitValue, invoke, construct, dynamicImport,
+ternary, ifBlock, forOf, whileBlock, doWhileBlock, forBlock,
+switchBlock, tryCatch, classDef, importModule, exportDefault,
+exportNamed, call, script, moduleScript, gen
+```
+
+**PHRO**
+
+```text
+initialize, guard, secure, getToken, csrfField, regenerateToken,
+trustProxies, root, getCallbackContext, get, post, put, patch, delete,
+head, options, group, crud, gap, sgap, add, name, middleware, header,
+mcp, gatherRequestData, attempt, resetAttempt, task, stream, channel,
+publish, routes, route, source, getUserIP, gatherHeaders,
+getGeolocationData, extractIdentityFromCookie, netKey, deviceKey,
+decrypt, key, track, footprint, setIdentityCookie, userAgentInfo,
+createSlug, sitemap, disallow, allow, getSitemapRoutes, manifest,
+addSitemapEntry, addRobotsRule, listen
+```
+
+**PHDB**
+
+```text
+error, id, affected, checker, connect, disconnect, query, fast, first,
+scalar, save, insert, batchInsert, update, delete, select, find,
+specificSelect, getValue, getSpecificValue, addDB, createTable,
+dropTable, alterTable, truncateTable, findBy, search, columns,
+deleteBy, paginate, sum, avg, max, min, count, exists, api,
+transaction, clean, array, array_get, array_set, close
+```
+
+**PHAI / PHPA / PHFY / PHMO**
+
+```text
+PHAI: setAccounts, setPriority, setModels, setTimeout, getModels,
+registerBridgeProcess, getBridgeProcess, cleanup, serve, clusterAPI,
+cluster, getInstance, routes, tool, prompt, resource, resourceTemplate,
+alias, middleware, handleRequest, bridge
+
+PHPA: courier, extendCourier, courierAvailable, courierProfile, extend,
+available, gatewayCapabilities, __callStatic
+
+PHFY: configure, config, public, private, send, clientConfig,
+webPushCapability, cryptoCapability, registerRoutes, privateFeed
+
+PHMO: configure, config, requestId, traceId, isProbeRequest,
+registerRoutes, dashboard, report, health, metrics, log, finishRequest
+```
+
+### 17.2 Library-by-library বিস্তারিত API reference
+
+নিচের তালিকায় “variable নেই” মানে class-এর configuration private এবং method দিয়েই নিয়ন্ত্রণ করতে হবে। Public array/map-কে সরাসরি পরিবর্তনের আগে source contract দেখুন; সম্ভব হলে documented setter/register method ব্যবহার করুন।
+
+#### 17.2.1 `DIR` ও `Importer`
+
+**কাজ:** project root, base URL, typed directory alias এবং নিরাপদ dynamic import পরিচালনা করে। Public configuration variable নেই।
+
+| Method | কাজ ও ফলাফল |
+| --- | --- |
+| `DIR::initialize(array $options = [])` | Custom root/directory map initialize করে; portable hosting detection override করার entry point। |
+| `DIR::path($key)` | `app:Name`, `component:Name`, `library:PHDB`, `js:file.js`-কে local filesystem path-এ resolve করে। |
+| `DIR::link($key, $cacheBust = false)` | একই key-এর public URL তৈরি করে; দ্বিতীয় argument true হলে cache-busting query যোগ করে। |
+| `DIR::raw($key)` | Resolved file-এর raw content পড়ে; output context অনুযায়ী caller-কে escape করতে হবে। |
+| `DIR::secureRequire($key, array $data = [])` | Scoped data-সহ resolved PHP file নিরাপদভাবে execute করে এবং result ফেরায়। |
+| `DIR::getRootDir()` / `getBaseUrl()` | বর্তমান detected root directory ও base URL দেয়। |
+| `Importer::getInstance()` | Shared importer instance দেয়। |
+| `setContext()` / `clearContext()` | Imported PHP file-এ পাঠানো temporary context set/clear করে। |
+| `load(...$args)` / global `import(...$args)` | একাধিক typed import, wildcard, PHP require, CSS link, JS script বা asset URL resolve/emit করে। |
+
+#### 17.2.2 `PHDE`
+
+**কাজ:** debug state, PHP error capture/display, API error envelope, memory/file response এবং API Bar। Public variable নেই; `debug()`/`isDebug()` source of truth।
+
+| Method | কাজ ও ফলাফল |
+| --- | --- |
+| `enableErrorReporting()` / `disableErrorReporting()` | PHP error reporting ও framework handler চালু/বন্ধ করে। Production-এ detailed display বন্ধ রাখুন। |
+| `customErrorHandler(...)` | PHP warning/error-কে framework error pipeline-এ নেয়; সাধারণত সরাসরি call করা হয় না। |
+| `debug($state = true)` | Runtime debug boolean set করে; chain/config bootstrap entry point। |
+| `isDebug(): bool` | বর্তমান debug state ফেরায়। Debug-only route/UI এই value মানে। |
+| `errors($state = true)` / `displayErrors($state = true)` | Error capture/display policy প্রয়োগ করে। |
+| `errorJSON()` | Captured error-কে API-উপযোগী JSON response হিসেবে দেয়/emit করে। |
+| `getType()` | বর্তমান error/request output type নির্ণয় করে। |
+| `api($method = 'application/json')` | Error/output pipeline-এর API content type set করে। |
+| `apibar($url = '/apibar')` | Route, request ও debug তথ্যের self-contained UI register করে; debug false হলে unavailable থাকতে হবে। |
+| `file($name, $length)` | Download/stream response header প্রস্তুত করে। |
+| `memory($limit)` | PHP memory limit সেট করে, যেমন `512M`। Hosting hard limit অতিক্রম করতে পারে না। |
+
+#### 17.2.3 `PHRO`
+
+**কাজ:** router, route builder, middleware, WAF, CSRF, proxy/IP, request identity, rate/attempt protection, channel, SEO endpoints এবং final dispatcher। Public configuration variable নেই।
+
+| Method group | Methods ও কাজ |
+| --- | --- |
+| Bootstrap | `initialize($basePath)` custom route base দেয়; `guard($config)` session/security shields চালু করে; `listen($errorHandler)` asset/system/application route dispatch করে request শেষ করে। |
+| HTTP route | `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, generic `add` route register করে; প্রত্যেকটি fluent route object দেয়। |
+| Route composition | `group` prefix scope, `crud` standard CRUD, `gap` generated API pattern, `sgap` secure/generated API pattern register করে। |
+| Fluent metadata | `name` route name, `middleware` authorization/transform chain, `header` response header, `mcp` route-কে MCP metadata দেয়। |
+| CSRF/security | `secure()` request secure কি না; `getToken()` token দেয়/তৈরি করে; `csrfField()` hidden input; `regenerateToken()` token rotate করে। |
+| Proxy/IP | `trustProxies(array)` trusted proxy/CIDR set করে; `getUserIP()` validated client IP; `gatherHeaders()` normalized headers; `getGeolocationData()` available network/location context। |
+| Request context | `root()` base URL/path, `getCallbackContext()` active callback data, `gatherRequestData()` query/body/files merge, `routes()` route list, `route()` named/identifier lookup, `source()` route source metadata। |
+| Abuse control | `attempt()` event/user/IP attempt check ও increment; `resetAttempt()` সফলতার পরে counter reset। Guard-এর rate-limit নিজে PHLS-backed। |
+| Task/stream/channel | `task(...$tasks)` background-compatible task dispatch; `stream($provider)` streaming response; `channel($id)` worker channel; `publish($id,$command,$data)` channel message। |
+| Identity/tracking | `netKey`, `deviceKey`, `extractIdentityFromCookie`, `setIdentityCookie`, `userAgentInfo`, `track`, `footprint`, `decrypt`, `key` device/network identity ও encrypted footprint পরিচালনা করে। |
+| SEO/PWA | `createSlug`, fluent `sitemap`, `allow`, `disallow`, `getSitemapRoutes`, `manifest`, `addSitemapEntry`, `addRobotsRule`। |
+
+`name`, `middleware`, `header`, `mcp`, `sitemap`, `allow`, `disallow` route registration-এর পরে chain করা instance method। Forwarded header কেবল `trustProxies()` validation-এর পরে trusted।
+
+#### 17.2.4 `PHOB`
+
+**কাজ:** browser/device capability ও stable device identity data build করে। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `capability(...)` | Browser/runtime capability map detect বা normalize করে। |
+| `build(...)` | Capability/device payload থেকে browser-side executable/config output তৈরি করে। |
+| `use(...)` | নির্বাচিত capability feature ব্যবহারের bridge/output দেয়। |
+| `deviceID(...)` | Available signals থেকে stable device identifier তৈরি করে; এটি authentication-এর বিকল্প নয়। |
+
+#### 17.2.5 `PHEV`
+
+**Public variable:** `PHEV::$retry = 1000` — SSE retry delay (milliseconds)। সাধারণত `setRetry()` ব্যবহার করুন।
+
+| Method group | কাজ |
+| --- | --- |
+| WebSocket lifecycle | `initialize($path,$address,$port)`, `start`, `restart`, `stop`, `running` server lifecycle। Long-running CLI/service supervisor প্রয়োজন। |
+| Worker policy | `allowWebWorker(bool)` web-worker compatible behavior অনুমোদন/বন্ধ করে। |
+| Clients | `clients`, `debugClients`, `disconnect($clientId)`, `message($clientId,$message)`, `broadcast($message)`। |
+| Handlers | `handler($requestPath,$action,$handler)` event/route action bind করে; `getHandler($message)` matching handler resolve করে। |
+| SSE | `initHeaders`, `sendSE($data,$event,$id)`, `setRetry($ms)`, `stream($callback,$interval)`। |
+| StreamUI | `streamUInew($key,$interval)` ও `streamUI($name,$interval)` live UI endpoint/bridge register করে। |
+
+#### 17.2.6 `PHEM`
+
+**কাজ:** dependency-free SMTP send এবং IMAP/POP3 mailbox access। Public variable নেই।
+
+| Method group | কাজ |
+| --- | --- |
+| Server config | `smtp(host,port,secure)`, `imap(host,port,secure,folder)`, `pop(host,port,secure,folder)` connection profile set করে। |
+| Login | `smtpLogin`, `imapLogin`, `popLogin` সংশ্লিষ্ট username/password set করে। Secret log করবেন না। |
+| Read | `smtpGet`, `imapGet`, `popGet` filter/limit অনুযায়ী message/result সংগ্রহ করে। |
+| Send | `smtpSend`, `imapSend`, `popSend` from/name/to/cc/bcc/subject/message দিয়ে send operation চালায়। |
+| Diagnostics | `showLog()` protocol transaction log দেয়; production output-এ sensitive content প্রকাশ করবেন না। |
+
+#### 17.2.7 `PHML`
+
+**Public variables:** `$flatAttrMap`, `$components`, `$sharedData`, `$treeCache`, `$tagAliases`, `$attrAliases`, `$unsafeKeywords`। এগুলো parser/registry state; direct mutation-এর বদলে method ব্যবহার করুন। `$unsafeKeywords` security-sensitive।
+
+| Method group | কাজ |
+| --- | --- |
+| Shared composition | `share`, `partial`, `layout`, `block`, `yieldBlock` shared data, partial/layout এবং named content block পরিচালনা করে। |
+| Components | `component`, `hasComponent`, `render` component register/check/render করে। |
+| Parser/bootstrap | `init`, `process`, magic `__callStatic`, `__toString` PHML DSL parse ও HTML render করে। |
+| Document/assets | `autoAssets`, `use`, `meta`, `title`, `js`, `css`, `uiConfig`, `head`, `footer`, `html`, `body` document composition ও asset attachment। |
+| Cache/map | `getFlatAttrMap()` normalized attribute map দেয়; `clearCache()` parser/tree cache clear করে। |
+
+#### 17.2.8 `PHCS`
+
+**কাজ:** PHP-native Tailwind-style utility scanner/compiler। Public configuration variable নেই। Instance এবং static—দুই API আছে।
+
+| Method | কাজ |
+| --- | --- |
+| `config(array)` | Theme, utilities, variants, colors ও build configuration merge করে। |
+| `HTML(string)` / instance `addHtml(string)` | Class scan করার HTML/PHML content যোগ করে। |
+| `CSS(string)` / instance `addCss(string)` | Raw/custom CSS source যোগ করে। |
+| `process($content,$type='html')` | এক ধাপে HTML/CSS input parse/process করে output দেয়। |
+| `build($modular=false)` / `buildCss(...)` | Collected sources থেকে final CSS তৈরি করে। |
+| `registerUtilityHandler($pattern,$handler,$priority)` | Custom utility parser/handler extension point। |
+| `processHtml`, `processCss` | Instance-level parser entry point। |
+| `generateCss(array $classes)` | নির্দিষ্ট class list-এর CSS generate করে। |
+
+#### 17.2.9 `PHJS`
+
+**Public variable:** `PHJS::$debug` — PHP-side generator diagnostics। Browser runtime debug-এর source `PHDE::isDebug()`-injected config; দুইটি গুলিয়ে ফেলবেন না।
+
+| API group | Methods ও কাজ |
+| --- | --- |
+| Entry/parser | `assets`, `js`, `render`, `parse`, `gen`, magic `__callStatic` natural/DSL input থেকে JS বা attribute output দেয়। |
+| Compatibility bridge | `alpineData`, `alpineStore`, `alpineBind`, `hxProcess`, `hxTrigger`, `hxAjax`, `hxRemove`, class helpers, `hxConfig` external runtime ছাড়াই compatible behavior/output দেয়। |
+| Reactive magic | `el`, `refs`, `store`, `watch`, `dispatch`, `nextTick`, `root`, `data`, `id`, `state_magic`, `params_magic`, `route_magic`, `ui_magic`, `os_magic`, `t_magic`, `router_magic`, `clipboard_magic` runtime context expression তৈরি করে। |
+| JS basics | `const`, `let`, `var`, `log`, `error`, `warn`, `table`, `raw`, `alert`, `redirect`, `reload`। |
+| Storage | `localSet/Get/Remove`, `sessionSet/Get`, `cookieSet` local/session/cookie operation generate করে। |
+| DOM | `html`, `text`, `val`, `addClass`, `removeClass`, `toggleClass`, `css`, `attr`, `remove`, `event`, `onReady`। |
+| Network/app | `fetch`, `appReady`, `appNavigate`, `appLink`, `appApi`, `appRoutePath`, `appRequest`, `appUpload` PHJS request/router bridge। |
+| UI/service helpers | `appToast`, `appModal`, `appProgress`, theme, validation, SEO, i18n, store/DB sync, search/index, hardware/DRM, filesystem, media/chart, worker, inspector, palette, accessibility trap, design, time, animation, font, AI, XR, PWA, hydrate। |
+| Auth/payment helpers | `appAuthTotp`, `appOAuthStart`, `appOAuthCallback`, `appTwoFactorSubmit`, `appPaymentStart`, `appPaymentStatus` same-origin/CSRF/idempotent UI flow generate করে; server verification বাদ দেয় না। |
+| Typed compiler | `expr`, `value`, `translate`, `arrayValue`, `object`, `template`, `statement`, `program`, `compile`, `module`, `build` PHP value/AST-কে safe JS বানায়। |
+| Flow/function/class | `arrow`, `functionDef`, `assign`, `returnValue`, `throwValue`, `awaitValue`, `invoke`, `construct`, `dynamicImport`, `ternary`, `ifBlock`, loops, `switchBlock`, `tryCatch`, `classDef`। |
+| Modules/scripts | `importModule`, `exportDefault`, `exportNamed`, `call`, `script`, `moduleScript` ES module/script output তৈরি করে। |
+
+Browser-side `APP` runtime-এর বিস্তারিত subsystem—state, directive compiler, component lifecycle, request de-duplication, SPA, CSS preparation, page cache, keymap, accessibility, PWA, PHFY, devtools—section 10-এ বর্ণিত। Canonical source সবসময় `src/js/PHJS-min.php`।
+
+#### 17.2.10 `PHJC`
+
+**Public variables:** `$loops` active loop context; `$tagMap` builder method→HTML tag map; `$attributeMap` attribute alias map। Extension প্রয়োজন ছাড়া direct mutation নয়।
+
+| Method group | কাজ |
+| --- | --- |
+| View/UI | `fastUI`, `ui`, `icon`, `slot`, `layout`, `view`, `includeView`, `use`, `render` component/view load ও render করে। |
+| Cache | `clearCache()` compiled CSS/JS/PHP view cache clear করে। |
+| Loop/state | `startLoop`, `currentLoop`, `endLoop`, `share`, `set`, `get` render context ও iteration state। |
+| Extensibility | `directive` custom directive; `metaPreset` metadata preset; `op` builder operation। |
+| Document | `breadcrumb`, `reset`, `head`, `buildHead`, `header`, `body`, `css` HTML head/body/meta composition। |
+| Conversion | `newHTML`, `singleHTML`, `mergeHTML`, `p2j`, `h2p`, `countElements`, `generateId`, `import` HTML/PHP/JSON conversion ও helper। |
+| JS builder | `streamJS`, `newJS`, `phjs`, `app`, `render_h/c/b/j`, `endFun`, `endCod` compiled JS/HTML builder chain। |
+| Magic API | `__call`, `__callStatic` `tagMap`/builder grammar অনুযায়ী dynamic element/operation resolve করে। |
+
+#### 17.2.11 `PHCO`
+
+**কাজ:** secure project-scoped cookie এবং portable project prefix/base path। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `isSecure()` | HTTPS/secure-cookie context detect করে। |
+| `path()` | application base path দেয়; PHJS/PHFY/SW-তে inject হয়। |
+| `pre()` | normalized project prefix দেয়, যেমন `shop_`; cookie/storage collision ঠেকায়। |
+| `add`, `update`, `remove` | Cookie create/change/delete করে; expiry minute এবং secure defaults মানে। |
+| `get`, `exists`, `getAll` | Cookie value/status সংগ্রহ করে। |
+| `expired`, `active`, `getExpiredDetails`, `makeExpired` | Framework-managed expiry metadata inspect/force-expire করে। |
+
+#### 17.2.12 `PHSE`
+
+**কাজ:** secure PHP session lifecycle এবং expiring session value। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `start()` | Strict/session-cookie defaults দিয়ে session শুরু করে। PHRO guard সাধারণত lifecycle manage করে। |
+| `add($key,$value,$expiry)` / `update` | Session value ও optional expiry set/change। |
+| `get($key,$default)` / `getAll()` | Active session value read করে। |
+| `remove` / `removeAll` | একটি বা সব value সরায়। |
+| `isActive`, `getExpiryTime`, `expireAll` | Expiry check ও expired value cleanup। |
+| `regenerateId()` | Session fixation প্রতিরোধে ID rotate করে; login/privilege change-এর পরে ব্যবহার করুন। |
+
+#### 17.2.13 `PHLS`
+
+**কাজ:** local SQLite state/cache/rate-limit/subscription store। Public variable নেই।
+
+| Method group | কাজ |
+| --- | --- |
+| Storage lifecycle | `setFile($path)` প্রথম connection-এর আগে custom DB path; `disconnect()` connection release; `checker()` integrity/WAL/write health report। |
+| CRUD/TTL | `add`, `addIfAbsent`, `update`, `remove`, `get`, `getAll`, `expire`, `isExpired`, expiry detail methods। |
+| Cleanup | `expireAllExpired()` expired row; `removeAll()` selected/all local data সরায়। Scope বুঝে ব্যবহার করুন। |
+| Rate/atomic | `limitizer(...)` rate window/block state; `increment`/`decrement` atomic counter। |
+| Cache | `remember($key,$ttl,$callback,$tags)` cache-aside; `flushByTag($tag)` related cache invalidate। |
+
+Default path `.mystack`-এর private storage। Lock retry exhausted বা malformed DB হলে caller-facing guard path non-fatal fallback ও checker/recovery behavior সংরক্ষণ করতে হবে।
+
+#### 17.2.14 `PHDB`
+
+**Public variables:**
+
+| Variable | অর্থ |
+| --- | --- |
+| `$host`, `$username`, `$password`, `$dbname` | MySQL/MariaDB connection settings। Password output/log করবেন না। |
+| `$charset = 'utf8mb4'` | Connection charset; Unicode-এর জন্য default রাখুন। |
+| `$error = true` | Database error behavior/detail policy। Production disclosure `PHDE::debug(false)`-এর সঙ্গে সীমিত রাখুন। |
+
+| Method group | কাজ |
+| --- | --- |
+| Status/connection | `connect`, `disconnect`, `close`, `checker`, `error`, `id`, `affected` connection ও last operation state। |
+| Query | `query($sql,$params,$single)`, `specificSelect`, `first`, `scalar`, value helpers—সব raw SQL-এ placeholders ব্যবহার করুন। |
+| Streaming | `fast($sql,$params,$columns): Generator` unbuffered row stream; iteration চলাকালে একই connection-এ query নয়। |
+| Write | `save` upsert-like save, `insert`, `batchInsert`, `update`, `delete`, `deleteBy` prepared writes। Empty where/all-delete guard মানুন। |
+| Read | `select`, `find`, `findBy`, `search`, `columns`, `exists`, `paginate` filtered/prepared reads। |
+| Analytics | `sum`, `avg`, `max`, `min`, `count` aggregate result। |
+| Database/schema | `addDB`, `createTable`, `alterTable`, `dropTable`, `truncateTable` database/schema lifecycle। Destructive operation explicit approval ও backup চায়। |
+| API/transaction | `api` table result API envelope; `transaction(callable)` atomic commit/rollback। |
+| Maintenance | `clean($table,$options)` bounded cleanup/maintenance। |
+| JSON/array column | `array($action,...)`, `array_get`, `array_set` encoded column-এর nested value safely read/write। |
+
+#### 17.2.15 `PHRQ`
+
+**কাজ:** server-side cURL request, generated browser request, headers, CORS/CSP, status, file, streaming এবং Live Map। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `php($method,$url,$headers,$body,$options)` | TLS-verified server HTTP request; parsed/raw response contract options-এর উপর নির্ভরশীল। |
+| `js(...)` | একই request-এর browser-side JS output তৈরি করে। Untrusted URL allowlist করুন। |
+| `header($method,$origin,$contentType,$additional)` | Response/CORS headers set করে। |
+| `cross($enable,$origin,$credentials)` | Framework CSP/CORS policy activate করে; true self-aware, array explicit allowlist। |
+| `status($code,$msg)` | HTTP status এবং optional message set/emit করে। |
+| `file($name,$length)` | File response headers। |
+| `livemap($url,$skipList,$limit,$time)` | Request/network visualization route/UI; debug-only। |
+| `stream($sleep,$type,$callback)` | Incremental response stream। |
+
+#### 17.2.16 `PHQR`
+
+**কাজ:** memory-safe QR generation। Public variable নেই।
+
+`PHQR::make($data, int $size = 8, int $margin = 4): string` input থেকে PNG data URI দেয়। Size module pixel; final width নয়। Secret-containing enrollment QR কেবল authenticated page-এ দেখান। `QRCode`, `QRUtil` ইত্যাদি internal encoder class সরাসরি application API নয়।
+
+#### 17.2.17 `PHED`
+
+**কাজ:** authenticated application encryption/decryption এবং key strength। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `key($newKey)` | Encryption key set করে। Router/JWT key থেকে আলাদা রাখুন। |
+| `make($string,$action)` | High-level encrypt/decrypt envelope। Failure return handling source অনুযায়ী করুন। |
+| `hide($string,$key,$action)` | Explicit key-সহ lower-level encrypt/decrypt path। |
+| `score()` | বর্তমান key/capability strength score/status দেয়। |
+
+#### 17.2.18 `PHTP`
+
+**কাজ:** HOTP/TOTP primitives এবং PHLS/PHED-backed account Authenticator lifecycle। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `configure(array)` | Issuer, digits, period, algorithm, storage/encryption policy configure করে। |
+| `key($length,$mode)` | OTP secret তৈরি করে। |
+| `code($secret,$mode,$digits,$time,$offset,$algo)` | নির্দিষ্ট secret/time-এর code generate করে। |
+| `verify($otp,$secret,...)` | Window/algorithm অনুযায়ী primitive OTP verify করে। |
+| `url($account,$secret,...)` | `otpauth://` enrollment URL তৈরি করে। |
+| `enroll($account,$options)` | Pending encrypted enrollment ও recovery material শুরু করে। |
+| `confirm($account,$code)` | প্রথম valid code দিয়ে enrollment activate করে। |
+| `authenticate($account,$code)` | TOTP বা recovery code verify, replay/reuse ঠেকায়। |
+| `status($account)` | Enabled/pending/recovery status দেয়; secret প্রকাশ করা উচিত নয়। |
+| `recovery($account,$currentCode)` | যাচাইয়ের পরে recovery code rotate করে। |
+| `disable($account,$code,$force)` | Verified বা explicit forced 2FA disable। Force admin authorization ছাড়া নয়। |
+
+#### 17.2.19 `PHTM`
+
+**কাজ:** timezone-aware time read, parse, difference, modification ও formatting। Public variable নেই।
+
+`setZone` timezone set, `getZone` current zone, `getTime` now format, `setTime` timestamp format, `calculate` দুই সময়ের difference, `modify` relative modifier, `format` output conversion, `to12h`/`to24h` clock conversion। Invalid timezone/date input caller-কে validate করতে হবে।
+
+#### 17.2.20 `PHVD`
+
+**কাজ:** declarative validation এবং database-aware uniqueness/existence। Public variable নেই।
+
+`PHVD::check(array $rules, array|bool|null $data = null, bool $debug = false): array` rules অনুযায়ী normalized validation result/errors/data দেয়। `PhvdRule::unique($table,$column,$except)` ও `exists($table,$column)` rule string তৈরি করে। Client validation থাকলেও server-side PHVD বাধ্যতামূলক।
+
+#### 17.2.21 `PHCD`
+
+**কাজ:** browser package search/install/update/use এবং responsive manager UI। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `initialize($state='/cdn',$css,$js,?callable $authorize)` | Manager route, storage paths এবং authorization register করে। Remote UI-তে authorizer দিন। |
+| `handleRequest()` | Search/install/update/remove request validate ও dispatch করে; সাধারণত initialize route থেকে। |
+| `get($package,$type,$skipPKG,$skipFILE)` | Installed/remote package metadata বা selected asset সংগ্রহ করে। |
+| `use($package,$type,$skipPKG,$skipFILE,$defer)` | Installed CSS/JS tags/output তৈরি করে। |
+
+Install/update staging, safe filename/path filter, atomic activation ও rollback বজায় রাখে। External package-এর নিজস্ব license/CSP/security review প্রয়োজন।
+
+#### 17.2.22 `PHJT`
+
+**কাজ:** HMAC JWT creation/verification ও key rotation। Public variable নেই।
+
+| Method | কাজ ও return |
+| --- | --- |
+| `key($newKey)` | Signing secret set করে; result envelope দেয়। Minimum strength বজায় রাখুন। |
+| `rotate($newKey,...)` | Key rotation policy/previous-key transition পরিচালনা করে। Exact options source signature দেখে দিন। |
+| `algorithm($newAlgorithm)` | Supported HMAC algorithm (`HS256/384/512`) set করে; status envelope। |
+| `create($payload,$expiresIn,$algorithm): array` | `status/message/data` envelope; `data`-তে signed token, payload-এ `iat`, `exp`, `jti` যোগ হয়। |
+| `verify($jwt,$algorithm): array` | Signature, header algorithm, payload JSON এবং expiry যাচাই করে `status/message/data` দেয়। |
+
+#### 17.2.23 `PHTR`
+
+**কাজ:** configured remote translation providers-এর URL, request এবং response normalization। Public variable নেই।
+
+`translate($input,$serverName,$source,$target)` selected provider, `auto($input,$targetLanguage)` automatic provider/source, `buildUrl(...)` encoded endpoint URL, `parseResponse(...)` provider-specific response normalize করে। Remote failure/terms/rate limit-এর fallback দিন।
+
+#### 17.2.24 `PHAU`
+
+**কাজ:** identity creation/check, verification token/OTP, OAuth/OIDC provider catalog ও callback। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `identityLib($url,$options)` | Built-in identity UI/routes register করে; authorization/debug exposure review করুন। |
+| `make($table,$dbMap,$inputData,$options): array` | Validated identity/account record ও token flow তৈরি করে। Password hashing rules preserve করুন। |
+| `check($table,$tokenCol,$inputToken,$identityCol): array` | Token/identity lookup ও authentication result দেয়। |
+| `verifyMake(...)` | OTP/token verification challenge তৈরি এবং configured mail/delivery path চালায়। |
+| `verifyCheck(...)` | Submitted code/secret verify করে এবং optional account data update করে। |
+| `socialProviders(): array` | Built-in OAuth/OIDC provider/mode catalog দেয়। |
+| `socialUrl($provider,$config): array` | State/PKCE/nonce-aware authorization URL/context তৈরি করে। |
+| `listenCallback($route,$configs,$onSuccess)` | Provider callback route register, state/code/token/userinfo validate/normalize করে success callback চালায়। |
+
+#### 17.2.25 `PHOP`
+
+**কাজ:** image, video, ZIP ও text operation option parser/processor। Public variable নেই।
+
+`img(...)` image transform/output options, `video(...)` media operation options, `zip(...)` archive create/extract/list flow, `text(...)` text/file transformation চালায়। Exact positional/option contract operationভেদে source method দেখুন। Path traversal, decompression bomb, executable upload ও memory limit validate করুন।
+
+#### 17.2.26 `PHAI`
+
+**কাজ:** multi-provider AI facade, cluster/fallback, remote bridge এবং MCP server। Public variable নেই।
+
+| Method group | কাজ |
+| --- | --- |
+| Provider config | `setAccounts`, `setPriority`, `setModels`, `setTimeout`, `getModels` credentials/model/fallback order configure/read। |
+| Process lifecycle | `registerBridgeProcess`, `getBridgeProcess`, `cleanup` external bridge process/pipes track ও release। |
+| AI endpoint | `serve($prefix,$apiKey)`, `clusterAPI($path,$apiKey)` compatible API routes; `cluster($input,$options)` provider selection/fallback execution। |
+| MCP | `routes`, `tool`, `prompt`, `resource`, `resourceTemplate`, `alias`, `middleware`, `handleRequest` MCP capabilities register/dispatch। Builder-এর `middleware()` ও `retries()` per-item policy দেয়। |
+| Bridge | `bridge($target,$method,$params,$options)` guarded local/remote bridge call। URL allowlist, TLS, timeout, response size ও SSRF boundary রাখুন। |
+| Instance | `getInstance()` shared PHAI service দেয়। |
+
+#### 17.2.27 `PHAP`
+
+**কাজ:** খুব ছোট syntax-এ REST route, validation, auth, CRUD, pagination ও JSON resource। Public variable নেই।
+
+| Method group | কাজ |
+| --- | --- |
+| Master route | `api('METHOD /path',$middleware,$rules,$logic,$message)` এক call-এ route+validation+logic+response। |
+| Smart CRUD | `all`, `get`, `add`, `up`, `rm` table operations standardized response-সহ চালায়। |
+| Custom action | `run($logic,$rules,$successMsg)` arbitrary validated callback। |
+| Input/validation/auth | `input`, `valid`, `auth` normalized request data, PHVD validation ও authenticated identity দেয়। |
+| Pagination | `page($table,$where,$limit,$callback)` paginated resource response। |
+| Resource transform | `resource`, `item`, `collection`, `clean` output field/filter/transform। |
+| Response | `ok`, `fail`, `send` consistent status/message/data HTTP JSON envelope। |
+
+#### 17.2.28 `PHUI`
+
+**কাজ:** searchable reusable UI registry—element, section, layout ও page renderer। Public variable নেই; internal registry `catalog()` দিয়ে read করুন।
+
+| Method | কাজ |
+| --- | --- |
+| `ui($slug,$data)` / `render` | Generic slug render। Placeholder, attributes, slot, PHJS mapping process করে HTML দেয়। |
+| `element`, `section`, `layout`, `page` | Type-constrained render; ভুল category/slug দ্রুত ধরা যায়। |
+| `exists($slug)` | Component/alias আছে কি না। |
+| `register($slug,$template,$meta,$replace)` | String/callable template register; existing replace explicit flag চায়। |
+| `registerMany($components,$replace)` | Bulk registration; registered count দেয়। |
+| `alias($alias,$target,$replace)` | Alternate slug map করে। |
+| `search($query,$group,$limit)` | Title/meta/slug catalog search result। |
+| `categories`, `count`, `catalog` | Registry groups, total এবং complete metadata read। |
+| `attributes($attributes)` | Attribute array/string safe HTML attribute output। |
+| `check($value)` | Raw/template HTML risk checker result; untrusted markup render-এর আগে ব্যবহার করুন। |
+| `boot()` | Built-in semantic registry একবার load করে। সাধারণত automatic। |
+
+#### 17.2.29 `PHPA`
+
+**কাজ:** payment gateway factory/capability এবং courier adapter registry। Facade-এর public variable নেই; returned gateway/courier object fluent methods দেয়।
+
+| Facade method | কাজ |
+| --- | --- |
+| Dynamic `PHPA::gatewayName()` | Registered gateway adapter instance দেয়, যেমন `stripe`, `paypal`, `bkash`। Unknown name error/failure handling করুন। |
+| `available()` | Registered payment gateway list। |
+| `gatewayCapabilities($name)` | Charge/verify/refund/webhook/sandbox ইত্যাদি supported কি না। |
+| `extend($name,$factory)` | Custom/private payment adapter register বা override। |
+| `courier($name)` | `PHPACourierInterface` adapter দেয়। |
+| `courierAvailable()` / `courierProfile($name)` | Courier list ও official/config profile metadata। |
+| `extendCourier($name,$profileOrFactory)` | Custom carrier contract যোগ/override। |
+
+**Payment adapter contract:** `setKeys`, `setLogic`, `setRefundLogic`, `setWebhookLogic`, `setTransport`, `sandbox`, `charge`, `verify`, adapterভেদে `execute`, `refund`, `webhook`। সব adapter সব operation support করে না।
+
+**Courier contract:** `setKeys`, `configure`, `sandbox`, `setTransport`, `create`, `track`, `rate`, `cancel`, `label`, `pickup`, generic `call`, `capabilities`। Provider profile default endpoint/auth mapping দেয়; merchant contract পরিবর্তিত হলে `configure`/custom adapter ব্যবহার করুন।
+
+#### 17.2.30 `PHFY`
+
+**কাজ:** ntfy public/private notification, user/permission/keyword filtering, local private feed, PHLS push subscription এবং self-contained VAPID sender। Public variable নেই।
+
+| Method | কাজ ও return |
+| --- | --- |
+| `configure(array $options = []): array` | Defaults merge করে। `enabled`, server/topics/tokens, VAPID, user/permissions/keywords, authorizer, poll interval configure হয়। |
+| `config(): array` | Effective normalized config দেয়; configure না হলে disabled defaults তৈরি করে। |
+| `public($message,$options)` / `private(...)` | Type set করে unified `send` চালায়। |
+| `send($message,$options): array` | Payload ID/type/filter/data বানিয়ে ntfy/local transport এবং Web Push চেষ্টা করে; status, code, transport/topic/web_push result দেয়। |
+| `clientConfig($context): array` | PHJS-এর জন্য base path, topic SSE, authorized private endpoint, user/filter, CSRF, VAPID capability দেয়। |
+| `webPushCapability(): array` | enabled/mode (`webpush` বা `ntfy`) ও key/crypto readiness জানায়। |
+| `cryptoCapability(): array` | Hosting-এর EC key, derive, sign ও AES-GCM in-memory test result। |
+| `registerRoutes()` | Config, private feed, push subscribe/unsubscribe/send-related same-origin routes একবার register করে। |
+| `privateFeed()` | Authorized private poll response দেয়; সরাসরি route callback ছাড়া সাধারণত call নয়। |
+
+#### 17.2.31 `PHMO`
+
+**কাজ:** zero-dependency observability—request/trace ID, JSON logs, health/readiness, metrics, alerts, retention এবং debug dashboard। Public variable নেই।
+
+| Method | কাজ |
+| --- | --- |
+| `configure($options): array` | enabled, health/ready route, request logging, file size ও `.mystack` log directory configure করে; retention সর্বশেষ ৯০ দিন। |
+| `config(): array` | Effective config। |
+| `requestId()` / `traceId()` | Current request correlation ID; generated/incoming trace context অনুযায়ী। |
+| `isProbeRequest(): bool` | Current path health/ready probe কি না; normal request metrics noise কমাতে সাহায্য করে। |
+| `registerRoutes()` | `/health` ও `/ready` (বা configured path) register করে। |
+| `dashboard($url)` | Responsive read-only log/problem UI; debug false হলে route register হয় না। |
+| `report($date,$limit,$level,$search)` | Bounded log entries, groups, files/lines/details report। |
+| `health($withDependencies)` | Liveness বা PHLS/PHDB readiness array। Dependency failure ready=false। |
+| `metrics($date)` | Request count, error rate, latency average/p95 এবং status summary। |
+| `log($level,$event,$context)` | Structured JSON line atomically append/rotate করে। Secret context দেবেন না। |
+| `finishRequest()` | Shutdown-এ latency/status/memory/request metadata final log; automatic registration থাকতে পারে। |
+
+## 18. Deployment, cache ও production checklist
+
+### Production bootstrap
+
+```php
+PHDE::debug(false);
+PHRO::guard();
+PHRQ::cross(true);
+PHMO::configure(['enabled' => true]);
+PHMO::registerRoutes();
+```
+
+Checklist:
+
+- [ ] PHP 8.1+, required extensions এবং writable folders verified
+- [ ] `php mystack doctor`, `audit`, `smoke` pass
+- [ ] router, JWT, encryption, OAuth, payment, mail, ntfy/VAPID secret আলাদা
+- [ ] HTTPS, rewrite, base path, `/app.js`, `/sw.js` verified
+- [ ] debug false; API Bar/Live Map/PHCD/monitor unauthorized নয়
+- [ ] DB least-privilege user এবং schema change backup আছে
+- [ ] backup restore বাস্তবে test করা
+- [ ] Cloudflare/reverse proxy CIDR explicitly trusted
+- [ ] CSP/CORS origin exact; unnecessary camera/microphone/geolocation access নেই
+- [ ] auth/payment/account response `no-store, private`
+- [ ] OAuth callback, webhook signature এবং idempotency tested
+- [ ] PHFY permission এবং private authorization tested
+- [ ] Android/iOS/Desktop target browser push test
+- [ ] automated browser regression, synthetic uptime, stress/soak test
+- [ ] PHMO log retention/rotation ও external alert delivery verified
+
+### Cache
+
+Component cache তিন ভাগে থাকে: `src/cache/css`, `src/cache/js`, `src/cache/php`। Missing path auto-create হয়; generated file component-এর readable name ধরে রাখে। `/app.js` long cache/ETag এবং `/sw.js` revalidation policy PHRO manage করে। Cloudflare/origin cache যেন debug/release বা dynamic configuration ভুলভাবে mix না করে তা verify করুন।
+
+## 19. Troubleshooting ও verification
+
+### প্রথম commands
+
+```bash
+php -l index.php
+php mystack doctor
+php mystack audit
+php mystack smoke
+```
+
+### Common সমস্যা
+
+**PHLS locked/malformed**
+
+- `.mystack` writable কি না দেখুন;
+- `PHLS::checker()` চালান;
+- একই storage network filesystem-এ বহু host থেকে share করবেন না;
+- framework recovery নিজে data salvage/rebuild চেষ্টা করে—ম্যানুয়ালি live DB file delete করবেন না।
+
+**Header/footer SPA navigation-এ হারায়**
+
+- fetched response পূর্ণ valid HTML কি না;
+- error response/DB stack trace HTML document হিসেবে swap হচ্ছে কি না;
+- destination layout markers ও CSS প্রস্তুত হচ্ছে কি না;
+- PHJS synchronized build smoke pass কি না।
+
+**Page প্রথমে সাদা/CSS late**
+
+- component cache writable;
+- destination CSS URL valid;
+- CSS response content-type/status;
+- PHJS CSS-ready navigation smoke test;
+- CDN/Cloudflare stale HTML এবং missing stylesheet mismatch।
+
+**PHFY private 401/403**
+
+- user session/authorizer/private permission;
+- same-origin credential এবং CSRF;
+- private endpoint client config-এ authorized অবস্থায় এসেছে কি না। Unauthorized client private poll বন্ধ করবে—এটাই expected।
+
+**Web Push কাজ করছে না**
+
+```php
+var_dump(PHFY::cryptoCapability());
+var_dump(PHFY::webPushCapability());
+```
+
+তারপর HTTPS, browser permission, Service Worker registration, PushManager subscription এবং platform restriction দেখুন।
+
+**Live Map script CSP-তে block**
+
+বর্তমান Live Map self-hosted/local compatible assets ব্যবহার করবে। External script যোগ করলে CSP-তে explicit trusted source প্রয়োজন; ad blocker-এর Cloudflare beacon error framework failure নয়।
+
+## 19. AI discovery ও স্বয়ংক্রিয় API documentation
+
+MyStack-এর AI-readable documentation বর্তমান `library/*.php` source থেকে তৈরি হয়। কোনো library execute না করেই public class, method, parameter, return declaration, source hash এবং doc summary index করা হয়।
+
+```bash
+php mystack docs:build
+php mystack docs:check
+```
+
+তৈরি হওয়া resource:
+
+- `docs/index.html` — responsive ও searchable static documentation portal;
+- `docs/index.md` এবং `docs/api/*.md` — human-readable source reference;
+- `docs/api.json` — machine-readable সম্পূর্ণ API catalog;
+- `docs/manifest.json` — repository, license, build time, totals ও source hash;
+- `llms.txt` — AI-এর জন্য সংক্ষিপ্ত framework map;
+- `llms-full.txt` — indexed public signature ও canonical documentation-সহ পূর্ণ context;
+Root ও `docs/`—দুই জায়গাতেই `llms.txt` ও `llms-full.txt` রাখা হয়: GitHub raw repository এবং published Pages site উভয় পথেই AI discovery কাজ করে। `robots.txt` ও `sitemap.xml` static file তৈরি করা হয় না; framework-এর PHRO router runtime-এ সেগুলো provide করে। `.github/workflows/docs.yml` কেবল generated `docs/` artifact GitHub Pages-এ deploy করে; executable PHP source documentation site-এ publish করে না। Repository settings-এ একবার Pages source হিসেবে **GitHub Actions** নির্বাচন করতে হবে। MyStack rolling `main` branch অনুসরণ করে এবং কোনো fixed framework version ঘোষণা করে না।
+
+Public API বদলানোর পরে `docs:build` চালাতে হবে। `docs:check` source hash ও public-method count মিলিয়ে stale documentation শনাক্ত করে এবং `php mystack smoke` একই check চালায়। Generated API page হাতে edit করবেন না; executable source সর্বশেষ সত্য।
+
+### Guarantee boundary
+
+Smoke test code path, synchronization ও local capability যাচাই করে। এটি live merchant account approval, third-party uptime, production DNS/TLS, browser vendor policy, real traffic scale বা backup restore সফলতা প্রমাণ করে না। এগুলোর জন্য target environment end-to-end test আবশ্যিক।
+
+---
+
+এই manual-এর সঙ্গে `README.md` quick-start এবং `AGENTS.md` engineering contract একসাথে ব্যবহার করুন। Public behavior বদলালে code, smoke coverage এবং তিনটি documentation একই change-এ update করুন।
+
+
+---
+
+# Embedded AGENTS.md
+
+# MyStack Framework — AI/Agent Engineering Contract
+
+This file is the authoritative working contract for AI agents and automated tools operating inside a MyStack project. Follow the current source code before assumptions, examples from other frameworks, or older documentation.
+
+## 1. Source-of-truth order
+
+When information conflicts, use this order:
+
+1. The user's explicit request.
+2. Executable framework code in `library/`, canonical browser runtime in `src/js/PHJS-min.php`, and the root `mystack` CLI.
+3. This `AGENTS.md` contract.
+4. `MANUAL_BN.md` and `README.md`.
+5. Comments, examples, and historical conventions.
+
+Never invent a method, configuration key, provider capability, or runtime dependency. Inspect the relevant class and verify the exact signature before use.
+
+## 2. Architecture and file placement
+
+| Path | Purpose | Agent rule |
+| --- | --- | --- |
+| `index.php` | Application bootstrap, framework configuration, imports, routes, and final `PHRO::listen()` | Preserve initialization order and keep secrets out of committed examples. |
+| `library/` | Thirty zero-Composer framework libraries plus `library.php` loader | Modify only when the user explicitly requests framework-level work. Preserve backward-compatible public APIs. |
+| `app/` | Controllers, models, middleware, API and backend logic | Keep files directly in `app/`; do not create subdirectories. |
+| `component/` | Views, layouts, and reusable UI components | Keep files directly in `component/`; do not create subdirectories. |
+| `src/js/` | PHJS runtime/build sources, Service Worker, and optional browser assets | Treat `PHJS-min.php` as canonical; see synchronization rules below. |
+| `src/cache/css`, `src/cache/js`, `src/cache/php` | Generated component builds | Directories are auto-created. Do not rename generated files to hashes or opaque names. |
+| `.mystack/` | Private PHLS/PHMO runtime state and structured logs | Never expose publicly or commit runtime data. Keep its access guard intact. |
+| `mystack`, `mystack.cmd` | Extensible console kernel plus portable Unix/Windows launcher | Preserve `php mystack`, direct `mystack`, original commands, executable PHP syntax and smoke coverage. |
+| `docs/`, `llms.txt`, `llms-full.txt` | Source-generated human and AI documentation, API catalog and static portal | Regenerate with `mystack docs:build`; do not hand-edit generated API files. |
+
+`app/` and `component/` intentionally use a flat layout. Framework-owned runtime folders may have their own internal structure.
+
+## 3. Bootstrap conventions
+
+Load the framework once:
+
+```php
+<?php
+require_once 'library/library.php';
+
+PHDE::debug(true);
+PHDE::memory('512M');
+PHTM::setZone('Asia/Dhaka');
+
+PHRO::guard();
+PHRO::key('replace-with-a-long-secret', false);
+PHRO::track(false);
+
+PHJT::key('replace-with-a-separate-jwt-secret');
+PHJT::algorithm('HS512');
+
+// Configure optional services here.
+
+import('app:HomeController', 'component:HomeView');
+
+PHRO::get('/', [HomeController::class, 'index']);
+PHRO::listen();
+```
+
+MyStack does not depend on `APP_ENV`, `APP_DEBUG`, or automatic `.env` parsing. Runtime behavior is controlled by framework APIs such as `PHDE::debug(true|false)`. A project may load environment values explicitly, but documentation and generated code must not present that as a framework requirement.
+
+Order-sensitive rules:
+
+- Configure `PHDE`, timezone, guards, keys, cross-origin behavior, storage, and optional services before registering application routes.
+- Call `PHRO::guard()` before protected request processing.
+- Register `PHFY`, `PHMO`, PHCD, debug UIs, and application routes before `PHRO::listen()`.
+- Keep `PHRO::listen()` at the end of the request bootstrap.
+- Debug-only UIs must remain unavailable when `PHDE::isDebug()` is false.
+
+## 4. Dynamic paths and imports
+
+Use the framework path layer instead of hardcoded document-root or project-folder assumptions:
+
+```php
+$path = DIR::path('component:HomeView');
+$url  = DIR::link('js:custom.js', true);
+$base = PHCO::path();
+$prefix = PHCO::pre();
+```
+
+Use `import()` for project/application assets:
+
+```php
+import('app:UserController');
+import('component:HomeView');
+import('js:custom.js');
+import('css:app.css');
+```
+
+Rules:
+
+- Do not hardcode `/projects/name`, a hosting document root, or a domain.
+- The application must work at a domain root, hosting root, subdomain, or nested subfolder.
+- Use `PHCO::pre()` for project-scoped cookie/storage namespaces and `PHCO::path()` for the detected base path.
+- Do not replace `import()` with ordinary `require/include` in application code. The root loader itself is the exception.
+- Never allow user input to become an unchecked import/path key.
+
+## 5. Core library catalog
+
+All libraries are loaded by `library/library.php`.
+
+| Library | Responsibility |
+| --- | --- |
+| `DIR` / `Importer` | Portable filesystem/URL resolution and dynamic imports. |
+| `PHDE` | Debug state, error handling, API errors, memory limits, and debug API Bar. |
+| `PHRO` | Router, route metadata, middleware, CSRF, security guard, WAF, proxy/IP resolution, tracking, sitemap/robots/manifest, channels, and asset routes. |
+| `PHOB` | Browser/device capability build and identity helpers. |
+| `PHEV` | WebSocket server, SSE, StreamUI, clients, events, and broadcasts. |
+| `PHEM` | Native SMTP, IMAP, and POP3 mail operations. |
+| `PHML` | Markup DSL, layouts, partials, blocks, components, head/body and asset composition. |
+| `PHCS` | PHP-native utility CSS processing and build engine. |
+| `PHJS` | PHP-to-JavaScript DSL, typed builder, declarative actions, request and application bridge. |
+| `PHJC` | View/page composition, HTML/JS rendering, slots, layouts, assets, metadata, and compiled component cache. |
+| `PHCO` | Secure project-scoped cookies, base path, and namespace prefix. |
+| `PHSE` | Secure session lifecycle and expiring session values. |
+| `PHLS` | SQLite-backed local state, atomic counters, TTL, tags, rate-limit data, recovery, and locking. |
+| `PHDB` | Prepared database access, CRUD, analytics, transactions, streaming, schema synchronization, and JSON/array columns. |
+| `PHRQ` | Server/browser HTTP requests, CORS/CSP policy, response status, streaming, file output, and Live Map. |
+| `PHQR` | Memory-safe QR code data-URI generation. |
+| `PHED` | Authenticated application encryption and key management. |
+| `PHTP` | OTP/TOTP plus account-level Authenticator enrollment, replay protection, and recovery. |
+| `PHTM` | Timezone, parsing, calculation, modification, and formatting. |
+| `PHVD` | Input validation and database-aware rules. |
+| `PHCD` | Authorized, atomic client-package installation/update and package UI. |
+| `PHJT` | HMAC JWT creation, verification, algorithm selection, and key rotation. |
+| `PHTR` | Translation provider requests and response parsing. |
+| `PHAU` | Identity creation/checking, verification flows, OAuth/OIDC provider matrix and callbacks. |
+| `PHOP` | Image, video, ZIP and text processing helpers. |
+| `PHAI` | AI provider bridge, clustering, MCP server/tools/prompts/resources and guarded remote bridge. |
+| `PHAP` | Compact REST API routes, validation, auth, resources, pagination and JSON responses. |
+| `PHUI` | Registered UI elements, sections, layouts, pages, placeholders, aliases and searchable catalog. |
+| `PHPA` | Payment gateway facade, capability-aware gateway adapters, webhooks/refunds, and courier facade. |
+| `PHFY` | ntfy public/private notifications, PHLS subscriptions, VAPID/Web Push and PHJS client configuration. |
+| `PHMO` | Request/trace IDs, JSON logs, health/ready probes, metrics, alerts, retention, and debug dashboard. |
+
+## 6. Routing and security rules
+
+Prefer the fluent router:
+
+```php
+PHRO::post('/users', [UserController::class, 'store'])
+    ->name('users.store')
+    ->middleware(AuthMiddleware::requireRole(['admin']))
+    ->header('Cache-Control', 'no-store, private')
+    ->disallow();
+```
+
+- Use the exact HTTP method; never accept state changes through GET.
+- Apply authorization on the server, even when the UI hides an action.
+- Use `PHRO::csrfField()` in state-changing HTML forms and validate via the guard.
+- Keep `PHRO::guard()` defaults unless a specific verified requirement justifies an override.
+- `trustProxies()` accepts only explicit trusted proxy addresses. Forwarded headers are fallback information only after proxy validation; never blindly trust client-supplied forwarding headers.
+- Use parameterized callbacks and gathered request data; escape output according to its HTML/JSON/URL context.
+- Use route cache headers deliberately: public cache only for genuinely public data; `no-store, private` for auth, account, payment, and sensitive pages.
+- Keep CSP/CORS restrictive. `PHRQ::cross(true)` means framework-managed self-aware policy; use an explicit origin/IP list for cross-site access.
+- Never expose debug errors, API Bar, Live Map, PHCD manager, monitor UI, secrets, stack traces, or `.mystack` storage publicly in production.
+
+## 7. Database and storage rules
+
+Use PHDB prepared helpers:
+
+```php
+$user = PHDB::find('users', $id);
+$rows = PHDB::select('users', '*', ['status' => 'active'], 50);
+$id   = PHDB::insert('users', ['name' => $name, 'email' => $email]);
+PHDB::update('users', ['status' => 'disabled'], ['id' => $id]);
+```
+
+- Raw SQL is allowed only through `PHDB::query()`/`fast()` with placeholders and a separate parameter array. Never interpolate untrusted values.
+- `PHDB::fast()` is an unbuffered generator; consume it in one pass and do not start another query on that connection until iteration finishes.
+- `PHDB::delete(..., allow_all: true)`, destructive schema sync, truncate, or drop requires explicit user intent.
+- `PHDB::createTable()` is the framework schema-sync mechanism. Preserve its current destructive-sync semantics unless the user explicitly asks to change them.
+- Use `PHDB::transaction()` for multi-step writes.
+- Use `PHLS` for local single-server state, counters, TTL, locks, and subscriptions. It is not a multi-server shared database.
+- Keep PHLS calls non-fatal at request-protection boundaries; preserve its corruption recovery and bounded retry behavior.
+- Use `PHSE` for request/user session state and `PHCO` for client cookies; do not substitute one storage type for another without considering lifetime and trust.
+
+## 8. Frontend, PHUI, PHCS and PHJS
+
+Build reusable UI with PHUI/PHML and utility classes processed by PHCS:
+
+```php
+echo PHUI::element('button:primary', [
+    'slot' => 'Save',
+    'class' => 'w-full md:w-auto',
+    'phjs' => ['click' => 'toast "Saved"'],
+]);
+```
+
+- All UI must be responsive, keyboard accessible, focus-visible, semantic, and theme-safe.
+- Escape untrusted text. PHUI raw HTML is allowed only through its guarded/checking path and only for explicitly trusted markup.
+- Support placeholders such as `{{key|Default}}`; do not remove existing aliases or registry entries.
+- Do not introduce Blade, Twig, React, Vue, Alpine, or HTMX as a required runtime dependency.
+- PHJS is self-contained. Compatibility helpers may recognize Alpine/HTMX-like behavior, but application behavior must work through PHJS without loading those libraries.
+- Prefer PHJS HTML directives and PHP builders over page-specific inline JavaScript when equivalent behavior exists.
+- Preserve SPA navigation boundaries: only same-origin document links are intercepted; mailto, tel, download, external, non-HTML, and native links remain native.
+- Preserve one-time initialization, request de-duplication, destination CSS preparation, page cache, touch/hover intent prefetch, Service Worker, accessibility, toast, and cleanup lifecycles.
+
+### PHJS synchronization contract
+
+`src/js/PHJS-min.php` is the canonical `/app.js` source. Any PHJS runtime behavior change must be synchronized so these builds contain the same behavior:
+
+- `src/js/PHJS-min.php` — canonical PHP-aware runtime
+- `src/js/PHJS.php`
+- `src/js/phjs.js`
+- `src/js/phjs.min.js`
+- any directly related generated/runtime counterpart required by the changed section
+
+Do not merely copy PHP interpolation into plain `.js`; preserve equivalent resolved behavior. Verify syntax, UTF-8/Bengali integrity, runtime markers, and the `PHJS synchronized builds` smoke test. `src/js/SW.php` is the canonical dynamic Service Worker source; keep `sw.js` synchronized when Service Worker behavior changes.
+
+## 9. Authentication, integration and sensitive flows
+
+- Hash passwords with PHP password APIs; never encrypt or log plaintext passwords.
+- Keep PHRO application key, PHJT JWT key, PHED encryption key, OAuth secrets, payment keys, mail passwords, ntfy tokens, and VAPID private keys separate.
+- Use HTTPS for OAuth callbacks, payment/webhook endpoints, Web Push and credential submission.
+- OAuth state/PKCE/nonce and callback validation must remain enabled. Store only the provider fields needed by the application; avoid persisting raw provider responses.
+- TOTP enrollment must be confirmed before activation. Preserve replay prevention and single-use recovery codes.
+- Verify payment/courier capability before calling an operation. Treat a configured adapter as integration-ready, not proof that live merchant credentials or provider approval are valid.
+- Verify signed webhooks before processing and make fulfillment idempotent.
+- PHFY public topics are public by nature. Put user-specific data only in authorized private delivery, and keep browser permission opt-in.
+- PHAI remote URL/bridge access must remain allowlisted, TLS-verified, timeout-bounded, and protected against private-network SSRF unless explicitly authorized.
+
+## 10. Observability and production behavior
+
+Recommended safe bootstrap:
+
+```php
+PHDE::debug(false);
+PHMO::configure(['enabled' => true]);
+PHMO::registerRoutes();            // /health and /ready by default
+// PHMO::dashboard('/monitor');    // visible only in debug mode
+```
+
+- Production must use `PHDE::debug(false)` and must not reveal database errors or stack traces to clients.
+- PHMO writes structured logs under `.mystack`, retains the configured window (default 90 days), and provides request/trace IDs, latency and error metrics.
+- `/health` is a liveness check; `/ready` includes dependency readiness and may return 503.
+- Monitoring endpoints do not replace external uptime checks, backups, restore drills, browser regression tests, or load/soak testing.
+- Long-running PHEV workers must be supervised by the hosting platform; do not start blocking loops inside ordinary web requests.
+
+## 11. CLI workflow and validation
+
+Use the built-in CLI from the project root:
+
+```bash
+php mystack help
+php mystack cli:status
+php mystack list
+php mystack route:list
+php mystack migrate:status
+php mystack queue:status
+php mystack schedule:list
+php mystack doctor
+php mystack doctor --fix
+php mystack audit
+php mystack smoke
+php mystack docs:build
+php mystack docs:check
+php mystack update --check
+```
+
+- `doctor` is read-only; `doctor --fix` applies bounded formatting/permission repair.
+- `audit` is a read-only production review.
+- `smoke` is the canonical framework regression suite and must remain green.
+- Application commands are auto-discovered only from flat `app/*Command.php` files with valid static `commandName()`, `description()` and `handle()` methods.
+- `php mystack` remains the universal fallback. Direct `mystack` uses the Unix shebang or Windows launchers; `cli:install` may create a user-level shim but must not silently mutate system PATH. Preserve plain `--json` output and honor `NO_COLOR`/`--no-ansi`.
+- Generated migrations, seeders, jobs and schedules are opt-in. Never run user migration/seeder code during discovery, help, doctor, audit or ordinary web requests.
+- Queue and scheduler state in `.mystack/console.sqlite` is private, WAL-backed, atomic local single-host state. It is not a distributed queue; long-running workers require an external process supervisor.
+- Destructive CLI operations such as rollback, cache pruning, queue flush/forget and schedule removal must retain confirmation/`--yes` gates.
+- `update` compares the official GitHub `main` branch by SHA-256/exact bytes, prompts before changes, validates staged files, runs smoke, and rolls back on failure.
+- Update scope is strictly limited to `library/*`, `src/js/*`, `docs/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, and `mystack.cmd`. Keep root HTTP denial for private metadata and both CLI files. It never deletes unmatched local files.
+- `docs:build` derives public signatures from current `library/*.php` without executing library code. `docs:check` and smoke reject stale API catalogs. Keep the portal, API JSON, `llms` files and per-library references synchronized.
+- The Pages workflow publishes only `docs/`. Keep root and `docs/` copies of both `llms` files synchronized. Do not generate static `robots.txt` or `sitemap.xml`; PHRO provides those routes dynamically.
+- MyStack follows the rolling official `main` branch and has no fixed framework version. Do not invent, display or document a MyStack release/version number.
+- Before handoff, run syntax checks for changed PHP, relevant targeted tests, and `php mystack smoke` for framework changes.
+
+## 11.1 License, ownership and contribution governance
+
+- MyStack is licensed under Apache License 2.0; preserve `LICENSE`, `NOTICE`, copyright and attribution notices.
+- Copyright owner and lead maintainer: Sakibur Rahman (`sakibweb`). Official organization: `https://github.com/mystack-framework`; official repository: `https://github.com/mystack-framework/mystack`.
+- Copies and modifications are allowed under the License. Modified files/distributions must be identified and must not claim authorship of the original MyStack work or imply that an unofficial fork is the official framework.
+- Public issues, requests and pull requests do not grant write, merge, release or official-update authority. Follow `CONTRIBUTING.md` and `.github/CODEOWNERS`; owner or authorized maintainers make official repository decisions.
+
+## 12. Change safety and compatibility checklist
+
+Before editing:
+
+- Read the whole relevant method/class and all call sites.
+- Search for synchronized copies, generated files, aliases, reflection-based use, and smoke assertions.
+- Preserve unrelated user changes and runtime data.
+
+While editing:
+
+- Keep existing public signatures and return shapes unless a breaking change was explicitly requested.
+- Add features through optional defaults so existing projects continue to run.
+- Validate paths, URLs, headers, filenames, HTML and remote responses at their trust boundary.
+- Use atomic writes/renames and rollback for package, updater, schema-sensitive, or stateful operations.
+- Do not add Composer/NPM dependencies or silently call third-party services.
+- Never claim “100% error-free” without evidence; report what was actually verified and what still needs live-provider/hosting testing.
+
+After editing:
+
+- Run `php -l` on every changed PHP executable.
+- Run `php mystack smoke`; use `audit` when production/security behavior changed.
+- Check UTF-8/Bengali text, responsive UI, keyboard/focus behavior, base-path portability, and debug-off behavior where relevant.
+- Update `README.md`, `MANUAL_BN.md`, this contract, and CLI smoke coverage when public behavior changes.
+
+## 13. Communication rules
+
+- Explain work and results to the project owner in Bengali.
+- Lead with the outcome, then provide exact affected files and verification evidence.
+- Distinguish framework guarantees from hosting, browser, credential, provider, and production-environment dependencies.
+- Ask before destructive, externally visible, or scope-expanding actions; do not ask unnecessary questions when a safe local implementation is clear.

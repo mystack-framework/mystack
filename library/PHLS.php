@@ -179,6 +179,12 @@ class PHLS
             $path = self::storagePath();
             clearstatcache(true, $path);
             $quick_check = (string) self::$pdo->query('PRAGMA quick_check')->fetchColumn();
+            if ($quick_check !== 'ok' && !self::$recovery_attempted) {
+                self::$recovery_attempted = true;
+                if (self::recoverCorruptStorage($path)) {
+                    $quick_check = (string) self::$pdo->query('PRAGMA quick_check')->fetchColumn();
+                }
+            }
             $journal_mode = (string) self::$pdo->query('PRAGMA journal_mode')->fetchColumn();
             $write_ok = null;
 

@@ -12,29 +12,111 @@ define('ROOT_DIR', __DIR__);
 $bootstrapArgs = $argv;
 array_shift($bootstrapArgs);
 $bootstrapCommand = $bootstrapArgs[0] ?? null;
-$needsFrameworkRuntime = in_array($bootstrapCommand, ['audit', 'smoke'], true);
+$runtimeCommandPrefixes = [
+    'route:', 'config:', 'library:', 'ui:', 'phjs:', 'health:', 'db:', 'schema:',
+    'queue:', 'schedule:', 'websocket:', 'mail:', 'oauth:', 'payment:', 'courier:',
+    'phfy:', 'vapid:', 'logs:', 'monitor:', 'test:', 'build:', 'optimize',
+];
+$needsFrameworkRuntime = in_array($bootstrapCommand, ['audit', 'smoke', 'test'], true);
+foreach ($runtimeCommandPrefixes as $runtimePrefix) {
+    if (str_starts_with((string) $bootstrapCommand, $runtimePrefix)) {
+        $needsFrameworkRuntime = true;
+        break;
+    }
+}
 
 $libraryPath = ROOT_DIR . '/library/library.php';
-if ($needsFrameworkRuntime && file_exists($libraryPath)) {
-    require_once $libraryPath;
-    if (class_exists('DIR') && method_exists('DIR', 'initialize')) {
-        DIR::initialize(['rootDir' => ROOT_DIR]);
+function ensureFrameworkRuntime(): void {
+    static $booted = false;
+    if ($booted) return;
+    $path = ROOT_DIR . '/library/library.php';
+    if (!is_file($path)) throw new RuntimeException('library/library.php not found. Are you in the project root?');
+    require_once $path;
+    if (class_exists('DIR') && method_exists('DIR', 'initialize')) DIR::initialize(['rootDir' => ROOT_DIR]);
+    $booted = true;
+}
+if ($needsFrameworkRuntime) {
+    try { ensureFrameworkRuntime(); }
+    catch (Throwable $exception) {
+        echo "\033[31m[!] Error: {$exception->getMessage()}\033[0m\n";
+        exit(1);
     }
-} elseif ($needsFrameworkRuntime) {
-    echo "\033[31m[!] Error: library/library.php not found. Are you in the project root?\033[0m\n";
-    exit(1);
 }
 
 // Ensure necessary core directories exist
 $appDir = ROOT_DIR . '/app';
 $componentDir = ROOT_DIR . '/component';
 
-// Utility functions for CLI output
-function printColor($msg, $colorCode) { echo "\033[{$colorCode}m{$msg}\033[0m"; }
-function info($msg) { printColor("[INFO] ", "1;36"); echo "$msg\n"; }
-function success($msg) { printColor("[SUCCESS] ", "1;32"); echo "$msg\n"; }
-function error($msg) { printColor("[ERROR] ", "1;31"); echo "$msg\n"; exit(1); }
-function warning($msg) { printColor("[WARNING] ", "1;33"); echo "$msg\n"; }
+// Adaptive terminal UI. JSON output remains plain and machine-readable.
+final class MyStackTui {
+    private static ?bool $color = null;
+
+    public static function color(): bool {
+        if (self::$color !== null) return self::$color;
+        $disabled = getenv('NO_COLOR') !== false || in_array('--no-ansi', $_SERVER['argv'] ?? [], true);
+        $interactive = function_exists('stream_isatty') ? @stream_isatty(STDOUT) : true;
+        return self::$color = !$disabled && ($interactive || PHP_OS_FAMILY === 'Windows');
+    }
+
+    public static function paint(string $text, string $code): string {
+        return self::color() ? "\033[{$code}m{$text}\033[0m" : $text;
+    }
+
+    public static function header(string $subtitle = 'Next-generation PHP application console'): void {
+        $logo = [
+            ' __  __ __   __ ____  _____  _     ____ _  __',
+            '|  \\/  |\\ \\ / // ___||_   _|/ \\   / ___| |/ /',
+            '| |\\/| | \\ V / \\___ \\  | | / _ \\ | |   | \' / ',
+            '| |  | |  | |   ___) | | |/ ___ \\| |___| . \\ ',
+            '|_|  |_|  |_|  |____/  |_/_/   \\_\\____|_|\\_\\',
+        ];
+        $colors = ['1;38;5;45', '1;38;5;39', '1;38;5;75', '1;38;5;111', '1;38;5;141'];
+        echo "\n";
+        foreach ($logo as $index => $line) echo self::paint('  ' . $line, $colors[$index]) . "\n";
+        echo self::paint('  M Y S T A C K   F R A M E W O R K', '1;38;5;45') . "\n";
+        echo self::paint('  ' . $subtitle, '2;37') . "\n";
+        echo self::paint('  ' . str_repeat('─', 47), '2;38;5;45') . "\n";
+    }
+
+    public static function badge(string $label, string $message, string $color, string $symbol): void {
+        echo '  ' . self::paint(" {$symbol} {$label} ", $color) . ' ' . $message . "\n";
+    }
+
+    public static function section(string $title): void {
+        echo "\n  " . self::paint('◆ ' . $title, '1;38;5;45') . "\n";
+    }
+
+    public static function progress(int $current, int $total, string $label = ''): void {
+        $total = max(1, $total); $current = max(0, min($current, $total));
+        $width = 28; $filled = (int) floor(($current / $total) * $width);
+        $bar = str_repeat('█', $filled) . str_repeat('░', $width - $filled);
+        $percent = (int) round(($current / $total) * 100);
+        echo "\r  " . self::paint($bar, '1;38;5;45') . sprintf(' %3d%%  %s', $percent, $label);
+        if ($current >= $total) echo "\n";
+    }
+
+    public static function data(array $data, int $depth = 0): void {
+        foreach ($data as $key => $value) {
+            $indent = str_repeat('  ', $depth + 1);
+            $label = is_int($key) ? '#' . ($key + 1) : str_replace('_', ' ', (string) $key);
+            if (is_array($value)) {
+                echo $indent . self::paint('› ' . $label, '1;38;5;117') . "\n";
+                self::data($value, $depth + 1);
+                continue;
+            }
+            if (is_bool($value)) $display = $value ? self::paint('YES', '1;32') : self::paint('NO', '1;31');
+            elseif ($value === null) $display = self::paint('—', '2;37');
+            else $display = (string) $value;
+            echo $indent . self::paint(str_pad($label, 24), '38;5;250') . ' ' . $display . "\n";
+        }
+    }
+}
+
+function printColor($msg, $colorCode) { echo MyStackTui::paint((string) $msg, (string) $colorCode); }
+function info($msg) { MyStackTui::badge('INFO', (string) $msg, '1;46;30', 'i'); }
+function success($msg) { MyStackTui::badge('SUCCESS', (string) $msg, '1;42;30', '+'); }
+function error($msg) { MyStackTui::badge('ERROR', (string) $msg, '1;41;97', 'x'); exit(1); }
+function warning($msg) { MyStackTui::badge('WARNING', (string) $msg, '1;43;30', '!'); }
 
 final class MyStackBrain {
     private const COMMANDS = [
@@ -43,9 +125,76 @@ final class MyStackBrain {
         'make:middleware',
         'make:component',
         'make:view',
+        'make:command',
+        'make:api',
+        'make:service',
+        'make:job',
+        'make:event',
+        'make:listener',
+        'make:mail',
+        'make:notification',
+        'make:policy',
+        'make:test',
+        'make:request',
+        'make:resource',
+        'make:factory',
+        'make:migration',
+        'make:seeder',
+        'make:crud',
+        'make:module',
         'get:started',
         'serve',
         'cache:clear',
+        'cache:status',
+        'cache:warm',
+        'cache:prune',
+        'about',
+        'list',
+        'cli:install',
+        'cli:status',
+        'route:list',
+        'route:show',
+        'config:show',
+        'library:list',
+        'library:check',
+        'ui:list',
+        'ui:search',
+        'phjs:check',
+        'health:check',
+        'db:check',
+        'db:tables',
+        'schema:status',
+        'migrate',
+        'migrate:status',
+        'migrate:rollback',
+        'db:seed',
+        'queue:push',
+        'queue:work',
+        'queue:status',
+        'queue:failed',
+        'queue:retry',
+        'queue:forget',
+        'queue:flush',
+        'schedule:add',
+        'schedule:list',
+        'schedule:remove',
+        'schedule:run',
+        'schedule:work',
+        'websocket:start',
+        'websocket:status',
+        'mail:check',
+        'oauth:list',
+        'payment:list',
+        'courier:list',
+        'phfy:check',
+        'vapid:check',
+        'logs:tail',
+        'logs:report',
+        'monitor:status',
+        'build:check',
+        'optimize',
+        'optimize:clear',
+        'test',
         'update',
         'doctor',
         'audit',
@@ -605,7 +754,7 @@ final class MyStackBrain {
     }
 
     public static function renderFolderMap(array $report): void {
-        printColor(" Framework Folder Map \n", "1;46;97");
+        MyStackTui::section('Framework folder map');
         echo "  Ready: {$report['ready']}/{$report['total']} | Created: {$report['created']}"
             . " | Permissions fixed: {$report['permissions_fixed']} | Failed: {$report['failed']}\n";
         foreach ($report['entries'] as $entry) {
@@ -620,8 +769,7 @@ final class MyStackBrain {
     public static function render(array $report): void {
         $stats = $report['stats'];
         $counts = $report['counts'];
-        echo "\n";
-        printColor(" MyStack Intelligence \n", "1;45;97");
+        MyStackTui::section('Project intelligence');
         echo "  Project files: {$stats['files']} | Lines: {$stats['lines']} | Size: "
             . self::formatBytes($stats['bytes']) . "\n";
         echo "  Classes: {$stats['classes']} | Functions: {$stats['functions']} | Routes: "
@@ -629,15 +777,12 @@ final class MyStackBrain {
         echo "  Critical: {$counts['critical']} | Advice: {$counts['advice']} | Info: {$counts['info']}\n";
 
         if ($report['issues'] === []) {
-            printColor("[HEALTHY] ", "1;32");
-            echo "No architectural conflict or contextual risk detected.\n";
+            MyStackTui::badge('HEALTHY', 'No architectural conflict or contextual risk detected.', '1;42;30', '+');
         } else {
             foreach (array_slice($report['issues'], 0, 20) as $issue) {
-                $color = $issue['severity'] === 'critical'
-                    ? '1;31'
-                    : ($issue['severity'] === 'advice' ? '1;33' : '1;36');
-                printColor('[' . strtoupper($issue['severity']) . '] ', $color);
-                echo "{$issue['message']} ({$issue['location']})\n";
+                $color = $issue['severity'] === 'critical' ? '1;41;97' : ($issue['severity'] === 'advice' ? '1;43;30' : '1;46;30');
+                $symbol = $issue['severity'] === 'critical' ? 'x' : ($issue['severity'] === 'advice' ? '!' : 'i');
+                MyStackTui::badge(strtoupper($issue['severity']), "{$issue['message']} ({$issue['location']})", $color, $symbol);
             }
             if (count($report['issues']) > 20) {
                 echo '  ... ' . (count($report['issues']) - 20) . " more insight(s)\n";
@@ -772,7 +917,9 @@ final class MyStackUpdater {
     private const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
     private const MAX_FILE_BYTES = 16 * 1024 * 1024;
     private const ROOT_FILES = [
-        'AGENTS.md', 'LICENSE', 'MANUAL_BN.md', 'README.md', 'mystack',
+        '.htaccess', '.github/CODEOWNERS', '.github/workflows/docs.yml', 'AGENTS.md', 'CONTRIBUTING.md', 'LICENSE',
+        'MANUAL_BN.md', 'NOTICE', 'README.md', 'llms.txt', 'llms-full.txt',
+        'mystack', 'mystack.cmd',
     ];
     private static ?bool $nodeAvailable = null;
 
@@ -781,7 +928,7 @@ final class MyStackUpdater {
             'repository' => self::OWNER . '/' . self::REPOSITORY,
             'branch' => self::BRANCH,
             'root_files' => self::ROOT_FILES,
-            'paths' => ['library/*', 'src/js/*'],
+            'paths' => ['library/*', 'src/js/*', 'docs/*'],
             'deletes_local_files' => false,
             'hash' => 'sha256',
         ];
@@ -798,23 +945,29 @@ final class MyStackUpdater {
         }
         $scope = self::normalizeScope($scope);
 
-        echo "\n";
-        printColor(" MyStack Main-Branch Updater \n", '1;44;97');
-        info('Source: https://github.com/' . self::OWNER . '/' . self::REPOSITORY . '/tree/' . self::BRANCH);
-        info('Mode: ' . ($checkOnly ? 'check only' : 'compare, confirm, verify, apply and rollback on failure'));
+        MyStackTui::header('Secure Main-Branch Updater  •  SHA-256 verified  •  rollback protected');
+        MyStackTui::section('Update session');
+        info('Source  https://github.com/' . self::OWNER . '/' . self::REPOSITORY . '/tree/' . self::BRANCH);
+        info('Mode    ' . ($checkOnly ? 'Check only — no files will change' : 'Compare → confirm → stage → verify → apply'));
         if ($scope !== '') info('Scope: ' . $scope);
 
+        MyStackTui::section('Remote verification');
+        MyStackTui::progress(0, 4, 'Connecting to GitHub main');
         $archivePath = self::downloadBranchArchive();
+        MyStackTui::progress(1, 4, 'Branch snapshot downloaded');
         $stageRoot = null;
         try {
             $remote = self::readAllowedFiles($archivePath, $scope);
+            MyStackTui::progress(2, 4, 'Allowlisted files verified');
             if ($remote === []) {
                 throw new RuntimeException($scope === ''
                     ? 'The official main branch contains no allowlisted update files.'
                     : "No allowlisted remote file matched scope '$scope'.");
             }
             $comparison = self::compare($root, $remote);
-            self::printComparison($comparison);
+            MyStackTui::progress(3, 4, 'Local SHA-256 hashes calculated');
+            MyStackTui::progress(4, 4, 'Comparison complete');
+            self::printComparison($comparison, in_array('--verbose', $arguments, true));
             $changes = array_values(array_filter(
                 $comparison,
                 static fn(array $item): bool => $item['status'] !== 'same'
@@ -823,11 +976,13 @@ final class MyStackUpdater {
                 success('All selected framework files already match the GitHub main branch.');
                 return true;
             }
-            echo '  Changes: ' . count($changes)
-                . ' | New: ' . count(array_filter($changes, static fn($item) => $item['status'] === 'new'))
-                . ' | Different: ' . count(array_filter($changes, static fn($item) => $item['status'] === 'different'))
-                . "\n";
-            echo "  Note: without framework versions, a hash difference means different—not automatically newer.\n\n";
+            MyStackTui::section('Update summary');
+            $newCount = count(array_filter($changes, static fn($item) => $item['status'] === 'new'));
+            $differentCount = count(array_filter($changes, static fn($item) => $item['status'] === 'different'));
+            MyStackTui::badge('CHANGES', (string) count($changes), '1;45;97', '◆');
+            MyStackTui::badge('NEW', (string) $newCount, '1;42;30', '+');
+            MyStackTui::badge('MODIFIED', (string) $differentCount, '1;43;30', '~');
+            echo '  ' . MyStackTui::paint('Note', '1;38;5;214') . ': a hash difference means different — not automatically newer.' . "\n\n";
 
             if ($checkOnly) {
                 warning('Updates are available. Nothing was changed because --check/--dry-run is active.');
@@ -839,11 +994,16 @@ final class MyStackUpdater {
             }
 
             $stageRoot = self::createStage($root);
+            MyStackTui::section('Safe installation');
+            MyStackTui::progress(1, 4, 'Staging selected files');
             self::stageAndValidate($stageRoot, $changes);
+            MyStackTui::progress(2, 4, 'Stage validation passed');
             $applied = self::apply($root, $stageRoot, $changes);
+            MyStackTui::progress(3, 4, 'Atomic activation complete');
             try {
                 self::verifyAppliedHashes($root, $changes);
                 self::verifyFramework($root);
+                MyStackTui::progress(4, 4, 'Framework verification passed');
             } catch (Throwable $error) {
                 self::rollback($root, $stageRoot, $applied);
                 throw new RuntimeException('Post-update verification failed; every changed file was rolled back. ' . $error->getMessage(), 0, $error);
@@ -865,7 +1025,7 @@ final class MyStackUpdater {
         if (str_contains($scope, "\0") || preg_match('#(^|/)\.\.(/|$)#', $scope)) {
             throw new InvalidArgumentException('Update scope contains an unsafe path.');
         }
-        if (!self::isAllowedPath($scope) && $scope !== 'library' && $scope !== 'src/js') {
+        if (!self::isAllowedPath($scope) && $scope !== 'library' && $scope !== 'src/js' && $scope !== 'docs') {
             throw new InvalidArgumentException("Update scope '$scope' is outside the framework update allowlist.");
         }
         return $scope;
@@ -876,7 +1036,8 @@ final class MyStackUpdater {
         if ($path === '' || str_contains($path, "\0") || preg_match('#(^|/)\.\.?(/|$)#', $path)) return false;
         if (in_array($path, self::ROOT_FILES, true)) return true;
         return (str_starts_with($path, 'library/') && strlen($path) > 8)
-            || (str_starts_with($path, 'src/js/') && strlen($path) > 7);
+            || (str_starts_with($path, 'src/js/') && strlen($path) > 7)
+            || (str_starts_with($path, 'docs/') && strlen($path) > 5);
     }
 
     private static function matchesScope(string $path, string $scope): bool {
@@ -1005,18 +1166,29 @@ final class MyStackUpdater {
         return $result;
     }
 
-    private static function printComparison(array $comparison): void {
-        echo "\n";
-        printf("  %-11s %-52s %12s  %-12s\n", 'STATUS', 'FILE', 'REMOTE', 'SHA-256');
-        echo '  ' . str_repeat('-', 92) . "\n";
-        foreach ($comparison as $item) {
+    private static function printComparison(array $comparison, bool $verbose = false): void {
+        MyStackTui::section('File comparison');
+        $visible = $verbose
+            ? $comparison
+            : array_values(array_filter($comparison, static fn(array $item): bool => $item['status'] !== 'same'));
+        $hidden = count($comparison) - count($visible);
+        $top = '┌────────────┬──────────────────────────────────────────────┬──────────┬──────────────┐';
+        $mid = '├────────────┼──────────────────────────────────────────────┼──────────┼──────────────┤';
+        $bottom = '└────────────┴──────────────────────────────────────────────┴──────────┴──────────────┘';
+        echo '  ' . MyStackTui::paint($top, '38;5;39') . "\n";
+        echo '  ' . MyStackTui::paint('│ STATUS     │ FILE                                         │ SIZE     │ SHA-256      │', '1;38;5;117') . "\n";
+        echo '  ' . MyStackTui::paint($mid, '38;5;39') . "\n";
+        foreach ($visible as $item) {
             $status = strtoupper($item['status']);
-            $color = $item['status'] === 'same' ? '0;90' : ($item['status'] === 'new' ? '1;32' : '1;33');
-            printColor('  ' . str_pad($status, 11), $color);
-            $path = strlen($item['path']) > 51 ? '...' . substr($item['path'], -48) : $item['path'];
-            printf(" %-52s %12s  %-12s\n", $path, self::formatBytes((int) $item['bytes']), substr($item['sha256'], 0, 12));
+            $color = $item['status'] === 'same' ? '2;37' : ($item['status'] === 'new' ? '1;32' : '1;33');
+            $path = strlen($item['path']) > 44 ? '...' . substr($item['path'], -41) : $item['path'];
+            echo '  ' . MyStackTui::paint('│ ' . str_pad($status, 10), $color)
+                . ' │ ' . MyStackTui::paint(str_pad($path, 44), '38;5;252')
+                . ' │ ' . str_pad(self::formatBytes((int) $item['bytes']), 8, ' ', STR_PAD_LEFT)
+                . ' │ ' . MyStackTui::paint(str_pad(substr($item['sha256'], 0, 12), 12), '38;5;141') . " │\n";
         }
-        echo "\n";
+        echo '  ' . MyStackTui::paint($bottom, '38;5;39') . "\n";
+        if ($hidden > 0) info("{$hidden} unchanged file(s) hidden. Use --verbose to display every file.");
     }
 
     private static function confirm(string $prompt): bool {
@@ -1224,15 +1396,983 @@ final class MyStackUpdater {
     }
 }
 
+/** Source-driven documentation and AI knowledge builder. */
+final class MyStackDocs {
+    private const SITE = 'https://mystack-framework.github.io/mystack/';
+    private const REPO = 'https://github.com/mystack-framework/mystack';
+
+    public static function catalog(): array {
+        $files = glob(ROOT_DIR . '/library/*.php') ?: []; sort($files, SORT_STRING);
+        $libraries = []; $hashes = []; $totals = ['classes' => 0, 'public_methods' => 0, 'public_functions' => 0];
+        foreach ($files as $file) {
+            $source = (string) file_get_contents($file);
+            $relative = str_replace('\\', '/', substr($file, strlen(ROOT_DIR) + 1));
+            $hashes[$relative] = hash('sha256', $source);
+            $inspected = self::inspectSource($source);
+            $classes = $inspected['classes']; $methods = $inspected['methods']; $functions = $inspected['functions'];
+            $libraries[] = ['name' => pathinfo($file, PATHINFO_FILENAME), 'file' => $relative, 'sha256' => $hashes[$relative], 'classes' => $classes, 'public_methods' => $methods, 'public_functions' => $functions];
+            $totals['classes'] += count($classes); $totals['public_methods'] += count($methods); $totals['public_functions'] += count($functions);
+        }
+        $knowledgeHashes = [];
+        foreach (['README.md', 'MANUAL_BN.md', 'AGENTS.md'] as $knowledgeFile) $knowledgeHashes[$knowledgeFile] = hash_file('sha256', ROOT_DIR . '/' . $knowledgeFile);
+        return ['schema' => self::SITE . 'api-schema', 'framework' => 'MyStack', 'repository' => self::REPO, 'release_model' => 'rolling main branch; no fixed framework version', 'generated_from' => 'library/*.php', 'source_sha256' => hash('sha256', self::json($hashes)), 'knowledge_sha256' => hash('sha256', self::json($knowledgeHashes)), 'totals' => $totals, 'libraries' => $libraries];
+    }
+
+    public static function build(): array {
+        $catalog = self::catalog(); $docs = ROOT_DIR . '/docs'; self::directory($docs . '/api'); self::removeLegacyCrawlerFiles();
+        $manifest = ['name' => 'MyStack Framework', 'repository' => self::REPO, 'documentation' => self::SITE, 'license' => 'Apache-2.0', 'release_model' => 'rolling main branch; no fixed framework version', 'source_branch' => 'main', 'generator' => 'mystack docs:build', 'deterministic' => true, 'libraries' => count($catalog['libraries']), 'classes' => $catalog['totals']['classes'], 'public_methods' => $catalog['totals']['public_methods'], 'public_functions' => $catalog['totals']['public_functions'], 'source_sha256' => $catalog['source_sha256'], 'knowledge_sha256' => $catalog['knowledge_sha256']];
+        self::write($docs . '/api.json', self::json($catalog)); self::write($docs . '/manifest.json', self::json($manifest));
+        $index = "# MyStack Framework Documentation\n\nSource-verified documentation for humans and AI.\n\n- [README](../README.md)\n- [Bangla manual](../MANUAL_BN.md)\n- [AI summary](../llms.txt)\n- [Full AI context](../llms-full.txt)\n- [Machine API catalog](api.json)\n\n## Library API\n\n";
+        foreach ($catalog['libraries'] as $library) {
+            $index .= '- [' . $library['name'] . '](api/' . $library['name'] . '.md) — ' . count($library['public_methods']) . " public methods\n";
+            self::write($docs . '/api/' . $library['name'] . '.md', self::libraryPage($library));
+        }
+        self::write($docs . '/index.md', $index . "\nGenerated from executable source by `mystack docs:build`.\n");
+        self::write($docs . '/index.html', self::portal($catalog));
+        $llms = self::llms($catalog, false); $llmsFull = self::llms($catalog, true);
+        self::write(ROOT_DIR . '/llms.txt', $llms); self::write(ROOT_DIR . '/llms-full.txt', $llmsFull);
+        self::write($docs . '/llms.txt', $llms); self::write($docs . '/llms-full.txt', $llmsFull);
+        $result = self::check(); if (!$result['status']) throw new RuntimeException(implode('; ', $result['errors'])); return $result;
+    }
+
+    public static function check(): array {
+        $errors = []; $catalog = self::catalog(); $stored = self::readJson(ROOT_DIR . '/docs/api.json');
+        foreach (['docs/index.html','docs/index.md','docs/api.json','docs/manifest.json','docs/llms.txt','docs/llms-full.txt','llms.txt','llms-full.txt'] as $path) if (!is_file(ROOT_DIR . '/' . $path) || filesize(ROOT_DIR . '/' . $path) < 32) $errors[] = 'Missing or empty: ' . $path;
+        if (($stored['source_sha256'] ?? '') !== $catalog['source_sha256']) $errors[] = 'API catalog is stale.';
+        if (($stored['knowledge_sha256'] ?? '') !== $catalog['knowledge_sha256']) $errors[] = 'AI knowledge context is stale.';
+        if (($stored['totals']['public_methods'] ?? -1) !== $catalog['totals']['public_methods']) $errors[] = 'Public method count differs from source.';
+        $manifest = self::readJson(ROOT_DIR . '/docs/manifest.json');
+        if (($manifest['deterministic'] ?? false) !== true || isset($manifest['version']) || isset($manifest['generated_at'])) $errors[] = 'Manifest must remain deterministic and versionless.';
+        foreach (['robots.txt', 'sitemap.xml', 'docs/robots.txt', 'docs/sitemap.xml'] as $legacy) if (is_file(ROOT_DIR . '/' . $legacy)) $errors[] = 'Static crawler file must be provided by PHRO instead: ' . $legacy;
+        foreach ($catalog['libraries'] as $library) if (!is_file(ROOT_DIR . '/docs/api/' . $library['name'] . '.md')) $errors[] = 'Missing API page: ' . $library['name'];
+        return ['status' => !$errors, 'errors' => $errors, 'libraries' => count($catalog['libraries']), 'classes' => $catalog['totals']['classes'], 'public_methods' => $catalog['totals']['public_methods'], 'public_functions' => $catalog['totals']['public_functions'], 'source_sha256' => $catalog['source_sha256']];
+    }
+
+    private static function libraryPage(array $lib): string {
+        $out = '# ' . $lib['name'] . " API\n\nSource: `" . $lib['file'] . "`  \nSHA-256: `" . $lib['sha256'] . "`\n\nClasses: " . ($lib['classes'] ? '`' . implode('`, `', $lib['classes']) . '`' : 'None') . "\n\n## Public methods\n\n";
+        foreach ($lib['public_methods'] as $method) { $sig = ($method['static'] ? 'static ' : '') . $method['name'] . '(' . $method['parameters'] . ')' . ($method['return'] ? ': ' . $method['return'] : ''); $out .= '### `' . str_replace('`', '', $sig) . "`\n\n" . ($method['summary'] ?: 'See executable source and call sites for the behavioral contract.') . "\n\n"; }
+        if (!$lib['public_methods']) $out .= "No public class methods detected.\n\n";
+        if ($lib['public_functions']) { $out .= "## Public functions\n\n"; foreach ($lib['public_functions'] as $fn) $out .= '- `' . $fn['name'] . '(' . str_replace('`', '', $fn['parameters']) . ')' . ($fn['return'] ? ': ' . $fn['return'] : '') . "`\n"; }
+        return $out . "\nGenerated by `mystack docs:build`; do not hand-edit.\n";
+    }
+
+    private static function llms(array $catalog, bool $full): string {
+        $out = "# MyStack Framework\n\n> Official repository: " . self::REPO . "\n> Documentation: " . self::SITE . "\n> License: Apache-2.0\n\nMyStack is a zero-Composer PHP full-stack framework. Executable code in library/, src/js/PHJS-min.php and mystack is authoritative. Never invent APIs; verify exact signatures.\n\n## Canonical resources\n- AGENTS.md: agent contract\n- README.md: overview\n- MANUAL_BN.md: detailed Bangla manual\n- docs/api.json: machine API catalog\n\n## Source API map\n";
+        foreach ($catalog['libraries'] as $lib) { $out .= "\n### " . $lib['name'] . " — " . $lib['file'] . "\n"; if ($full) foreach ($lib['public_methods'] as $method) $out .= '- `' . ($method['static'] ? 'static ' : '') . $method['name'] . '(' . $method['parameters'] . ')' . ($method['return'] ? ': ' . $method['return'] : '') . '`' . ($method['summary'] ? ' — ' . $method['summary'] : '') . "\n"; else { $names = array_column($lib['public_methods'], 'name'); $out .= count($names) . ' public methods: ' . implode(', ', array_slice($names, 0, 24)) . (count($names) > 24 ? ', …' : '') . "\n"; } }
+        if ($full) foreach (['README.md','MANUAL_BN.md','AGENTS.md'] as $file) $out .= "\n\n---\n\n# Embedded {$file}\n\n" . trim((string) file_get_contents(ROOT_DIR . '/' . $file)) . "\n";
+        return $out;
+    }
+
+    private static function portal(array $catalog): string {
+        $data = json_encode($catalog, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_INVALID_UTF8_SUBSTITUTE);
+        return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="MyStack source-verified API documentation"><title>MyStack Documentation</title><style>:root{color-scheme:dark;--b:#07111f;--c:#0e1c30;--l:#24405e;--t:#eaf4ff;--m:#9fb4ca;--a:#22d3ee}*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#07111f,#0b1730);color:var(--t);font:16px/1.6 system-ui,sans-serif}header,main{width:min(1180px,calc(100% - 32px));margin:auto}header{padding:52px 0 20px}h1{font-size:clamp(2rem,7vw,4.5rem);margin:0;color:var(--a)}a{color:#7dd3fc}input{width:100%;padding:15px;border:1px solid var(--l);border-radius:12px;background:#081426;color:var(--t);font:inherit}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;padding:24px 0 64px}.card{background:var(--c);border:1px solid var(--l);border-radius:16px;padding:18px;min-width:0}.method{padding:7px 0;border-top:1px solid #18314c;overflow-wrap:anywhere}.muted{color:var(--m)}:focus-visible{outline:3px solid #fbbf24;outline-offset:3px}</style></head><body><header><h1>MyStack</h1><p>Source-verified framework documentation for humans and AI.</p><p class="muted">' . count($catalog['libraries']) . ' libraries · ' . $catalog['totals']['public_methods'] . ' public methods · Apache-2.0</p><label for="q">Search libraries and methods</label><input id="q" type="search" placeholder="Try PHRO, createTable, OAuth…"></header><main><div id="r" class="grid"></div></main><script>const A=' . $data . ',q=document.querySelector("#q"),r=document.querySelector("#r"),e=s=>String(s).replace(/[&<>"\']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","\'":"&#39;"}[c]));function d(){let x=q.value.toLowerCase().trim();r.innerHTML=A.libraries.map(l=>{let m=l.public_methods.filter(v=>!x||l.name.toLowerCase().includes(x)||v.name.toLowerCase().includes(x)||(v.summary||"").toLowerCase().includes(x));if(x&&!m.length&&!l.name.toLowerCase().includes(x))return"";return`<section class="card"><h2><a href="api/${encodeURIComponent(l.name)}.md">${e(l.name)}</a></h2><div class="muted">${m.length} matching method(s)</div>${m.slice(0,80).map(v=>`<div class="method"><code>${v.static?"static ":""}${e(v.name)}(${e(v.parameters)})${v.return?": "+e(v.return):""}</code>${v.summary?`<div class="muted">${e(v.summary)}</div>`:""}</div>`).join("")}</section>`}).join("")||"<p>No matching API found.</p>"}q.addEventListener("input",d);d();</script></body></html>';
+    }
+
+    private static function inspectSource(string $source): array {
+        $tokens = token_get_all($source); $classes = []; $methods = []; $functions = [];
+        $braceDepth = 0; $pendingType = null; $classStack = []; $count = count($tokens);
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (is_string($token)) {
+                if ($token === '{') { $braceDepth++; if ($pendingType !== null) { $classStack[] = ['name' => $pendingType, 'depth' => $braceDepth]; $pendingType = null; } }
+                elseif ($token === '}') { if ($classStack && end($classStack)['depth'] === $braceDepth) array_pop($classStack); $braceDepth = max(0, $braceDepth - 1); }
+                continue;
+            }
+            $id = $token[0];
+            if (in_array($id, [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) { $braceDepth++; continue; }
+            if (in_array($id, [T_CLASS, T_INTERFACE, T_TRAIT, defined('T_ENUM') ? T_ENUM : -1], true)) {
+                $nameIndex = self::nextSignificant($tokens, $i + 1);
+                $pendingType = '';
+                if ($nameIndex !== null && is_array($tokens[$nameIndex]) && $tokens[$nameIndex][0] === T_STRING) { $pendingType = $tokens[$nameIndex][1]; $classes[] = $pendingType; }
+                continue;
+            }
+            if ($id !== T_FUNCTION) continue;
+            $nameIndex = self::nextSignificant($tokens, $i + 1, true);
+            if ($nameIndex === null || !is_array($tokens[$nameIndex]) || $tokens[$nameIndex][0] !== T_STRING) continue;
+            $name = $tokens[$nameIndex][1]; $open = self::findSymbol($tokens, $nameIndex + 1, '(');
+            if ($open === null) continue;
+            [$parameters, $close] = self::balancedText($tokens, $open, '(', ')');
+            $return = ''; $cursor = self::nextSignificant($tokens, $close + 1);
+            if ($cursor !== null && $tokens[$cursor] === ':') {
+                for ($cursor++; $cursor < $count; $cursor++) { if ($tokens[$cursor] === '{' || $tokens[$cursor] === ';') break; $return .= self::tokenText($tokens[$cursor]); }
+            }
+            $modifiers = self::functionModifiers($tokens, $i); $insideClass = $classStack !== [];
+            $record = ['name' => $name, 'static' => in_array(T_STATIC, $modifiers, true), 'parameters' => self::clean($parameters), 'return' => self::clean($return), 'summary' => self::precedingDoc($tokens, $i)];
+            if ($insideClass && end($classStack)['name'] !== '' && !in_array(T_PRIVATE, $modifiers, true) && !in_array(T_PROTECTED, $modifiers, true)) $methods[] = $record;
+            elseif (!$insideClass) { unset($record['static'], $record['summary']); $functions[] = $record; }
+        }
+        return ['classes' => array_values(array_unique($classes)), 'methods' => $methods, 'functions' => $functions];
+    }
+    private static function nextSignificant(array $tokens, int $start, bool $skipReference = false): ?int { for ($i = $start, $n = count($tokens); $i < $n; $i++) { $token = $tokens[$i]; if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) continue; if ($skipReference && ($token === '&' || (is_array($token) && defined('T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG') && $token[0] === T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG))) continue; return $i; } return null; }
+    private static function findSymbol(array $tokens, int $start, string $symbol): ?int { for ($i = $start, $n = count($tokens); $i < $n; $i++) { if ($tokens[$i] === $symbol) return $i; if ($tokens[$i] === ';' || $tokens[$i] === '{') return null; } return null; }
+    private static function balancedText(array $tokens, int $open, string $left, string $right): array { $depth = 0; $text = ''; for ($i = $open, $n = count($tokens); $i < $n; $i++) { $token = $tokens[$i]; if ($token === $left) { if ($depth++ > 0) $text .= $left; continue; } if ($token === $right && --$depth === 0) return [$text, $i]; if ($depth > 0) $text .= self::tokenText($token); } return [$text, $open]; }
+    private static function tokenText(mixed $token): string { return is_array($token) ? $token[1] : (string) $token; }
+    private static function functionModifiers(array $tokens, int $index): array { $found = []; for ($i = $index - 1; $i >= 0; $i--) { $token = $tokens[$i]; if (is_string($token) && in_array($token, [';', '{', '}'], true)) break; if (is_array($token) && in_array($token[0], [T_PUBLIC, T_PROTECTED, T_PRIVATE, T_STATIC, T_ABSTRACT, T_FINAL], true)) $found[] = $token[0]; } return $found; }
+    private static function precedingDoc(array $tokens, int $index): string { for ($i = $index - 1; $i >= 0; $i--) { $token = $tokens[$i]; if (is_array($token) && $token[0] === T_DOC_COMMENT) return self::summary($token[1]); if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_PUBLIC, T_PROTECTED, T_PRIVATE, T_STATIC, T_ABSTRACT, T_FINAL], true)) continue; break; } return ''; }
+    private static function removeLegacyCrawlerFiles(): void {
+        foreach (['robots.txt', 'docs/robots.txt', 'sitemap.xml', 'docs/sitemap.xml'] as $relative) {
+            $path = ROOT_DIR . '/' . $relative; if (!is_file($path)) continue;
+            $content = (string) file_get_contents($path);
+            $isOldGenerated = str_contains($content, 'mystack-framework.github.io/mystack/sitemap.xml')
+                || (str_contains($content, '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">') && str_contains($content, 'mystack-framework.github.io/mystack'));
+            if ($isOldGenerated) @unlink($path);
+        }
+    }
+    private static function summary(string $doc): string { $doc = preg_replace('/^\\s*\\/\\*\\*|\\*\\/\\s*$/', '', $doc) ?? ''; foreach (preg_split('/\\R/', $doc) ?: [] as $line) { $line = trim(preg_replace('/^\\s*\\*\\s?/', '', $line) ?? ''); if ($line !== '' && !str_starts_with($line, '@')) return self::clean($line); } return ''; }
+    private static function clean(string $text): string { return trim(preg_replace('/\\s+/', ' ', $text) ?? $text); }
+    private static function json(array $value): string { return (string) json_encode($value, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE) . "\n"; }
+    private static function readJson(string $file): array { $value = is_file($file) ? json_decode((string) file_get_contents($file), true) : null; return is_array($value) ? $value : []; }
+    private static function directory(string $path): void { if (!is_dir($path) && !mkdir($path, 0755, true) && !is_dir($path)) throw new RuntimeException('Unable to create: ' . $path); }
+    private static function write(string $path, string $content): void {
+        if (function_exists('mb_check_encoding') && !mb_check_encoding($content, 'UTF-8')) $content = mb_scrub($content, 'UTF-8');
+        self::directory(dirname($path)); $temporary = $path . '.tmp-' . bin2hex(random_bytes(4));
+        if (file_put_contents($temporary, $content, LOCK_EX) !== strlen($content) || !@rename($temporary, $path)) { @unlink($temporary); throw new RuntimeException('Unable to write: ' . $path); }
+    }
+}
+
+/**
+ * Extensible, dependency-free console kernel. Legacy commands remain handled by
+ * the original dispatcher; this layer adds Artisan-class discovery, inspection,
+ * workers, scheduling, service diagnostics and safe operational commands.
+ */
+final class MyStackConsoleKernel {
+
+    public static function commands(): array {
+        return [
+            'Core' => [
+                'list' => 'List every built-in and discovered command.',
+                'about' => 'Show framework, PHP, path and capability information.',
+                'cli:install [--target=path]' => 'Install a user-level mystack launcher without removing php mystack support.',
+                'cli:status' => 'Show launcher and PATH availability for this operating system.',
+                'help [command]' => 'Show the command catalog or detailed command help.',
+                'serve [port]' => 'Start the portable PHP development server.',
+                'get:started' => 'Generate the original getting-started example.',
+                'doctor [--fix]' => 'Inspect or safely repair the project folder map.',
+                'audit' => 'Run the read-only production and security audit.',
+                'smoke' => 'Run the canonical framework regression suite.',
+                'update [path] [--check|--yes]' => 'Safely compare/update framework files from GitHub main.',
+                'docs:build' => 'Build source-verified docs, AI context, API catalog and static portal.',
+                'docs:check' => 'Verify generated documentation coverage and source freshness.',
+            ],
+            'Original generators' => [
+                'make:controller <Name>' => 'Generate the original controller scaffold.',
+                'make:model <Name>' => 'Generate the original model scaffold.',
+                'make:middleware <Name>' => 'Generate the original middleware scaffold.',
+                'make:component <Name>' => 'Generate the original PHUI component scaffold.',
+                'make:view <Name>' => 'Generate the original page view scaffold.',
+            ],
+            'Inspection' => [
+                'route:list' => 'List statically discovered routes.',
+                'route:show <path|name>' => 'Show matching route details.',
+                'config:show' => 'Show safe effective framework configuration.',
+                'library:list' => 'List loaded MyStack libraries and public API counts.',
+                'library:check <Class>' => 'Inspect one library public API.',
+                'ui:list' => 'List PHUI categories and registry totals.',
+                'ui:search <query>' => 'Search the PHUI registry.',
+                'phjs:check' => 'Verify PHJS/SW sources and synchronized build contracts.',
+                'health:check' => 'Run PHLS and database readiness checks.',
+            ],
+            'Generators' => [
+                'make:command <Name>' => 'Generate an auto-discovered custom CLI command.',
+                'make:api <Name>' => 'Generate a compact PHAP API class.',
+                'make:service <Name>' => 'Generate an application service.',
+                'make:job <Name>' => 'Generate a durable queue job.',
+                'make:event <Name>' => 'Generate an event data class.',
+                'make:listener <Name>' => 'Generate an event listener.',
+                'make:mail <Name>' => 'Generate a PHEM mail action.',
+                'make:notification <Name>' => 'Generate a PHFY notification action.',
+                'make:policy <Name>' => 'Generate an authorization policy.',
+                'make:test <Name>' => 'Generate a framework-native test class.',
+                'make:request <Name>' => 'Generate a reusable PHVD request validator.',
+                'make:resource <Name>' => 'Generate an API resource transformer.',
+                'make:factory <Name>' => 'Generate deterministic test-data factory helpers.',
+                'make:migration <Name>' => 'Generate a tracked PHDB schema migration.',
+                'make:seeder <Name>' => 'Generate an idempotent database seeder.',
+                'make:crud <Name>' => 'Atomically generate model/controller/API/view CRUD files.',
+                'make:module <Name>' => 'Atomically generate service/API/view module files.',
+            ],
+            'Cache & Build' => [
+                'cache:clear' => 'Clear generated CSS, JS and PHP cache files.',
+                'cache:status' => 'Show generated cache counts and sizes.',
+                'cache:warm' => 'Create and validate the canonical cache map.',
+                'cache:prune [--days=30]' => 'Remove old generated cache files after confirmation.',
+                'build:check' => 'Run full build synchronization checks.',
+                'optimize' => 'Run safe local cleanup and readiness optimization.',
+                'optimize:clear' => 'Clear generated/opcode caches after confirmation.',
+            ],
+            'Database' => [
+                'db:check' => 'Run a read-only PHDB connection check.',
+                'db:tables' => 'List database tables without changing schema.',
+                'schema:status' => 'Show table and column schema status.',
+                'migrate' => 'Run pending application migrations in order.',
+                'migrate:status' => 'Show applied and pending migrations.',
+                'migrate:rollback [--step=1] --yes' => 'Roll back the latest migration batch safely.',
+                'db:seed [Class|all]' => 'Run an application seeder explicitly.',
+            ],
+            'Queue' => [
+                'queue:push <Job> [--payload={}]' => 'Push a durable local job.',
+                'queue:work [--once|--daemon]' => 'Process queued jobs with retries and timeouts.',
+                'queue:status' => 'Show queue counts by state.',
+                'queue:failed' => 'List failed jobs.',
+                'queue:retry <id|all>' => 'Retry failed jobs.',
+                'queue:forget <id> --yes' => 'Delete one failed job.',
+                'queue:flush --yes' => 'Delete completed/failed queue records.',
+            ],
+            'Scheduler' => [
+                'schedule:add <name> <expression> <command>' => 'Register an isolated CLI schedule.',
+                'schedule:list' => 'List configured schedules.',
+                'schedule:remove <name> --yes' => 'Remove one schedule.',
+                'schedule:run' => 'Run due schedules once.',
+                'schedule:work [--daemon]' => 'Run the scheduler once or continuously.',
+            ],
+            'Services' => [
+                'websocket:start [--host=0.0.0.0 --port=8000]' => 'Start the PHEV CLI worker.',
+                'websocket:status [--host=127.0.0.1 --port=8000]' => 'Check a WebSocket TCP listener.',
+                'mail:check' => 'Check mail-related PHP capabilities.',
+                'oauth:list' => 'List PHAU OAuth/OIDC providers.',
+                'payment:list' => 'List payment adapters and capabilities.',
+                'courier:list' => 'List courier adapters and profiles.',
+                'phfy:check' => 'Show PHFY delivery capability.',
+                'vapid:check' => 'Run OpenSSL EC/VAPID capability checks.',
+            ],
+            'Operations' => [
+                'logs:tail [--lines=50]' => 'Show recent structured PHMO log entries.',
+                'logs:report [--date=YYYY-MM-DD]' => 'Show PHMO metrics and problem summary.',
+                'monitor:status' => 'Show health, queue, scheduler and cache status.',
+                'test' => 'Run the complete framework test suite.',
+            ],
+        ];
+    }
+
+    public static function supports(string $command): bool {
+        foreach (self::commands() as $commands) {
+            foreach (array_keys($commands) as $signature) {
+                if (strtok($signature, ' ') === $command) return true;
+            }
+        }
+        return self::customCommand($command) !== null;
+    }
+
+    public static function run(string $command, array $arguments): int {
+        [$args, $options] = self::parse($arguments);
+        try {
+            return match ($command) {
+                'list' => self::renderList($options),
+                'about' => self::about($options),
+                'cli:install' => self::cliInstall($options),
+                'cli:status' => self::cliStatus($options),
+                'route:list' => self::routeList($options),
+                'route:show' => self::routeShow($args, $options),
+                'config:show' => self::configShow($options),
+                'library:list' => self::libraryList($options),
+                'library:check' => self::libraryCheck($args, $options),
+                'ui:list' => self::uiList($options),
+                'ui:search' => self::uiSearch($args, $options),
+                'phjs:check' => self::phjsCheck($options),
+                'health:check' => self::healthCheck($options),
+                'docs:build' => self::docsBuild($options),
+                'docs:check' => self::docsCheck($options),
+                'cache:status' => self::cacheStatus($options),
+                'cache:warm' => self::cacheWarm($options),
+                'cache:prune' => self::cachePrune($options),
+                'build:check' => self::buildCheck(),
+                'optimize' => self::optimize(false, $options),
+                'optimize:clear' => self::optimize(true, $options),
+                'db:check' => self::dbCheck($options),
+                'db:tables' => self::dbTables($options, false),
+                'schema:status' => self::dbTables($options, true),
+                'migrate' => MyStackQueueScheduler::migrate($options),
+                'migrate:status' => MyStackQueueScheduler::migrationStatus($options),
+                'migrate:rollback' => MyStackQueueScheduler::migrationRollback($options),
+                'db:seed' => MyStackQueueScheduler::seed($args, $options),
+                'queue:push' => MyStackQueueScheduler::push($args, $options),
+                'queue:work' => MyStackQueueScheduler::work($options),
+                'queue:status' => MyStackQueueScheduler::status($options),
+                'queue:failed' => MyStackQueueScheduler::failed($options),
+                'queue:retry' => MyStackQueueScheduler::retry($args, $options),
+                'queue:forget' => MyStackQueueScheduler::forget($args, $options),
+                'queue:flush' => MyStackQueueScheduler::flush($options),
+                'schedule:add' => MyStackQueueScheduler::scheduleAdd($args, $options),
+                'schedule:list' => MyStackQueueScheduler::scheduleList($options),
+                'schedule:remove' => MyStackQueueScheduler::scheduleRemove($args, $options),
+                'schedule:run' => MyStackQueueScheduler::scheduleRun($options),
+                'schedule:work' => MyStackQueueScheduler::scheduleWork($options),
+                'websocket:start' => self::websocketStart($options),
+                'websocket:status' => self::websocketStatus($options),
+                'mail:check' => self::mailCheck($options),
+                'oauth:list' => self::oauthList($options),
+                'payment:list' => self::paymentList($options),
+                'courier:list' => self::courierList($options),
+                'phfy:check' => self::phfyCheck($options, false),
+                'vapid:check' => self::phfyCheck($options, true),
+                'logs:tail' => self::logsTail($options),
+                'logs:report' => self::logsReport($options),
+                'monitor:status' => self::monitorStatus($options),
+                'test' => runSmokeTests() ? 0 : 1,
+                default => str_starts_with($command, 'make:')
+                    ? self::generate($command, $args, $options)
+                    : self::runCustom($command, $args, $options),
+            };
+        } catch (Throwable $exception) {
+            self::emit(['status' => false, 'error' => $exception->getMessage()], $options, 'error');
+            return 1;
+        }
+    }
+
+    public static function help(?string $command = null): int {
+        if ($command === null || $command === '') return self::renderList([]);
+        foreach (self::commands() as $category => $commands) {
+            foreach ($commands as $signature => $description) {
+                if (strtok($signature, ' ') === $command) {
+                    MyStackTui::header('Command reference  •  ' . $command);
+                    echo "\n  {$description}\n\n  " . MyStackTui::paint('USAGE', '1;38;5;214') . ": mystack {$signature}\n";
+                    echo "         php mystack {$signature}\n";
+                    echo "\n  Global options: --json --yes --no-interaction --verbose --no-ansi\n\n";
+                    return 0;
+                }
+            }
+        }
+        $custom = self::customCommand($command);
+        if ($custom !== null) {
+            echo "\n{$command}: " . $custom['description'] . "\n";
+            return 0;
+        }
+        warning("No help is available for '{$command}'.");
+        return 1;
+    }
+
+    private static function docsBuild(array $options): int {
+        $result = MyStackDocs::build(); self::emit($result, $options); return 0;
+    }
+
+    private static function docsCheck(array $options): int {
+        $result = MyStackDocs::check(); self::emit($result, $options, $result['status'] ? 'info' : 'error'); return $result['status'] ? 0 : 1;
+    }
+
+    private static function parse(array $arguments): array {
+        $args = []; $options = [];
+        $booleanOptions = ['json', 'yes', 'no-interaction', 'verbose', 'daemon', 'once', 'fix', 'check', 'dry-run'];
+        for ($index = 0; $index < count($arguments); $index++) {
+            $argument = (string) $arguments[$index];
+            if (str_starts_with($argument, '--')) {
+                $pair = explode('=', substr($argument, 2), 2);
+                $key = strtolower(trim($pair[0]));
+                if ($key === '') continue;
+                if (isset($pair[1])) $options[$key] = $pair[1];
+                elseif (in_array($key, $booleanOptions, true)) $options[$key] = true;
+                elseif (isset($arguments[$index + 1]) && !str_starts_with((string) $arguments[$index + 1], '-')) {
+                    $options[$key] = (string) $arguments[++$index];
+                } else $options[$key] = true;
+            } elseif (str_starts_with($argument, '-') && strlen($argument) > 1) {
+                foreach (str_split(substr($argument, 1)) as $flag) $options[$flag] = true;
+            } else $args[] = $argument;
+        }
+        return [$args, $options];
+    }
+
+    private static function emit(mixed $data, array $options = [], string $kind = 'info'): void {
+        if (!empty($options['json'])) {
+            echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+            return;
+        }
+        if (is_string($data)) { $kind === 'error' ? warning($data) : info($data); return; }
+        if (is_array($data)) { MyStackTui::data($data); echo "\n"; return; }
+        echo (string) $data . "\n";
+    }
+
+    public static function confirm(string $question, array $options): bool {
+        if (!empty($options['yes'])) return true;
+        if (!empty($options['no-interaction'])) return false;
+        echo $question . ' [y/N]: ';
+        $answer = strtolower(trim((string) fgets(STDIN)));
+        return in_array($answer, ['y', 'yes'], true);
+    }
+
+    private static function renderList(array $options): int {
+        if (!empty($options['json'])) { self::emit(self::commands(), $options); return 0; }
+        MyStackTui::header('Console Kernel  •  intelligent, portable, dependency-free');
+        echo "\n  " . MyStackTui::paint('USAGE', '1;38;5;214') . "  mystack <command> [arguments] [options]\n";
+        echo "         php mystack <command> [arguments] [options]\n";
+        foreach (self::commands() as $category => $commands) {
+            MyStackTui::section($category);
+            foreach ($commands as $signature => $description) {
+                printf("    %-54s %s\n", MyStackTui::paint($signature, '1;38;5;117'), $description);
+            }
+        }
+        $custom = self::customCommands();
+        if ($custom !== []) {
+            echo "\n"; printColor(" Application Commands\n", '1;35');
+            foreach ($custom as $name => $definition) printf("  %-54s %s\n", $name, $definition['description']);
+        }
+        echo "\n  " . MyStackTui::paint('GLOBAL OPTIONS', '1;38;5;214') . ": --json --yes --no-interaction --verbose --no-ansi\n\n";
+        return 0;
+    }
+
+    private static function cliInstall(array $options): int {
+        $targetOption = trim((string) ($options['target'] ?? ''));
+        if (PHP_OS_FAMILY === 'Windows') {
+            $base = $targetOption !== '' ? $targetOption : rtrim((string) (getenv('LOCALAPPDATA') ?: getenv('USERPROFILE')), '/\\') . '\\MyStack\\bin';
+            if ($base === '' || str_contains($base, "\0")) throw new RuntimeException('A valid launcher target is required.');
+            if (!is_dir($base) && !mkdir($base, 0755, true) && !is_dir($base)) throw new RuntimeException('Unable to create launcher directory: ' . $base);
+            $launcher = rtrim($base, '/\\') . '\\mystack.cmd';
+            $root = str_replace('%', '%%', ROOT_DIR);
+            $content = "@echo off\r\nphp \"{$root}\\mystack\" %*\r\n";
+        } else {
+            $home = (string) getenv('HOME');
+            $base = $targetOption !== '' ? $targetOption : rtrim($home, '/') . '/.local/bin';
+            if ($base === '' || $base === '/.local/bin' || str_contains($base, "\0")) throw new RuntimeException('HOME or --target is required.');
+            if (!is_dir($base) && !mkdir($base, 0755, true) && !is_dir($base)) throw new RuntimeException('Unable to create launcher directory: ' . $base);
+            $launcher = rtrim($base, '/') . '/mystack';
+            $php = str_replace("'", "'\\''", PHP_BINARY); $script = str_replace("'", "'\\''", ROOT_DIR . '/mystack');
+            $content = "#!/usr/bin/env sh\nexec '{$php}' '{$script}' \"\$@\"\n";
+        }
+        $temporary = $launcher . '.tmp-' . bin2hex(random_bytes(4));
+        if (file_put_contents($temporary, $content, LOCK_EX) !== strlen($content) || !@rename($temporary, $launcher)) {
+            @unlink($temporary); throw new RuntimeException('Unable to install the launcher atomically.');
+        }
+        if (PHP_OS_FAMILY !== 'Windows') @chmod($launcher, 0755);
+        $inPath = self::pathContains(dirname($launcher));
+        self::emit([
+            'status' => true, 'launcher' => $launcher, 'command' => 'mystack', 'php_mystack_preserved' => true,
+            'path_ready' => $inPath,
+            'next' => $inPath ? 'Run: mystack help' : 'Add this directory to PATH: ' . dirname($launcher),
+        ], $options);
+        return 0;
+    }
+
+    private static function cliStatus(array $options): int {
+        $local = PHP_OS_FAMILY === 'Windows'
+            ? [ROOT_DIR . '/mystack.cmd']
+            : [ROOT_DIR . '/mystack'];
+        $pathEntries = array_values(array_filter(explode(PATH_SEPARATOR, (string) getenv('PATH'))));
+        $matches = [];
+        foreach ($pathEntries as $entry) {
+            foreach (PHP_OS_FAMILY === 'Windows' ? ['mystack.cmd', 'mystack.exe', 'mystack.bat'] : ['mystack'] as $name) {
+                $candidate = rtrim($entry, '/\\') . DIRECTORY_SEPARATOR . $name;
+                if (is_file($candidate)) $matches[] = $candidate;
+            }
+        }
+        $projectLaunchers = [];
+        foreach ($local as $launcher) $projectLaunchers[$launcher] = is_file($launcher);
+        self::emit([
+            'status' => true, 'os' => PHP_OS_FAMILY, 'php_binary' => PHP_BINARY,
+            'project_launchers' => $projectLaunchers, 'path_matches' => array_values(array_unique($matches)),
+            'direct_command_ready' => $matches !== [], 'fallback' => 'php mystack',
+        ], $options);
+        return 0;
+    }
+
+    private static function pathContains(string $directory): bool {
+        $needle = rtrim(str_replace('\\', '/', realpath($directory) ?: $directory), '/');
+        foreach (explode(PATH_SEPARATOR, (string) getenv('PATH')) as $entry) {
+            $resolved = rtrim(str_replace('\\', '/', realpath($entry) ?: $entry), '/');
+            if ($resolved !== '' && strcasecmp($resolved, $needle) === 0) return true;
+        }
+        return false;
+    }
+
+    private static function about(array $options): int {
+        $folders = MyStackBrain::ensureFolderMap(ROOT_DIR, false);
+        $data = [
+            'framework' => 'MyStack', 'release_model' => 'rolling main branch (no fixed framework version)', 'php' => PHP_VERSION,
+            'sapi' => PHP_SAPI, 'os' => PHP_OS_FAMILY, 'root' => ROOT_DIR,
+            'libraries' => count(glob(ROOT_DIR . '/library/PH*.php') ?: []),
+            'folders' => ['ready' => $folders['ready'] ?? 0, 'total' => $folders['total'] ?? 0],
+            'extensions' => array_fill_keys(['json','openssl','pdo_sqlite','mysqli','curl','mbstring','sockets','zip'], false),
+        ];
+        foreach ($data['extensions'] as $extension => $_) $data['extensions'][$extension] = extension_loaded($extension);
+        self::emit($data, $options); return 0;
+    }
+
+    private static function routeList(array $options): int {
+        $analysis = MyStackBrain::analyze(ROOT_DIR, ROOT_DIR . '/app', ROOT_DIR . '/component');
+        $rows = $analysis['routes'];
+        self::emit(['count' => count($rows), 'routes' => $rows, 'named' => $analysis['route_names']], $options);
+        return empty($analysis['status']) ? 1 : 0;
+    }
+
+    private static function routeShow(array $args, array $options): int {
+        $needle = trim((string) ($args[0] ?? ''));
+        if ($needle === '') throw new InvalidArgumentException('Route path or name is required.');
+        $analysis = MyStackBrain::analyze(ROOT_DIR, ROOT_DIR . '/app', ROOT_DIR . '/component');
+        $matches = array_values(array_filter($analysis['routes'], static fn($route) => $route['path'] === $needle || str_contains($route['path'], $needle)));
+        if (isset($analysis['route_names'][$needle])) $matches[] = ['name' => $needle, 'files' => $analysis['route_names'][$needle]];
+        self::emit(['query' => $needle, 'matches' => $matches], $options); return $matches === [] ? 1 : 0;
+    }
+
+    private static function configShow(array $options): int {
+        $data = [
+            'debug' => class_exists('PHDE') ? PHDE::isDebug() : false,
+            'timezone' => date_default_timezone_get(),
+            'root' => class_exists('DIR') ? DIR::getRootDir() : ROOT_DIR,
+            'base_path' => class_exists('PHCO') ? PHCO::path() : '',
+            'prefix' => class_exists('PHCO') ? PHCO::pre() : '',
+            'phls' => class_exists('PHLS') ? PHLS::checker(false) : ['status' => false],
+            'database' => self::configureDatabase() ? PHDB::checker() : ['status' => false, 'configured' => false],
+        ];
+        self::emit($data, $options); return 0;
+    }
+
+    private static function libraryClasses(): array {
+        return ['PHAI','PHAP','PHAU','PHCD','PHCO','PHCS','PHDB','PHDE','PHED','PHEM','PHEV','PHFY','PHJC','PHJS','PHJT','PHLS','PHML','PHMO','PHOB','PHOP','PHPA','PHQR','PHRO','PHRQ','PHSE','PHTM','PHTP','PHTR','PHUI','PHVD'];
+    }
+
+    private static function libraryList(array $options): int {
+        $rows = [];
+        foreach (self::libraryClasses() as $class) {
+            $reflection = new ReflectionClass($class);
+            $rows[] = ['class' => $class, 'methods' => count($reflection->getMethods(ReflectionMethod::IS_PUBLIC)), 'properties' => count($reflection->getProperties(ReflectionProperty::IS_PUBLIC)), 'file' => basename($reflection->getFileName())];
+        }
+        self::emit(['count' => count($rows), 'libraries' => $rows], $options); return 0;
+    }
+
+    private static function libraryCheck(array $args, array $options): int {
+        $class = strtoupper(trim((string) ($args[0] ?? '')));
+        if (!in_array($class, self::libraryClasses(), true)) throw new InvalidArgumentException('A valid MyStack library class is required.');
+        $reflection = new ReflectionClass($class); $methods = []; $properties = [];
+        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) if ($method->getDeclaringClass()->getName() === $class) $methods[] = $method->getName();
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) if ($property->getDeclaringClass()->getName() === $class) $properties[] = '$' . $property->getName();
+        self::emit(['class' => $class, 'file' => $reflection->getFileName(), 'methods' => $methods, 'properties' => $properties], $options); return 0;
+    }
+
+    private static function uiList(array $options): int {
+        self::emit(['count' => PHUI::count(), 'categories' => PHUI::categories()], $options); return 0;
+    }
+
+    private static function uiSearch(array $args, array $options): int {
+        $query = trim(implode(' ', $args)); if ($query === '') throw new InvalidArgumentException('A UI search query is required.');
+        $limit = max(1, min(200, (int) ($options['limit'] ?? 50)));
+        $results = PHUI::search($query, isset($options['group']) ? (string) $options['group'] : null, $limit);
+        self::emit(['query' => $query, 'count' => count($results), 'results' => $results], $options); return 0;
+    }
+
+    private static function phjsCheck(array $options): int {
+        $files = ['PHJS-min.php','PHJS.php','phjs.js','phjs.min.js','SW.php','sw.js']; $result = []; $ok = true;
+        foreach ($files as $file) {
+            $path = ROOT_DIR . '/src/js/' . $file; $content = is_file($path) ? (string) file_get_contents($path) : '';
+            $valid = $content !== '' && preg_match('//u', $content) === 1;
+            $result[$file] = ['status' => $valid, 'bytes' => strlen($content), 'sha256' => $valid ? hash('sha256', str_replace(["\r\n","\r"], "\n", $content)) : null];
+            $ok = $ok && $valid;
+        }
+        $canonical = (string) file_get_contents(ROOT_DIR . '/src/js/PHJS-min.php');
+        $ok = $ok && str_contains($canonical, '__PHJS_RUNTIME_LOADED__') && str_contains($canonical, 'APP.version');
+        self::emit(['status' => $ok, 'canonical' => 'src/js/PHJS-min.php', 'files' => $result], $options); return $ok ? 0 : 1;
+    }
+
+    private static function healthCheck(array $options): int {
+        self::configureDatabase();
+        PHMO::configure(['enabled' => true]); $health = PHMO::health(true);
+        self::emit($health, $options); return !empty($health['ready']) ? 0 : 1;
+    }
+
+    public static function cacheSummary(): array {
+        $summary = ['total' => 0, 'bytes' => 0, 'sections' => []];
+        foreach (['css','js','php'] as $section) {
+            $files = glob(ROOT_DIR . '/src/cache/' . $section . '/*') ?: []; $bytes = 0;
+            foreach ($files as $file) if (is_file($file)) $bytes += filesize($file) ?: 0;
+            $summary['sections'][$section] = ['files' => count($files), 'bytes' => $bytes];
+            $summary['total'] += count($files); $summary['bytes'] += $bytes;
+        }
+        return $summary;
+    }
+
+    private static function cacheStatus(array $options): int { self::emit(self::cacheSummary(), $options); return 0; }
+
+    private static function cacheWarm(array $options): int {
+        if (empty($options['json'])) MyStackTui::progress(1, 3, 'Checking framework folders');
+        $state = MyStackBrain::ensureFolderMap(ROOT_DIR, true);
+        if (empty($options['json'])) MyStackTui::progress(2, 3, 'Validating generated cache map');
+        $summary = self::cacheSummary();
+        if (empty($options['json'])) MyStackTui::progress(3, 3, 'Cache is ready');
+        self::emit(['status' => !empty($state['status']), 'folders' => $state, 'cache' => $summary], $options);
+        return !empty($state['status']) ? 0 : 1;
+    }
+
+    private static function cachePrune(array $options): int {
+        $days = max(1, min(3650, (int) ($options['days'] ?? 30))); $cutoff = time() - ($days * 86400); $targets = [];
+        foreach (['css','js','php'] as $section) foreach (glob(ROOT_DIR . '/src/cache/' . $section . '/*') ?: [] as $file) if (is_file($file) && filemtime($file) < $cutoff) $targets[] = $file;
+        if ($targets === []) { self::emit(['status' => true, 'removed' => 0], $options); return 0; }
+        if (!self::confirm('Remove ' . count($targets) . " cache file(s) older than {$days} days?", $options)) { warning('Cache prune cancelled.'); return 0; }
+        $removed = 0; foreach ($targets as $file) if (@unlink($file)) $removed++;
+        self::emit(['status' => $removed === count($targets), 'removed' => $removed, 'selected' => count($targets)], $options); return $removed === count($targets) ? 0 : 1;
+    }
+
+    private static function buildCheck(): int { return runSmokeTests() ? 0 : 1; }
+
+    private static function optimize(bool $clear, array $options): int {
+        if ($clear && !self::confirm('Clear generated cache and reset OPcache?', $options)) { warning('Optimization clear cancelled.'); return 0; }
+        $removed = 0;
+        if ($clear) foreach (['css','js','php'] as $section) foreach (glob(ROOT_DIR . '/src/cache/' . $section . '/*') ?: [] as $file) if (is_file($file) && @unlink($file)) $removed++;
+        MyStackBrain::ensureFolderMap(ROOT_DIR, true);
+        if (class_exists('PHLS')) PHLS::expireAllExpired();
+        if ($clear && function_exists('opcache_reset')) @opcache_reset();
+        self::emit(['status' => true, 'cleared' => $removed, 'cache' => self::cacheSummary()], $options); return 0;
+    }
+
+    public static function configureDatabase(): bool {
+        if (!class_exists('PHDB')) return false;
+        $source = is_file(ROOT_DIR . '/index.php') ? (string) file_get_contents(ROOT_DIR . '/index.php') : '';
+        foreach (['host','username','password','dbname','charset'] as $property) {
+            if (preg_match('/PHDB::\$' . $property . '\s*=\s*([\'"])(.*?)\1\s*;/s', $source, $match)) PHDB::${$property} = stripcslashes($match[2]);
+        }
+        return is_string(PHDB::$host) && PHDB::$host !== '' && is_string(PHDB::$username) && PHDB::$username !== '' && is_string(PHDB::$dbname) && PHDB::$dbname !== '';
+    }
+
+    private static function dbCheck(array $options): int {
+        $configured = self::configureDatabase(); $check = $configured ? PHDB::checker() : ['status' => false, 'configured' => false, 'error' => 'Literal PHDB configuration was not found in index.php.'];
+        self::emit($check, $options); return !empty($check['status']) ? 0 : 1;
+    }
+
+    private static function dbTables(array $options, bool $columns): int {
+        if (!self::configureDatabase()) throw new RuntimeException('Database configuration could not be loaded safely from index.php.');
+        $check = PHDB::checker(); if (empty($check['status'])) { self::emit($check, $options); return 1; }
+        $rows = PHDB::query('SELECT TABLE_NAME, ENGINE, TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME', [PHDB::$dbname]);
+        if ($columns) foreach ($rows as &$row) $row['columns'] = PHDB::query('SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION', [PHDB::$dbname, $row['TABLE_NAME']]);
+        self::emit(['database' => PHDB::$dbname, 'count' => count($rows), 'tables' => $rows], $options); return 0;
+    }
+
+    private static function websocketStart(array $options): int {
+        $host = (string) ($options['host'] ?? '0.0.0.0'); $port = max(1, min(65535, (int) ($options['port'] ?? 8000)));
+        PHEV::initialize('/websocket', $host, $port); PHEV::start(); return 0;
+    }
+
+    private static function websocketStatus(array $options): int {
+        $host = (string) ($options['host'] ?? '127.0.0.1'); $port = max(1, min(65535, (int) ($options['port'] ?? 8000))); $errno = 0; $error = '';
+        $socket = @fsockopen($host, $port, $errno, $error, 1.0); $running = is_resource($socket); if ($running) fclose($socket);
+        self::emit(['running' => $running, 'host' => $host, 'port' => $port, 'error' => $running ? null : $error], $options); return $running ? 0 : 1;
+    }
+
+    private static function mailCheck(array $options): int {
+        $data = ['smtp' => function_exists('stream_socket_client'), 'openssl' => extension_loaded('openssl'), 'imap' => extension_loaded('imap'), 'class' => class_exists('PHEM')];
+        $data['status'] = $data['smtp'] && $data['openssl'] && $data['class']; self::emit($data, $options); return $data['status'] ? 0 : 1;
+    }
+
+    private static function oauthList(array $options): int { $providers = PHAU::socialProviders(); self::emit(['count' => count($providers), 'providers' => $providers], $options); return 0; }
+
+    private static function paymentList(array $options): int {
+        $names = PHPA::available(); $result = [];
+        foreach ($names as $name) $result[$name] = PHPA::gatewayCapabilities((string) $name);
+        self::emit(['count' => count($names), 'gateways' => $result], $options); return 0;
+    }
+
+    private static function courierList(array $options): int {
+        $available = PHPA::courierAvailable(); $result = [];
+        foreach ($available as $slug => $summary) {
+            $result[(string) $slug] = [
+                ...$summary,
+                'profile' => PHPA::courierProfile((string) $slug),
+            ];
+        }
+        self::emit(['count' => count($result), 'couriers' => $result], $options); return 0;
+    }
+
+    private static function phfyCheck(array $options, bool $cryptoOnly): int {
+        PHFY::configure(['enabled' => true]); $data = $cryptoOnly ? PHFY::cryptoCapability() : ['webpush' => PHFY::webPushCapability(), 'crypto' => PHFY::cryptoCapability()];
+        self::emit($data, $options); $status = $cryptoOnly ? !empty($data['status']) : !empty($data['crypto']['status']); return $status ? 0 : 1;
+    }
+
+    private static function logsTail(array $options): int {
+        PHMO::configure(['enabled' => true]); $limit = max(1, min(500, (int) ($options['lines'] ?? 50))); $report = PHMO::report(null, $limit, '', '');
+        self::emit(['count' => count($report['entries'] ?? []), 'entries' => $report['entries'] ?? []], $options); return 0;
+    }
+
+    private static function logsReport(array $options): int {
+        PHMO::configure(['enabled' => true]); $date = isset($options['date']) ? (string) $options['date'] : null;
+        self::emit(['metrics' => PHMO::metrics($date), 'report' => PHMO::report($date, 500, (string) ($options['level'] ?? ''), (string) ($options['search'] ?? ''))], $options); return 0;
+    }
+
+    private static function monitorStatus(array $options): int {
+        self::configureDatabase(); PHMO::configure(['enabled' => true]);
+        self::emit(['health' => PHMO::health(true), 'queue' => MyStackQueueScheduler::counts(), 'schedules' => MyStackQueueScheduler::scheduleCount(), 'cache' => self::cacheSummary()], $options); return 0;
+    }
+
+    private static function generate(string $command, array $args, array $options): int {
+        $name = trim((string) ($args[0] ?? '')); if ($name === '') throw new InvalidArgumentException("A name is required for {$command}.");
+        $base = MyStackBrain::smartName($name); $suffix = match ($command) {
+            'make:command' => 'Command', 'make:api' => 'Api', 'make:service' => 'Service', 'make:job' => 'Job',
+            'make:event' => 'Event', 'make:listener' => 'Listener', 'make:mail' => 'Mail',
+            'make:notification' => 'Notification', 'make:policy' => 'Policy', 'make:test' => 'Test',
+            'make:request' => 'Request', 'make:resource' => 'Resource', 'make:factory' => 'Factory',
+            'make:migration' => 'Migration', 'make:seeder' => 'Seeder', default => '',
+        };
+        if (in_array($command, ['make:crud','make:module'], true)) return self::generateSet($command, $base, $options);
+        $class = str_ends_with($base, $suffix) ? $base : $base . $suffix; $path = ROOT_DIR . '/app/' . $class . '.php';
+        $content = self::generatorContent($command, $class, $base);
+        generateFile($path, $content, $class); return 0;
+    }
+
+    private static function generatorContent(string $command, string $class, string $base): string {
+        return match ($command) {
+            'make:command' => "<?php\nfinal class {$class} {\n    public static function commandName(): string { return '" . strtolower(preg_replace('/(?<!^)[A-Z]/', ':$0', $base)) . "'; }\n    public static function description(): string { return 'Application command {$base}.'; }\n    public static function handle(array \$arguments, array \$options): int {\n        echo \"{$class} executed.\\n\";\n        return 0;\n    }\n}\n",
+            'make:api' => "<?php\nfinal class {$class} {\n    public static function register(string \$path = '/api/" . strtolower($base) . "'): void {\n        PHAP::api('GET ' . \$path, false, [], fn() => ['resource' => '{$base}']);\n    }\n}\n",
+            'make:service' => "<?php\nfinal class {$class} {\n    public static function run(array \$input = []): array { return ['status' => true, 'data' => \$input]; }\n}\n",
+            'make:job' => "<?php\nfinal class {$class} {\n    public static function handle(array \$payload): void {\n        // Perform an idempotent background operation.\n    }\n}\n",
+            'make:event' => "<?php\nfinal class {$class} {\n    public function __construct(public readonly array \$data = []) {}\n}\n",
+            'make:listener' => "<?php\nfinal class {$class} {\n    public static function handle(object|array \$event): void {}\n}\n",
+            'make:mail' => "<?php\nfinal class {$class} {\n    public static function send(string \$from, string \$to, string \$subject, string \$html, string \$sender = 'MyStack'): bool {\n        return (bool) PHEM::smtpSend(\$from, \$sender, \$to, '', '', \$subject, \$html);\n    }\n}\n",
+            'make:notification' => "<?php\nfinal class {$class} {\n    public static function send(string \$message, array \$options = []): array { return PHFY::send(\$message, \$options); }\n}\n",
+            'make:policy' => "<?php\nfinal class {$class} {\n    public static function allows(array \$identity, string \$ability, mixed \$resource = null): bool { return false; }\n}\n",
+            'make:test' => "<?php\nfinal class {$class} {\n    public static function run(): array { return ['status' => true, 'assertions' => 1]; }\n}\n",
+            'make:request' => "<?php\nfinal class {$class} {\n    public static function validate(array \$input): array {\n        return PHVD::check(['name' => 'required|string|max:255'], \$input);\n    }\n}\n",
+            'make:resource' => "<?php\nfinal class {$class} {\n    public static function make(array \$row): array {\n        return ['id' => \$row['id'] ?? null, 'data' => \$row];\n    }\n}\n",
+            'make:factory' => "<?php\nfinal class {$class} {\n    public static function make(array \$overrides = []): array {\n        return array_replace(['name' => '{$base}', 'created_at' => date('Y-m-d H:i:s')], \$overrides);\n    }\n}\n",
+            'make:migration' => "<?php\nfinal class {$class} {\n    public static function up(): void {\n        // PHDB::createTable('" . MyStackBrain::tableName($base) . "', ['id' => 'BIGINT AUTO_INCREMENT PRIMARY KEY']);\n    }\n    public static function down(): void {\n        // PHDB::dropTable('" . MyStackBrain::tableName($base) . "');\n    }\n}\n",
+            'make:seeder' => "<?php\nfinal class {$class} {\n    public static function run(): void {\n        // Keep seed operations repeatable when possible.\n    }\n}\n",
+            default => throw new InvalidArgumentException("Unsupported generator: {$command}"),
+        };
+    }
+
+    private static function generateSet(string $command, string $base, array $options): int {
+        $definitions = $command === 'make:crud'
+            ? [
+                ROOT_DIR . "/app/{$base}Model.php" => "<?php\nfinal class {$base}Model {\n    private const TABLE = '" . MyStackBrain::tableName($base . 'Model') . "';\n    public static function all(): array { return PHDB::select(self::TABLE); }\n    public static function find(int|string \$id): ?array { return PHDB::find(self::TABLE, \$id); }\n    public static function create(array \$data): bool { return (bool) PHDB::insert(self::TABLE, \$data); }\n}\n",
+                ROOT_DIR . "/app/{$base}Controller.php" => "<?php\nfinal class {$base}Controller { public static function index(): array { return PHDB::select('" . MyStackBrain::tableName($base . 'Model') . "'); } }\n",
+                ROOT_DIR . "/app/{$base}Api.php" => self::generatorContent('make:api', "{$base}Api", $base),
+                ROOT_DIR . "/component/{$base}View.php" => "<?php echo PHUI::section('section:hero', ['hero_title' => '{$base}', 'hero_desc' => 'Resource overview']);\n",
+            ] : [
+                ROOT_DIR . "/app/{$base}Service.php" => self::generatorContent('make:service', "{$base}Service", $base),
+                ROOT_DIR . "/app/{$base}Api.php" => self::generatorContent('make:api', "{$base}Api", $base),
+                ROOT_DIR . "/component/{$base}View.php" => "<?php echo PHUI::section('section:hero', ['hero_title' => '{$base}', 'hero_desc' => 'Module view']);\n",
+            ];
+        foreach (array_keys($definitions) as $path) if (file_exists($path)) throw new RuntimeException('Generation stopped; file already exists: ' . $path);
+        $created = [];
+        try { foreach ($definitions as $path => $content) { if (file_put_contents($path, $content, LOCK_EX) === false) throw new RuntimeException('Could not create: ' . $path); $created[] = $path; } }
+        catch (Throwable $error) { foreach ($created as $path) @unlink($path); throw $error; }
+        self::emit(['status' => true, 'created' => $created], $options); return 0;
+    }
+
+    private static function customCommands(): array {
+        ensureFrameworkRuntime();
+        static $commands = null; if (is_array($commands)) return $commands; $commands = [];
+        foreach (glob(ROOT_DIR . '/app/*Command.php') ?: [] as $file) {
+            $before = get_declared_classes(); try { require_once $file; } catch (Throwable) { continue; }
+            foreach (array_diff(get_declared_classes(), $before) as $class) {
+                if (!method_exists($class, 'commandName') || !method_exists($class, 'handle')) continue;
+                $name = (string) $class::commandName(); if (!preg_match('/^[a-z][a-z0-9:_-]*$/', $name)) continue;
+                $commands[$name] = ['class' => $class, 'description' => method_exists($class, 'description') ? (string) $class::description() : 'Application command.'];
+            }
+        }
+        return $commands;
+    }
+
+    private static function customCommand(string $command): ?array { return self::customCommands()[$command] ?? null; }
+    private static function runCustom(string $command, array $args, array $options): int {
+        $definition = self::customCommand($command); if ($definition === null) return 1;
+        $result = $definition['class']::handle($args, $options); return is_int($result) ? $result : 0;
+    }
+}
+
+/** Durable, local single-server queue and scheduler used by the console kernel. */
+final class MyStackQueueScheduler {
+    private static ?PDO $pdo = null;
+
+    private static function db(): PDO {
+        if (self::$pdo instanceof PDO) return self::$pdo;
+        $directory = ROOT_DIR . '/.mystack'; if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) throw new RuntimeException('Unable to create .mystack.');
+        $pdo = new PDO('sqlite:' . $directory . '/console.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        $pdo->exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL');
+        $pdo->exec('CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT "pending", attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, available_at INTEGER NOT NULL, reserved_at INTEGER, completed_at INTEGER, error TEXT, created_at INTEGER NOT NULL)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS jobs_status_available ON jobs(status, available_at)');
+        $pdo->exec('CREATE TABLE IF NOT EXISTS schedules (name TEXT PRIMARY KEY, expression TEXT NOT NULL, command TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_run INTEGER, created_at INTEGER NOT NULL)');
+        $pdo->exec('CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, batch INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
+        self::$pdo = $pdo; return $pdo;
+    }
+
+    public static function push(array $args, array $options): int {
+        $job = trim((string) ($args[0] ?? ''));
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*(?:\\\\[A-Za-z_][A-Za-z0-9_]*)*$/', $job)) {
+            throw new InvalidArgumentException('A valid job class is required.');
+        }
+        $payload = json_decode((string) ($options['payload'] ?? '{}'), true); if (!is_array($payload)) throw new InvalidArgumentException('--payload must be a JSON object.');
+        $delay = max(0, (int) ($options['delay'] ?? 0)); $tries = max(1, min(100, (int) ($options['tries'] ?? 3)));
+        $statement = self::db()->prepare('INSERT INTO jobs(job,payload,max_attempts,available_at,created_at) VALUES(?,?,?,?,?)'); $statement->execute([$job, json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $tries, time() + $delay, time()]);
+        self::output(['status' => true, 'id' => (int) self::db()->lastInsertId(), 'job' => $job], $options); return 0;
+    }
+
+    public static function counts(): array {
+        $rows = self::db()->query('SELECT status, COUNT(*) total FROM jobs GROUP BY status')->fetchAll(); $counts = ['pending'=>0,'running'=>0,'completed'=>0,'failed'=>0];
+        foreach ($rows as $row) $counts[$row['status']] = (int) $row['total']; return $counts;
+    }
+
+    public static function status(array $options): int { self::output(['queue' => self::counts()], $options); return 0; }
+
+    public static function work(array $options): int {
+        $daemon = !empty($options['daemon']); $limit = max(1, min(1000, (int) ($options['limit'] ?? ($daemon ? 1000 : 1)))); $processed = 0; $sleep = max(1, min(60, (int) ($options['sleep'] ?? 2)));
+        do {
+            $job = self::reserve();
+            if ($job === null) { if ($daemon) { sleep($sleep); continue; } break; }
+            self::execute($job); $processed++;
+            if (!$daemon && $processed >= $limit) break;
+        } while (true);
+        self::output(['status' => true, 'processed' => $processed, 'queue' => self::counts()], $options); return 0;
+    }
+
+    private static function reserve(): ?array {
+        $pdo = self::db(); $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $statement = $pdo->prepare('SELECT * FROM jobs WHERE status="pending" AND available_at<=? ORDER BY id LIMIT 1'); $statement->execute([time()]); $job = $statement->fetch();
+            if (!$job) { $pdo->exec('COMMIT'); return null; }
+            $update = $pdo->prepare('UPDATE jobs SET status="running", reserved_at=?, attempts=attempts+1 WHERE id=? AND status="pending"'); $update->execute([time(), $job['id']]);
+            $pdo->exec('COMMIT'); return $update->rowCount() === 1 ? $job : null;
+        } catch (Throwable $error) {
+            try { $pdo->exec('ROLLBACK'); } catch (Throwable) {}
+            throw $error;
+        }
+    }
+
+    private static function execute(array $job): void {
+        $class = (string) $job['job']; $file = ROOT_DIR . '/app/' . basename(str_replace('\\', '/', $class)) . '.php';
+        try {
+            if (!class_exists($class, false) && is_file($file)) require_once $file;
+            if (!class_exists($class) || !method_exists($class, 'handle')) throw new RuntimeException("Job class {$class}::handle() is unavailable.");
+            $payload = json_decode($job['payload'], true, 512, JSON_THROW_ON_ERROR); $class::handle($payload);
+            $statement = self::db()->prepare('UPDATE jobs SET status="completed", completed_at=?, error=NULL WHERE id=?'); $statement->execute([time(), $job['id']]);
+        } catch (Throwable $error) {
+            $attempt = (int) $job['attempts'] + 1; $failed = $attempt >= (int) $job['max_attempts'];
+            $statement = self::db()->prepare('UPDATE jobs SET status=?, available_at=?, reserved_at=NULL, error=? WHERE id=?'); $statement->execute([$failed ? 'failed' : 'pending', time() + min(300, 2 ** min(8, $attempt)), substr($error->getMessage(), 0, 2000), $job['id']]);
+        }
+    }
+
+    public static function failed(array $options): int { $rows = self::db()->query('SELECT id,job,attempts,error,created_at FROM jobs WHERE status="failed" ORDER BY id DESC LIMIT 500')->fetchAll(); self::output(['count'=>count($rows),'jobs'=>$rows],$options); return 0; }
+    public static function retry(array $args, array $options): int { $target = (string) ($args[0] ?? ''); if ($target === 'all') $count = self::db()->exec('UPDATE jobs SET status="pending", attempts=0, error=NULL, available_at=' . time() . ' WHERE status="failed"'); elseif (ctype_digit($target)) { $s=self::db()->prepare('UPDATE jobs SET status="pending", attempts=0, error=NULL, available_at=? WHERE id=? AND status="failed"');$s->execute([time(),(int)$target]);$count=$s->rowCount(); } else throw new InvalidArgumentException('Use a failed job ID or all.'); self::output(['retried'=>$count],$options); return $count>0?0:1; }
+    public static function forget(array $args, array $options): int { $id=(string)($args[0]??'');if(!ctype_digit($id))throw new InvalidArgumentException('A numeric failed job ID is required.');if(!MyStackConsoleKernel::confirm("Delete failed job #{$id}?",$options))return 0;$s=self::db()->prepare('DELETE FROM jobs WHERE id=? AND status="failed"');$s->execute([(int)$id]);self::output(['deleted'=>$s->rowCount()],$options);return $s->rowCount()?0:1; }
+    public static function flush(array $options): int { if(!MyStackConsoleKernel::confirm('Delete all completed and failed queue records?',$options))return 0;$count=self::db()->exec('DELETE FROM jobs WHERE status IN ("completed","failed")');self::output(['deleted'=>$count],$options);return 0; }
+
+    private static function migrationFiles(): array {
+        $files = glob(ROOT_DIR . '/app/*Migration.php') ?: [];
+        usort($files, static fn(string $a, string $b): int => strnatcasecmp(basename($a), basename($b)));
+        return $files;
+    }
+
+    private static function migrationClass(string $file): string {
+        return pathinfo($file, PATHINFO_FILENAME);
+    }
+
+    private static function requireDatabase(): void {
+        if (!MyStackConsoleKernel::configureDatabase()) throw new RuntimeException('Literal PHDB configuration was not found in index.php.');
+        $check = PHDB::checker();
+        if (empty($check['status'])) throw new RuntimeException('Database is not ready: ' . ($check['error'] ?? 'connection failed'));
+    }
+
+    public static function migrationStatus(array $options): int {
+        $applied = [];
+        foreach (self::db()->query('SELECT name,batch,applied_at FROM migrations ORDER BY batch,name')->fetchAll() as $row) $applied[$row['name']] = $row;
+        $rows = [];
+        foreach (self::migrationFiles() as $file) {
+            $name = self::migrationClass($file);
+            $rows[] = ['name' => $name, 'status' => isset($applied[$name]) ? 'applied' : 'pending', 'batch' => $applied[$name]['batch'] ?? null, 'file' => $file];
+        }
+        self::output(['count' => count($rows), 'migrations' => $rows], $options);
+        return 0;
+    }
+
+    public static function migrate(array $options): int {
+        self::requireDatabase();
+        $applied = self::db()->query('SELECT name FROM migrations')->fetchAll(PDO::FETCH_COLUMN);
+        $known = array_fill_keys(array_map('strval', $applied), true);
+        $batch = (int) self::db()->query('SELECT COALESCE(MAX(batch),0)+1 FROM migrations')->fetchColumn();
+        $ran = [];
+        foreach (self::migrationFiles() as $file) {
+            $class = self::migrationClass($file);
+            if (isset($known[$class])) continue;
+            require_once $file;
+            if (!class_exists($class) || !is_callable([$class, 'up'])) throw new RuntimeException("Migration {$class} must provide public static up().");
+            $class::up();
+            $statement = self::db()->prepare('INSERT INTO migrations(name,batch,applied_at) VALUES(?,?,?)');
+            $statement->execute([$class, $batch, time()]);
+            $ran[] = $class;
+        }
+        self::output(['status' => true, 'batch' => $ran === [] ? null : $batch, 'ran' => $ran], $options);
+        return 0;
+    }
+
+    public static function migrationRollback(array $options): int {
+        $steps = max(1, min(100, (int) ($options['step'] ?? 1)));
+        if (!MyStackConsoleKernel::confirm("Roll back the latest {$steps} migration batch(es)?", $options)) return 0;
+        self::requireDatabase();
+        $batches = self::db()->query('SELECT DISTINCT batch FROM migrations ORDER BY batch DESC LIMIT ' . $steps)->fetchAll(PDO::FETCH_COLUMN);
+        if ($batches === []) { self::output(['status' => true, 'rolled_back' => []], $options); return 0; }
+        $placeholders = implode(',', array_fill(0, count($batches), '?'));
+        $statement = self::db()->prepare("SELECT name,batch FROM migrations WHERE batch IN ({$placeholders}) ORDER BY batch DESC, applied_at DESC, name DESC");
+        $statement->execute($batches); $rolledBack = [];
+        foreach ($statement->fetchAll() as $row) {
+            $class = (string) $row['name']; $file = ROOT_DIR . '/app/' . $class . '.php';
+            if (is_file($file)) require_once $file;
+            if (!class_exists($class) || !is_callable([$class, 'down'])) throw new RuntimeException("Migration {$class} must provide public static down().");
+            $class::down();
+            $delete = self::db()->prepare('DELETE FROM migrations WHERE name=?'); $delete->execute([$class]);
+            $rolledBack[] = $class;
+        }
+        self::output(['status' => true, 'rolled_back' => $rolledBack], $options);
+        return 0;
+    }
+
+    public static function seed(array $args, array $options): int {
+        self::requireDatabase();
+        $target = trim((string) ($args[0] ?? 'all')); $files = glob(ROOT_DIR . '/app/*Seeder.php') ?: [];
+        $ran = [];
+        foreach ($files as $file) {
+            $class = pathinfo($file, PATHINFO_FILENAME);
+            if ($target !== 'all' && strcasecmp($target, $class) !== 0 && strcasecmp($target . 'Seeder', $class) !== 0) continue;
+            require_once $file;
+            if (!class_exists($class) || !is_callable([$class, 'run'])) throw new RuntimeException("Seeder {$class} must provide public static run().");
+            $class::run(); $ran[] = $class;
+        }
+        if ($target !== 'all' && $ran === []) throw new RuntimeException("Seeder {$target} was not found.");
+        self::output(['status' => true, 'ran' => $ran], $options); return 0;
+    }
+
+    public static function scheduleAdd(array $args, array $options): int {
+        $name=trim((string)($args[0]??''));$expression=trim((string)($args[1]??''));$command=trim(implode(' ',array_slice($args,2)));
+        if(!preg_match('/^[a-zA-Z][a-zA-Z0-9_.-]*$/',$name)||!self::validExpression($expression)||$command===''||str_starts_with($command,'schedule:'))throw new InvalidArgumentException('Usage: schedule:add <name> <every-minute|hourly|daily|@every:N> <command>.');
+        $s=self::db()->prepare('INSERT INTO schedules(name,expression,command,created_at) VALUES(?,?,?,?) ON CONFLICT(name) DO UPDATE SET expression=excluded.expression,command=excluded.command,enabled=1');$s->execute([$name,$expression,$command,time()]);self::output(['status'=>true,'name'=>$name,'expression'=>$expression,'command'=>$command],$options);return 0;
+    }
+    public static function scheduleCount(): int { return (int) self::db()->query('SELECT COUNT(*) FROM schedules WHERE enabled=1')->fetchColumn(); }
+    public static function scheduleList(array $options): int { $rows=self::db()->query('SELECT * FROM schedules ORDER BY name')->fetchAll();self::output(['count'=>count($rows),'schedules'=>$rows],$options);return 0; }
+    public static function scheduleRemove(array $args,array $options):int{$name=(string)($args[0]??'');if($name===''||!MyStackConsoleKernel::confirm("Remove schedule {$name}?",$options))return 0;$s=self::db()->prepare('DELETE FROM schedules WHERE name=?');$s->execute([$name]);self::output(['removed'=>$s->rowCount()],$options);return $s->rowCount()?0:1;}
+    public static function scheduleRun(array $options):int{$rows=self::db()->query('SELECT * FROM schedules WHERE enabled=1 ORDER BY name')->fetchAll();$ran=[];foreach($rows as $row){if(!self::due($row))continue;$parts=str_getcsv($row['command'],' ');$cmd=array_merge([PHP_BINARY,ROOT_DIR.'/mystack'],$parts);[$code,$output]=self::process($cmd,max(5,min(3600,(int)($options['timeout']??300))));$s=self::db()->prepare('UPDATE schedules SET last_run=? WHERE name=?');$s->execute([time(),$row['name']]);$ran[]=['name'=>$row['name'],'exit'=>$code,'output'=>trim($output)];}self::output(['ran'=>count($ran),'results'=>$ran],$options);return count(array_filter($ran,fn($r)=>$r['exit']!==0))===0?0:1;}
+    public static function scheduleWork(array $options):int{$daemon=!empty($options['daemon']);do{$code=self::scheduleRun($options);if(!$daemon)return $code;sleep(max(5,min(60,(int)($options['sleep']??30))));}while(true);}
+    private static function validExpression(string $e):bool{return in_array($e,['every-minute','hourly','daily'],true)||preg_match('/^@every:\d+$/',$e)===1;}
+    private static function due(array $r):bool{$last=(int)($r['last_run']??0);$now=time();return match($r['expression']){'every-minute'=>$last<($now-59),'hourly'=>$last<($now-3599),'daily'=>$last<($now-86399),default=>preg_match('/^@every:(\d+)$/',$r['expression'],$m)===1&&$last<=($now-max(1,(int)$m[1]))};}
+    private static function process(array $command,int $timeout):array{$pipes=[];$p=@proc_open($command,[1=>['pipe','w'],2=>['pipe','w']],$pipes,ROOT_DIR,null,['bypass_shell'=>true]);if(!is_resource($p))return[127,'Unable to start command.'];foreach($pipes as $pipe)stream_set_blocking($pipe,false);$out='';$start=microtime(true);while(true){$st=proc_get_status($p);foreach($pipes as $pipe)$out.=stream_get_contents($pipe);if(!$st['running'])break;if(microtime(true)-$start>$timeout){proc_terminate($p);foreach($pipes as $pipe)fclose($pipe);proc_close($p);return[124,$out."\nTimed out."];}usleep(20000);}foreach($pipes as $pipe){$out.=stream_get_contents($pipe);fclose($pipe);}return[proc_close($p),$out];}
+    private static function output(array $data,array $options):void{echo json_encode($data,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n";}
+}
+
 $folderRepairCommands = [
     'make:controller',
     'make:model',
     'make:middleware',
     'make:component',
     'make:view',
+    'make:command',
+    'make:api',
+    'make:service',
+    'make:job',
+    'make:event',
+    'make:listener',
+    'make:mail',
+    'make:notification',
+    'make:policy',
+    'make:test',
+    'make:request',
+    'make:resource',
+    'make:factory',
+    'make:migration',
+    'make:seeder',
+    'make:crud',
+    'make:module',
     'get:started',
     'serve',
     'cache:clear',
+    'cache:warm',
+    'cache:prune',
+    'optimize',
+    'optimize:clear',
+    'queue:push',
+    'queue:work',
+    'schedule:add',
+    'schedule:run',
+    'schedule:work',
     'doctor',
 ];
 $folderMapReport = null;
@@ -1255,7 +2395,7 @@ function generateFile($path, $content, $type) {
 
 function showHelp() {
     echo "\n";
-    printColor(" MyStack Intelligent CLI (v2.0.0) \n", "1;44;97");
+    printColor(" MyStack Intelligent CLI \n", "1;44;97");
     echo "\n";
     printColor(" Usage:\n", "1;33");
     echo "  php mystack [command] [arguments]\n\n";
@@ -1422,12 +2562,8 @@ function runDoctorLegacyUnsafe($dirPaths) {
 }
 
 function runDoctor(array $dirPaths, bool $applyFixes = false): bool {
-    echo "\n";
-    printColor(
-        " MyStack Doctor - " . ($applyFixes ? "safe fix mode" : "read-only code scan + folder self-heal") . " \n",
-        "1;42;97"
-    );
-    echo "\n";
+    MyStackTui::header('Framework Doctor  •  ' . ($applyFixes ? 'safe repair mode' : 'read-only diagnosis'));
+    MyStackTui::section('Code and filesystem scan');
 
     $totalScanned = 0;
     $totalIssues = 0;
@@ -1555,12 +2691,11 @@ function runDoctor(array $dirPaths, bool $applyFixes = false): bool {
         }
     }
 
-    echo "\n";
-    printColor(" Doctor Report \n", "1;44;97");
-    echo "  Files scanned: {$totalScanned}\n";
-    echo "  Files with issues: {$totalIssues}\n";
-    echo "  Files safely fixed: {$totalFixed}\n";
-    echo "  Syntax errors: {$syntaxErrors}\n\n";
+    MyStackTui::section('Doctor summary');
+    MyStackTui::badge('SCANNED', (string) $totalScanned, '1;46;30', '◆');
+    MyStackTui::badge('ISSUES', (string) $totalIssues, $totalIssues === 0 ? '1;42;30' : '1;43;30', $totalIssues === 0 ? '+' : '!');
+    MyStackTui::badge('FIXED', (string) $totalFixed, '1;45;97', '~');
+    MyStackTui::badge('SYNTAX', $syntaxErrors === 0 ? 'Clean' : (string) $syntaxErrors, $syntaxErrors === 0 ? '1;42;30' : '1;41;97', $syntaxErrors === 0 ? '+' : 'x');
 
     $folderState = $GLOBALS['folderMapReport']
         ?? MyStackBrain::ensureFolderMap(ROOT_DIR, true);
@@ -1576,9 +2711,8 @@ function runDoctor(array $dirPaths, bool $applyFixes = false): bool {
 }
 
 function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): bool {
-    echo "\n";
-    printColor(" {$reportTitle} \n", "1;44;97");
-    echo "\n";
+    MyStackTui::header($reportTitle . '  •  deterministic framework verification');
+    MyStackTui::section('Verification checks');
 
     $passed = 0;
     $failed = 0;
@@ -1809,7 +2943,9 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         'encryption_key' => 'mystack-audit-authenticator-key-0123456789',
         'recovery_codes' => 2,
     ]);
-    $authenticatorAccount = 'mystack-audit-authenticator';
+    // A unique audit identity prevents a previous interrupted run's replay marker
+    // from affecting this isolated lifecycle verification.
+    $authenticatorAccount = 'mystack-audit-authenticator-' . bin2hex(random_bytes(6));
     PHTP::disable($authenticatorAccount, null, true);
     $authenticatorEnroll = !empty($authenticatorConfigured['status'])
         ? PHTP::enroll($authenticatorAccount)
@@ -2420,7 +3556,14 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             && ($updatePolicy['deletes_local_files'] ?? true) === false
             && in_array('library/*', $updatePolicy['paths'] ?? [], true)
             && in_array('src/js/*', $updatePolicy['paths'] ?? [], true)
-            && count($updatePolicy['root_files'] ?? []) === 5
+            && in_array('docs/*', $updatePolicy['paths'] ?? [], true)
+            && count($updatePolicy['root_files'] ?? []) === 13
+            && in_array('.htaccess', $updatePolicy['root_files'] ?? [], true)
+            && in_array('LICENSE', $updatePolicy['root_files'] ?? [], true)
+            && in_array('NOTICE', $updatePolicy['root_files'] ?? [], true)
+            && in_array('CONTRIBUTING.md', $updatePolicy['root_files'] ?? [], true)
+            && in_array('.github/CODEOWNERS', $updatePolicy['root_files'] ?? [], true)
+            && in_array('.github/workflows/docs.yml', $updatePolicy['root_files'] ?? [], true)
             && MyStackBrain::suggestCommand('updat') === 'update'
             && str_contains($updaterSource, 'codeload.github.com/')
             && str_contains($updaterSource, 'ZipArchive')
@@ -2430,7 +3573,7 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         'SHA-256/byte diff, strict allowlist, confirmation, staging, smoke and rollback'
     );
 
-    $documentationFiles = ['README.md', 'MANUAL_BN.md', 'AGENTS.md', 'LICENSE'];
+    $documentationFiles = ['README.md', 'MANUAL_BN.md', 'AGENTS.md', 'CONTRIBUTING.md', 'LICENSE', 'NOTICE'];
     $documentation = [];
     $documentationHealthy = true;
     foreach ($documentationFiles as $documentationFile) {
@@ -2459,24 +3602,122 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             break;
         }
     }
+    $manualApiClasses = ['DIR', 'Importer', ...$manualLibraries];
+    foreach ($manualApiClasses as $manualApiClass) {
+        if (!class_exists($manualApiClass, false)) {
+            $documentationHealthy = false;
+            break;
+        }
+        $reflection = new ReflectionClass($manualApiClass);
+        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+            if ($method->getDeclaringClass()->getName() !== $manualApiClass || $method->isConstructor()) {
+                continue;
+            }
+            if (!str_contains($manual, $method->getName())) {
+                $documentationHealthy = false;
+                break 2;
+            }
+        }
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            if ($property->getDeclaringClass()->getName() === $manualApiClass
+                && !str_contains($manual, '$' . $property->getName())) {
+                $documentationHealthy = false;
+                break 2;
+            }
+        }
+    }
     $readme = $documentation['README.md'] ?? '';
     $agents = $documentation['AGENTS.md'] ?? '';
     $license = $documentation['LICENSE'] ?? '';
+    $notice = $documentation['NOTICE'] ?? '';
+    $contributing = $documentation['CONTRIBUTING.md'] ?? '';
     $documentationHealthy = $documentationHealthy
         && strlen($readme) > 8000
-        && strlen($manual) > 30000
+        && strlen($manual) > 70000
         && strlen($agents) > 12000
+        && preg_match_all('/^#### 17\.2\.\d+\s+`/m', $manual) === 31
+        && preg_match('/\b(?:edu_sys|school\s*\/\s*college|school\s+erp)\b/i', $readme . "\n" . $manual . "\n" . $agents) !== 1
         && str_contains($readme, 'MyStack does not automatically depend on `.env`, `APP_ENV`, or `APP_DEBUG`')
         && str_contains($manual, 'src/js/PHJS-min.php')
         && str_contains($manual, 'php mystack update --check')
         && str_contains($agents, 'PHJS is self-contained')
         && !str_contains($agents, 'Frontend reactivity relies on `src/js/phjs.js` and Alpine/HTMX')
-        && str_contains($license, 'MIT License')
-        && str_contains($license, 'THE SOFTWARE IS PROVIDED "AS IS"');
+        && str_contains($license, 'Apache License')
+        && str_contains($license, 'Version 2.0, January 2004')
+        && str_contains($license, 'Copyright 2026 Sakibur Rahman (sakibweb)')
+        && str_contains($license, 'Trademarks.')
+        && str_contains($license, 'Disclaimer of Warranty')
+        && str_contains($notice, 'Official repository: https://github.com/mystack-framework/mystack')
+        && str_contains($notice, 'Modified distributions must clearly identify their own')
+        && str_contains($contributing, 'Public contributors do not receive direct write');
     $check(
         'Framework documentation integrity',
         $documentationHealthy,
-        'UTF-8, balanced examples, 30-library catalog, current PHJS/config/CLI guidance and MIT text'
+        'UTF-8, framework-only content, 31 detailed API sections, Apache-2.0, NOTICE and contribution governance'
+    );
+
+    $aiDocumentation = MyStackDocs::check();
+    $check(
+        'AI-discoverable source documentation',
+        !empty($aiDocumentation['status'])
+            && ($aiDocumentation['libraries'] ?? 0) === 31
+            && ($aiDocumentation['public_methods'] ?? 0) > 500
+            && is_file(ROOT_DIR . '/llms.txt')
+            && is_file(ROOT_DIR . '/llms-full.txt')
+            && is_file(ROOT_DIR . '/docs/index.html')
+            && !is_file(ROOT_DIR . '/robots.txt')
+            && !is_file(ROOT_DIR . '/sitemap.xml')
+            && str_contains((string) file_get_contents(ROOT_DIR . '/library/PHRO.php'), 'self::get("/robots.txt"')
+            && str_contains((string) file_get_contents(ROOT_DIR . '/library/PHRO.php'), 'self::get("/sitemap.xml"'),
+        ($aiDocumentation['public_methods'] ?? 0) . ' source-indexed public methods, portal, llms and machine API catalog'
+    );
+
+    $registeredConsoleCommands = [];
+    foreach (MyStackConsoleKernel::commands() as $consoleGroup) {
+        foreach (array_keys($consoleGroup) as $signature) $registeredConsoleCommands[] = strtok($signature, ' ');
+    }
+    $requiredConsoleCommands = [
+        'list', 'about', 'cli:install', 'cli:status', 'route:list', 'library:check', 'make:command', 'make:crud',
+        'make:migration', 'migrate', 'migrate:rollback', 'db:seed', 'queue:push',
+        'queue:work', 'schedule:add', 'schedule:run', 'monitor:status', 'docs:build', 'docs:check', 'test',
+    ];
+    $check(
+        'Extensible console kernel registry',
+        array_diff($requiredConsoleCommands, $registeredConsoleCommands) === []
+            && method_exists(MyStackConsoleKernel::class, 'run')
+            && method_exists(MyStackConsoleKernel::class, 'help'),
+        count(array_unique($registeredConsoleCommands)) . ' registered command names with legacy dispatch preserved'
+    );
+
+    $cliSource = (string) file_get_contents(__FILE__);
+    $check(
+        'Queue, scheduler and migration safety contract',
+        str_contains($cliSource, '/.mystack')
+            && str_contains($cliSource, 'PRAGMA journal_mode=WAL')
+            && str_contains($cliSource, 'BEGIN IMMEDIATE')
+            && str_contains($cliSource, 'MyStackConsoleKernel::confirm')
+            && str_contains($cliSource, 'CREATE TABLE IF NOT EXISTS migrations'),
+        'private local SQLite, WAL, atomic reservation, tracked migrations and confirmation gates'
+    );
+
+    $windowsCmd = ROOT_DIR . '/mystack.cmd';
+    $rootAccessGuard = (string) file_get_contents(ROOT_DIR . '/.htaccess');
+    $check(
+        'Cross-platform CLI launcher and adaptive TUI',
+        is_file($windowsCmd)
+            && str_starts_with((string) file_get_contents(__FILE__), '#!/usr/bin/env php')
+            && str_contains((string) file_get_contents($windowsCmd), '%~dp0mystack')
+            && str_contains($rootAccessGuard, 'mystack(?:\\.cmd)?')
+            && str_contains($rootAccessGuard, 'AGENTS\\.md|CONTRIBUTING\\.md|MANUAL_BN\\.md|README\\.md|LICENSE|NOTICE')
+            && str_contains($rootAccessGuard, 'RewriteRule ^\\..*$ - [F,L]')
+            && str_contains($rootAccessGuard, '^(?!index\\.php$).*\\.php$')
+            && str_contains($rootAccessGuard, '\\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml)')
+            && str_contains($rootAccessGuard, 'Require all denied')
+            && str_contains($cliSource, 'NO_COLOR')
+            && !defined(MyStackConsoleKernel::class . '::VERSION')
+            && preg_match('/MyStack Intelligent CLI \\x28v[0-9]/', $cliSource) !== 1
+            && str_contains($cliSource, 'function progress'),
+        'Unix shebang, Windows CMD/PowerShell-compatible shim, HTTP-denied CLI files, JSON-safe color control and progress UI'
     );
 
     $intelligence = MyStackBrain::analyze(
@@ -2508,11 +3749,11 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         }
     }
 
+    MyStackTui::section($reportTitle . ' summary');
+    MyStackTui::badge('PASSED', (string) $passed, '1;42;30', '+');
+    MyStackTui::badge('FAILED', (string) $failed, $failed === 0 ? '1;42;30' : '1;41;97', $failed === 0 ? '+' : 'x');
+    MyStackTui::badge('WARNINGS', (string) $warnings, $warnings === 0 ? '1;46;30' : '1;43;30', $warnings === 0 ? 'i' : '!');
     echo "\n";
-    printColor(" {$reportTitle} Report \n", "1;44;97");
-    echo "  Passed: {$passed}\n";
-    echo "  Failed: {$failed}\n";
-    echo "  Warnings: {$warnings}\n\n";
 
     return $failed === 0;
 }
@@ -2532,8 +3773,19 @@ $command = array_shift($args);
 $name = $args[0] ?? null;
 
 if (!$command || $command === 'help' || $command === '--help' || $command === '-h') {
-    showHelp();
-    exit(0);
+    $helpTarget = $command === 'help' ? ($args[0] ?? null) : null;
+    exit(MyStackConsoleKernel::help(is_string($helpTarget) ? $helpTarget : null));
+}
+
+// The original commands keep their established implementation and output.
+// Every new command is dispatched through the extensible console kernel.
+$legacyCommands = [
+    'make:controller', 'make:model', 'make:middleware', 'make:component', 'make:view',
+    'get:started', 'serve', 'cache:clear', 'update', 'doctor', 'audit', 'smoke',
+];
+if (!in_array((string) $command, $legacyCommands, true)
+    && MyStackConsoleKernel::supports((string) $command)) {
+    exit(MyStackConsoleKernel::run((string) $command, $args));
 }
 
 // Context-aware name formatting is applied only to generator commands.

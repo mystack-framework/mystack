@@ -1,0 +1,108 @@
+# MyStack Framework
+
+> Official repository: https://github.com/mystack-framework/mystack
+> Documentation: https://mystack-framework.github.io/mystack/
+> License: Apache-2.0
+
+MyStack is a zero-Composer PHP full-stack framework. Executable code in library/, src/js/PHJS-min.php and mystack is authoritative. Never invent APIs; verify exact signatures.
+
+## Canonical resources
+- AGENTS.md: agent contract
+- README.md: overview
+- MANUAL_BN.md: detailed Bangla manual
+- docs/api.json: machine API catalog
+
+## Source API map
+
+### PHAI — library/PHAI.php
+27 public methods: setAccounts, setPriority, setModels, setTimeout, getModels, registerBridgeProcess, getBridgeProcess, cleanup, serve, clusterAPI, cluster, getInstance, routes, tool, prompt, resource, resourceTemplate, alias, middleware, handleRequest, bridge, __construct, middleware, retries, …
+
+### PHAP — library/PHAP.php
+18 public methods: api, all, get, add, up, rm, run, input, resource, ok, fail, valid, page, auth, send, item, collection, clean
+
+### PHAU — library/PHAU.php
+8 public methods: identityLib, make, check, verifyMake, verifyCheck, socialProviders, socialUrl, listenCallback
+
+### PHCD — library/PHCD.php
+3 public methods: initialize, handleRequest, get
+
+### PHCO — library/PHCO.php
+13 public methods: isSecure, path, pre, add, update, remove, get, exists, expired, active, getExpiredDetails, makeExpired, getAll
+
+### PHCS — library/PHCS.php
+13 public methods: __construct, config, HTML, addHtml, CSS, addCss, process, build, registerUtilityHandler, processHtml, processCss, generateCss, buildCss
+
+### PHDB — library/PHDB.php
+42 public methods: error, id, affected, checker, connect, disconnect, query, fast, first, scalar, save, insert, batchInsert, update, delete, select, find, specificSelect, getValue, getSpecificValue, addDB, createTable, dropTable, alterTable, …
+
+### PHDE — library/PHDE.php
+14 public methods: __construct, enableErrorReporting, disableErrorReporting, customErrorHandler, debug, isDebug, errors, errorJSON, getType, displayErrors, api, apibar, file, memory
+
+### PHED — library/PHED.php
+4 public methods: hide, make, score, key
+
+### PHEM — library/PHEM.php
+13 public methods: smtp, imap, pop, smtpLogin, imapLogin, popLogin, smtpGet, imapSend, popSend, imapGet, popGet, smtpSend, showLog
+
+### PHEV — library/PHEV.php
+19 public methods: allowWebWorker, initialize, start, restart, stop, running, clients, debugClients, getHandler, handler, message, broadcast, disconnect, initHeaders, sendSE, setRetry, stream, streamUInew, streamUI
+
+### PHFY — library/PHFY.php
+8 public methods: configure, config, send, clientConfig, webPushCapability, cryptoCapability, registerRoutes, privateFeed
+
+### PHJC — library/PHJC.php
+46 public methods: fastUI, ui, icon, slot, layout, clearCache, view, includeView, startLoop, currentLoop, endLoop, share, directive, minify, metaPreset, breadcrumb, reset, head, buildHead, newHTML, singleHTML, mergeHTML, p2j, h2p, …
+
+### PHJS — library/PHJS.php
+155 public methods: __construct, code, __toString, assets, js, __callStatic, render, parse, alpineData, alpineStore, alpineBind, el, refs, store, watch, dispatch, nextTick, root, data, id, state_magic, params_magic, route_magic, ui_magic, …
+
+### PHJT — library/PHJT.php
+5 public methods: key, rotate, algorithm, create, verify
+
+### PHLS — library/PHLS.php
+20 public methods: disconnect, setFile, checker, add, addIfAbsent, update, remove, expire, expireAllExpired, isExpired, getExpiredDetails, getActiveDetails, limitizer, get, getAll, remember, increment, decrement, flushByTag, removeAll
+
+### PHML — library/PHML.php
+25 public methods: share, partial, layout, block, yieldBlock, component, hasComponent, getFlatAttrMap, render, __callStatic, __construct, __toString, init, autoAssets, meta, title, js, css, uiConfig, head, footer, html, body, clearCache, …
+
+### PHMO — library/PHMO.php
+12 public methods: configure, config, requestId, traceId, isProbeRequest, registerRoutes, dashboard, report, health, metrics, log, finishRequest
+
+### PHOB — library/PHOB.php
+3 public methods: capability, build, deviceID
+
+### PHOP — library/PHOP.php
+4 public methods: img, video, zip, text
+
+### PHPA — library/PHPA.php
+153 public methods: setKeys, setLogic, charge, verify, setLogic, setRefundLogic, setWebhookLogic, setTransport, timeout, expect, setKeys, sandbox, capabilities, refund, webhook, setKeys, configure, sandbox, setTransport, create, track, rate, cancel, label, …
+
+### PHQR — library/PHQR.php
+85 public methods: make, __construct, getTypeNumber, setTypeNumber, getErrorCorrectLevel, setErrorCorrectLevel, addData, clearData, addDataImpl, getDataCount, getData, isDark, getModuleCount, hex2rgb, make, getBestMaskPattern, createNullArray, makeImpl, mapData, setupPositionAdjustPattern, setupPositionProbePattern, setupTimingPattern, setupTypeNumber, setupTypeInfo, …
+
+### PHRO — library/PHRO.php
+80 public methods: __construct, inspect, __construct, addShield, getShield, removeShield, protect, block, inspect, inspect, inspect, inspect, inspect, checkAndIncrementAttempt, performAttemptReset, inspect, inspect, inspect, inspect, inspect, __construct, authorize, worker, listen, …
+
+### PHRQ — library/PHRQ.php
+8 public methods: php, js, header, cross, status, file, livemap, stream
+
+### PHSE — library/PHSE.php
+11 public methods: start, add, update, remove, get, isActive, expireAll, removeAll, regenerateId, getAll, getExpiryTime
+
+### PHTM — library/PHTM.php
+9 public methods: setZone, getZone, getTime, setTime, calculate, modify, format, to12h, to24h
+
+### PHTP — library/PHTP.php
+11 public methods: configure, key, code, verify, url, enroll, confirm, authenticate, status, recovery, disable
+
+### PHTR — library/PHTR.php
+4 public methods: translate, auto, buildUrl, parseResponse
+
+### PHUI — library/PHUI.php
+17 public methods: ui, element, section, layout, page, exists, register, registerMany, alias, search, categories, count, attributes, check, render, boot, catalog
+
+### PHVD — library/PHVD.php
+3 public methods: unique, exists, check
+
+### library — library/library.php
+11 public methods: initialize, path, link, raw, secureRequire, getRootDir, getBaseUrl, getInstance, setContext, clearContext, load
