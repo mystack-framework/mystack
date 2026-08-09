@@ -27,11 +27,26 @@
   RewriteCond %{REQUEST_URI}::$1 ^(/.+)/(.*)::\2$
   RewriteRule ^(.*) - [E=BASE:%1]
   RewriteRule ^\..*$ - [F,L]
+  RewriteRule ^(?:app|component|library)(?:/|$) - [F,L,NC]
+  RewriteRule ^src/(?:cache/.*\.php|js/.*\.php)$ - [F,L,NC]
+  # CLI source/launchers and framework metadata are local-only. Keep this
+  # explicit rule in addition to FilesMatch for Apache/LiteSpeed portability.
+  RewriteRule ^(?:database\.php|database_schema\.sql|AGENTS\.md|CONTRIBUTING\.md|MANUAL_BN\.md|README\.md|LICENSE|NOTICE|mystack(?:\.cmd)?)$ - [F,L,NC]
+  RewriteRule ^favicon\.ico$ favicon.svg [L,NC]
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
   RewriteRule . %{ENV:BASE}/index.php [QSA,L]
 </IfModule>
-<FilesMatch "(^\..*|composer\.(json|lock)|\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml|md)$|^mystack$|mystack\.)">
+<FilesMatch "(^\..*|^(?!index\.php$).*\.php$|composer\.(json|lock)|\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml)$|^(?:AGENTS\.md|CONTRIBUTING\.md|MANUAL_BN\.md|README\.md|LICENSE|NOTICE|mystack(?:\.cmd)?)$|mystack\.)">
     Require all denied
 </FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    <FilesMatch "^favicon\.svg$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
