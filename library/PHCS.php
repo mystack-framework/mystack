@@ -2,29 +2,29 @@
 
 /**
  * ============================================================================
- * Class: PHCS (PHP Hypertext CSS System - Tailwind Engine)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHCS
+ * Title: CSS Processing Engine
  * ============================================================================
  * 
- * PHCS is an incredibly fast, on-the-fly, Tailwind-like utility-first CSS 
- * generator running entirely natively in PHP. It eliminates the need for Node.js, 
- * Webpack, or any build steps during development.
- *
+ * PHP-native utility CSS processing and build engine. Eliminates the need for Node.js dependencies by dynamically compiling, minifying, and optimizing CSS classes on the fly.
+ * 
  * Features:
- * - Scans HTML/PHML for utility classes and compiles optimal CSS on runtime.
- * - Dynamic generation of colors, spacing, borders, shadows, and pseudo-variants 
- *   (hover:, focus:, dark:, md:).
- * - Built-in support for Glassmorphism, Mesh Gradients, and Custom Keyframes.
- * - Micro-caching engine to ensure blazing fast page load times.
+ * - PHP-native utility-first CSS compilation.
+ * - Dynamic class discovery and generation.
+ * - Zero Node.js dependency build engine.
+ * - Built-in minification and caching.
  * 
  * Usage Example:
  * ```php
- * // Simply use Tailwind classes in your HTML or PHML code:
- * <div class="bg-gradient-to-r from-red-500 to-blue-500 hover:scale-105 p-6 rounded-xl">
- *     MyStack is Awesome!
- * </div>
- * // PHCS will automatically inject the corresponding CSS into the <head>
+ * PHCS::build(); // Normally handled by the framework lifecycle
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

@@ -3,11 +3,30 @@
 /**
  * ============================================================================
  * Class: PHDE
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Debug & Environment Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Controls debug states, centralized error handling, API error formatting, memory limits, and powers the comprehensive MyStack API Bar for real-time observability.
+ * 
+ * Features:
+ * - Debug state toggling and environment configuration.
+ * - Advanced error handling and stack trace rendering.
+ * - Memory limit and execution time controls.
+ * - Interactive debug API Bar for developers.
+ * 
+ * Usage Example:
+ * ```php
+ * PHDE::debug(true);
+ * PHDE::memory('512M');
+ * PHDE::logError($exception);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

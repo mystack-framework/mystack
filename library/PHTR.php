@@ -3,11 +3,29 @@
 /**
  * ============================================================================
  * Class: PHTR
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Translation & Localization Provider
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Manages translation provider requests, response parsing, and language dictionaries to support fully multilingual MyStack applications.
+ * 
+ * Features:
+ * - Language dictionary management.
+ * - Dynamic string translation and interpolation.
+ * - External translation provider integrations.
+ * - Fallback language support.
+ * 
+ * Usage Example:
+ * ```php
+ * PHTR::setLocale('bn');
+ * echo PHTR::get('messages.welcome', ['name' => 'Sakib']);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

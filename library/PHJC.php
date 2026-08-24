@@ -3,11 +3,29 @@
 /**
  * ============================================================================
  * Class: PHJC
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Component & View Compiler
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * The core view rendering engine. Manages view and page composition, HTML/JS interpolation, slots, layouts, metadata injection, and the compiled component cache.
+ * 
+ * Features:
+ * - View and page composition with layouts.
+ * - Component slots and partials rendering.
+ * - Head/metadata injection and asset management.
+ * - High-performance compiled component caching.
+ * 
+ * Usage Example:
+ * ```php
+ * import('component:HomeView');
+ * // Inside view: <?= PHJC::slot('content') ?>;
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

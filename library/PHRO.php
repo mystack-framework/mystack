@@ -2,31 +2,31 @@
 
 /**
  * ============================================================================
- * Class: PHRO (PHP Router & Web Application Firewall)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHRO
+ * Title: Router & Web Application Firewall (WAF)
  * ============================================================================
  * 
- * PHRO is a highly powerful, zero-dependency Routing Engine equipped with a 
- * military-grade Web Application Firewall (WAF) designed to protect MyStack 
- * applications against XSS, SQLi, CSRF, DDoS, and other malicious attacks.
- *
+ * Highly powerful, zero-dependency Routing Engine equipped with a military-grade Web Application Firewall (WAF). Protects against XSS, SQLi, CSRF, DDoS, and other attacks.
+ * 
  * Features:
- * - Dynamic RESTful Routing (GET, POST, PUT, DELETE, PATCH, ANY).
- * - Multi-layered Middleware Support (Controllers, Callbacks).
- * - Comprehensive Protection: Rate Limiting, Open Redirect Shields, Honeypots.
- * - Footprint tracking and dynamic Content-Type validations.
+ * - Dynamic RESTful Routing (GET, POST, PUT, DELETE, etc.).
+ * - Multi-layered Middleware Support.
+ * - Comprehensive WAF: Rate Limiting, Open Redirect Shields, Honeypots.
+ * - Cross-Site Request Forgery (CSRF) protection.
  * 
  * Usage Example:
  * ```php
- * // Basic Route
- * PHRO::get('/home', [HomeController::class, 'index']);
- * 
- * // Route with Middleware
- * PHRO::add('POST', '/api/data', 'ApiHandler::save', ['AuthMiddleware']);
- * 
- * // Enable Global Firewall Protection
- * PHRO::guard();
+ * PHRO::get('/', [HomeController::class, 'index']);
+ * PHRO::guard(); // Enables Global Firewall
+ * PHRO::listen();
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

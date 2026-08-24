@@ -1,8 +1,30 @@
 <?php
 
 /**
- * PHFY - lightweight ntfy.sh notification bridge.
- * Public topics are consumed directly by PHJS; private topics are relayed by PHP.
+ * ============================================================================
+ * Class: PHFY
+ * Title: Notifications & Subscriptions
+ * ============================================================================
+ * 
+ * Handles advanced notifications including ntfy public/private topics, PHLS-backed subscriptions, VAPID/Web Push notifications, and PHJS client integration.
+ * 
+ * Features:
+ * - ntfy public and private notification delivery.
+ * - VAPID/Web Push notification handling.
+ * - PHLS-backed topic subscriptions.
+ * - Seamless PHJS client configuration.
+ * 
+ * Usage Example:
+ * ```php
+ * PHFY::notify('alerts', 'System deployment completed successfully.');
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 final class PHFY
 {

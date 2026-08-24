@@ -3,11 +3,28 @@
 /**
  * ============================================================================
  * Class: PHQR
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: QR Code Generator
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Memory-safe, high-performance QR code generator. Produces SVG or Data-URI PNG images dynamically without requiring heavy external dependencies.
+ * 
+ * Features:
+ * - Memory-safe QR code generation.
+ * - Outputs to SVG or base64 Data-URI.
+ * - Customizable error correction and styling.
+ * 
+ * Usage Example:
+ * ```php
+ * $qrUri = PHQR::generate('https://mystack-framework.github.io');
+ * echo "<img src='{$qrUri}'>";
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

@@ -3,11 +3,29 @@
 /**
  * ============================================================================
  * Class: PHCO
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Cookie & Path Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Manages secure, project-scoped cookies, resolves base paths dynamically, and handles namespace prefixes to avoid collisions in multi-tenant environments.
+ * 
+ * Features:
+ * - Secure, HttpOnly, and project-scoped cookie management.
+ * - Dynamic base path and URL resolution.
+ * - Namespace prefixing for isolated storage.
+ * 
+ * Usage Example:
+ * ```php
+ * $base = PHCO::path();
+ * PHCO::set('theme', 'dark', 3600);
+ * $theme = PHCO::get('theme');
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

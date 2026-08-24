@@ -3,11 +3,28 @@
 /**
  * ============================================================================
  * Class: PHOP
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Media & File Processor
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Versatile helpers for image manipulation, video handling, ZIP archive creation/extraction, and advanced text processing workflows.
+ * 
+ * Features:
+ * - Image resizing, cropping, and optimization.
+ * - ZIP archive creation and extraction.
+ * - Text processing and formatting helpers.
+ * 
+ * Usage Example:
+ * ```php
+ * PHOP::resize('uploads/avatar.png', 200, 200);
+ * PHOP::zip('archive.zip', ['file1.txt', 'file2.jpg']);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

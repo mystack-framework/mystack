@@ -2,31 +2,30 @@
 
 /**
  * ============================================================================
- * Class: PHAI (PHP Artificial Intelligence Engine & MCP Server)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHAI
+ * Title: AI & Agent Bridge
  * ============================================================================
  * 
- * PHAI is the ultimate Intelligence Engine tailored for the MyStack framework.
- * It provides seamless integration with 31+ major AI providers and functions 
- * as a Model Context Protocol (MCP) server.
- *
+ * Advanced AI provider bridge for MyStack. Facilitates AI clustering, seamless integration with MCP servers, tool execution, prompts management, resources handling, and guarded remote bridge access.
+ * 
  * Features:
- * - Auto-Configured connections to OpenAI, Gemini, Groq, Anthropic, DeepSeek, etc.
- * - Universal Handlers (Raw Data, Closures, Strings, Arrays, Objects).
- * - Automatic Tool creation, function calling, and self-correction.
- * - Intelligent Memory Management and robust Resource Templates.
+ * - AI provider integration and clustering.
+ * - Guarded remote bridge and secure API communication.
+ * - Built-in MCP (Model Context Protocol) server support.
+ * - Tools, prompts, and resources management.
  * 
  * Usage Example:
  * ```php
- * // Setup provider
- * PHAI::accounts(['gemini' => ['key' => 'YOUR_API_KEY']]);
- * 
- * // Send a basic prompt
- * $response = PHAI::gemini()->ask("Write a PHP function to calculate factorial.");
- * 
- * // Expose an internal tool to the AI
- * PHAI::tool('get_user_data', 'Gets user info', ['id' => 'int'], fn($id) => PHDB::find('users', $id));
+ * $response = PHAI::prompt('Generate a summary', $context);
+ * PHAI::registerTool('search', 'Search the web');
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

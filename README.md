@@ -290,7 +290,7 @@ Both invocation styles are supported: `php mystack ...` always works when PHP is
 
 Interactive output uses the adaptive MyStack TUI: ASCII brand header, semantic status badges, framed comparisons and real operation-stage progress. `update --check` focuses on changed files and summarizes unchanged files; add `--verbose` to display the complete comparison.
 
-The updater reads the rolling official GitHub `main` branch rather than Releases or versions, compares SHA-256 and exact bytes, and allows only `library/*`, `src/js/*`, `docs/*`, the two `llms` files, framework governance/documentation files, `.htaccess`, the Pages workflow, and CLI launchers. It asks before applying, stages and validates every change, runs smoke tests, and rolls back on failure. The root access guard explicitly denies HTTP access to private framework PHP/metadata and both CLI files. The updater never removes unmatched local files merely because they are absent upstream.
+The updater reads the rolling official GitHub `main` branch rather than Releases or versions, compares SHA-256 and exact bytes, and allows only `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, the two `llms` files, framework governance/documentation files, `.htaccess`, the Pages workflow, and CLI launchers. VSIX files receive nested ZIP/path/manifest validation. It asks before applying, stages and validates every change, runs smoke tests, and rolls back on failure. The root access guard explicitly denies HTTP access to private framework PHP/metadata, extension development files and both CLI files. The updater never removes unmatched local files merely because they are absent upstream.
 
 ## Verification
 

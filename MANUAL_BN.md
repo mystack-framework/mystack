@@ -206,7 +206,7 @@ $debug = PHDE::isDebug();
 
 Interactive mode-এ ASCII MyStack header, semantic INFO/SUCCESS/WARNING/ERROR badge, framed comparison এবং বাস্তব operation-stage progress দেখায়। `update --check` defaultভাবে changed file-এ focus করে এবং unchanged count দেখায়; সব file দেখতে `--verbose` দিন।
 
-Updater Release/version ব্যবহার করে না। এটি official rolling `main` snapshot থেকে `library/*`, `src/js/*`, `docs/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, `mystack.cmd` file-by-file নেয়। Root `.htaccess` private framework metadata ও CLI file-এর HTTP access deny করে। Stage, hash, text/PHP/JS validation এবং smoke pass না হলে rollback করে; upstream-এ অনুপস্থিত বলে local file delete করে না।
+Updater Release/version ব্যবহার করে না। এটি official rolling `main` snapshot থেকে `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, `mystack.cmd` file-by-file নেয়। VSIX package-এ ZIP path ও required extension manifest verify করা হয়। Root `.htaccess` private framework metadata, extension development files ও CLI file-এর HTTP access deny করে। Stage, hash, text/PHP/JS/VSIX validation এবং smoke pass না হলে rollback করে; upstream-এ অনুপস্থিত বলে local file delete করে না।
 
 ### License, ownership ও contribution
 

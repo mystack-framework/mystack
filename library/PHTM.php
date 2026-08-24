@@ -3,11 +3,30 @@
 /**
  * ============================================================================
  * Class: PHTM
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Timezone & Date Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Comprehensive utilities for timezone configuration, date parsing, calculations, modifications, and localization formatting.
+ * 
+ * Features:
+ * - Global timezone configuration.
+ * - Date parsing and robust calculations.
+ * - Time modification (add/sub days, months).
+ * - Localized date and time formatting.
+ * 
+ * Usage Example:
+ * ```php
+ * PHTM::setZone('Asia/Dhaka');
+ * $future = PHTM::addDays(PHTM::now(), 7);
+ * echo PHTM::format($future, 'Y-m-d H:i:s');
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

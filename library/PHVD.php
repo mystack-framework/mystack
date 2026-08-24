@@ -3,11 +3,32 @@
 /**
  * ============================================================================
  * Class: PHVD
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Validation Engine
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Powerful input validation engine providing robust, database-aware validation rules to ensure data integrity and security before processing.
+ * 
+ * Features:
+ * - Comprehensive set of built-in validation rules.
+ * - Database-aware rules (e.g., unique, exists).
+ * - Custom validation callbacks and messaging.
+ * - Automatic error formatting.
+ * 
+ * Usage Example:
+ * ```php
+ * $errors = PHVD::check($_POST, [
+ *     'email' => 'required|email|unique:users,email',
+ *     'password' => 'required|min:8'
+ * ]);
+ * if (!empty($errors)) { // Handle errors }
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

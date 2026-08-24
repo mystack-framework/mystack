@@ -1,10 +1,31 @@
 <?php
 
 /**
- * MyStack one-time-password and account-level Authenticator/2FA service.
- *
- * The original key(), code(), verify() and url() APIs remain compatible.
- * The enrollment APIs use PHED authenticated encryption and PHLS storage.
+ * ============================================================================
+ * Class: PHTP
+ * Title: OTP & Authenticator
+ * ============================================================================
+ * 
+ * Provides secure One-Time Password (OTP) and TOTP utilities. Manages account-level Authenticator enrollment, replay protection, and recovery codes.
+ * 
+ * Features:
+ * - TOTP (Time-based One-Time Password) generation.
+ * - Authenticator app enrollment and verification.
+ * - Replay protection and single-use validation.
+ * - Backup/recovery code management.
+ * 
+ * Usage Example:
+ * ```php
+ * $secret = PHTP::generateSecret();
+ * $isValid = PHTP::verify($userInput, $secret);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 class PHTP
 {

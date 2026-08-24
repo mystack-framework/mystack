@@ -27,6 +27,7 @@ Never invent a method, configuration key, provider capability, or runtime depend
 | `.mystack/` | Private PHLS/PHMO runtime state and structured logs | Never expose publicly or commit runtime data. Keep its access guard intact. |
 | `mystack`, `mystack.cmd` | Extensible console kernel plus portable Unix/Windows launcher | Preserve `php mystack`, direct `mystack`, original commands, executable PHP syntax and smoke coverage. |
 | `docs/`, `llms.txt`, `llms-full.txt` | Source-generated human and AI documentation, API catalog and static portal | Regenerate with `mystack docs:build`; do not hand-edit generated API files. |
+| `mystack-extension-main/` | Official VS Code helper source, generated stubs/snippets and packaged VSIX | Keep source-derived metadata, package validation, workspace trust and traversal guards green. |
 
 `app/` and `component/` intentionally use a flat layout. Framework-owned runtime folders may have their own internal structure.
 
@@ -267,7 +268,7 @@ php mystack update --check
 - Queue and scheduler state in `.mystack/console.sqlite` is private, WAL-backed, atomic local single-host state. It is not a distributed queue; long-running workers require an external process supervisor.
 - Destructive CLI operations such as rollback, cache pruning, queue flush/forget and schedule removal must retain confirmation/`--yes` gates.
 - `update` compares the official GitHub `main` branch by SHA-256/exact bytes, prompts before changes, validates staged files, runs smoke, and rolls back on failure.
-- Update scope is strictly limited to `library/*`, `src/js/*`, `docs/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, and `mystack.cmd`. Keep root HTTP denial for private metadata and both CLI files. It never deletes unmatched local files.
+- Update scope is strictly limited to `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, and `mystack.cmd`. VSIX files require ZIP and extension-manifest validation. Keep root HTTP denial for private metadata, extension development files and both CLI files. It never deletes unmatched local files.
 - `docs:build` derives public signatures from current `library/*.php` without executing library code. `docs:check` and smoke reject stale API catalogs. Keep the portal, API JSON, `llms` files and per-library references synchronized.
 - The Pages workflow publishes only `docs/`. Keep root and `docs/` copies of both `llms` files synchronized. Do not generate static `robots.txt` or `sitemap.xml`; PHRO provides those routes dynamically.
 - MyStack follows the rolling official `main` branch and has no fixed framework version. Do not invent, display or document a MyStack release/version number.

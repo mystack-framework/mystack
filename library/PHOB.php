@@ -3,11 +3,30 @@
 /**
  * ============================================================================
  * Class: PHOB
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Browser & Device Observer
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Parses User-Agent strings and network data to provide browser capabilities, device types, operating systems, and identity helpers.
+ * 
+ * Features:
+ * - Device type detection (Mobile, Tablet, Desktop).
+ * - Browser and OS capability parsing.
+ * - Identity and fingerprinting helpers.
+ * 
+ * Usage Example:
+ * ```php
+ * if (PHOB::isMobile()) {
+ *     // Serve mobile-optimized layout
+ * }
+ * $os = PHOB::os();
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

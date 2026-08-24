@@ -2,36 +2,32 @@
 
 /**
  * ============================================================================
- * Class: PHUI (PHP User Interface & Design Universe)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHUI
+ * Title: UI Element Catalog
  * ============================================================================
  * 
- * PHUI is a revolutionary, world-class A-Z component-based UI design system 
- * for the MyStack framework. It natively replaces complex templating engines 
- * (like Blade or Twig) and supports over 7000+ hyper-fidelity components.
- *
+ * Extensive catalog of registered UI elements, sections, layouts, pages, and placeholders. Enables rapid, consistent, and beautiful interface development.
+ * 
  * Features:
- * - Pure PHP Component Rendering with zero third-party dependencies.
- * - Anti-Recursion Crash Guards (Death-Loop protection up to 32 depth).
- * - Full integration with Tailwind CSS via PHCS and UI interactivity via PHJS.
- * - Placeholder Alias engine (`{{key|Default}}`) for dynamic slot injection.
+ * - Registered UI element generation.
+ * - Semantic, responsive, and accessible markup.
+ * - Support for aliases and placeholders (`{{key|Default}}`).
+ * - Theme-safe component structures.
  * 
  * Usage Example:
  * ```php
- * // Render a standard HTML element with attributes
- * echo PHUI::ui('html:button', ['class' => 'bg-blue-600 text-white', 'text' => 'Submit']);
- * 
- * // Render a complex, nested pre-built UI block
- * echo PHUI::ui('section:hero', ['title' => 'Welcome to MyStack', 'subtitle' => 'The Future of PHP']);
- *
- * // Semantic kit API with Tailwind, PHJS/app.js and HTMX integration
  * echo PHUI::element('button:primary', [
- *     'slot' => 'Save',
- *     'class' => 'w-full shadow-lg',
- *     'phjs' => ['click' => 'toast "Saved"'],
- *     'htmx' => ['post' => '/save', 'target' => '#result'],
+ *     'slot' => 'Save Changes',
+ *     'class' => 'w-full md:w-auto'
  * ]);
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

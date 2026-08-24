@@ -2,31 +2,30 @@
 
 /**
  * ============================================================================
- * Class: PHML (PHP Markup Language Builder)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHML
+ * Title: Markup & Layout DSL
  * ============================================================================
  * 
- * PHML is an elegant, pure PHP alternative to HTML. It enables developers to 
- * construct complex, nested HTML DOM structures using an intuitive Object-Oriented 
- * Builder and a clean Domain Specific Language (DSL).
- *
+ * Advanced HTML Markup DSL for crafting layouts, partials, blocks, UI components, and managing head/body tags alongside asset composition.
+ * 
  * Features:
- * - Fluid syntax to create elements, attributes, and text nodes instantly.
- * - Supports aliases and shortcuts for over 130+ standard HTML5 tags.
- * - Prevents dirty string concatenation, ensuring perfectly indented HTML.
- * - Tightly integrated with PHUI for seamless component generation.
+ * - Fluent HTML Markup DSL.
+ * - Layout, block, and partial composition.
+ * - Automated head/body tag management.
+ * - Asset compilation and injection.
  * 
  * Usage Example:
  * ```php
- * // Using the DSL Helper
- * echo phml(<<<DSL
- * div {
- *     class: "bg-white p-4 shadow";
- *     h1 { "Hello World" }
- *     p { "This is rendered via PHML." }
- * }
- * DSL);
+ * echo PHML::block('header', ['title' => 'Dashboard']);
+ * echo PHML::tag('div', 'Content here', ['class' => 'container']);
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

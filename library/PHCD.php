@@ -3,11 +3,28 @@
 /**
  * ============================================================================
  * Class: PHCD
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Client Package & UI Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Handles authorized, atomic client-package installations, updates, and package UI rendering. Safely integrates external dependencies into the framework ecosystem.
+ * 
+ * Features:
+ * - Atomic client-package installation and updates.
+ * - Package UI management.
+ * - Authorized access and integrity checks.
+ * 
+ * Usage Example:
+ * ```php
+ * PHCD::install('vendor/package');
+ * PHCD::updateAll();
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

@@ -2,30 +2,28 @@
 
 /**
  * ============================================================================
- * Class: PHEM (PHP Email Management & Mailer)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHEM
+ * Title: Email Operations Manager
  * ============================================================================
  * 
- * PHEM is a highly secure, lightweight, and native email management library 
- * for the MyStack framework. It natively handles SMTP, IMAP, and POP3 
- * operations without requiring external packages like PHPMailer.
- *
+ * Native SMTP, IMAP, and POP3 mail operations library. Facilitates robust email sending, receiving, and parsing without relying on heavy external mailer libraries.
+ * 
  * Features:
- * - Send rich HTML and text emails via secure SMTP (SSL/TLS).
- * - Read, parse, and download attachments via IMAP & POP3.
- * - Support for multiple recipients, CC, BCC, and file attachments.
- * - Detailed transaction logging for debugging communication protocols.
+ * - Native SMTP sending with TLS/SSL support.
+ * - IMAP/POP3 mailbox reading and parsing.
+ * - HTML email templating and attachments.
  * 
  * Usage Example:
  * ```php
- * // Configure SMTP
- * PHEM::smtp('smtp.example.com', 465, 'ssl');
- * PHEM::smtpLogin('sender@example.com', 'SuperSecretPass');
- * 
- * // Send Email
- * PHEM::to('recipient@example.com', 'John Doe');
- * PHEM::send('Welcome to MyStack!', '<p>Thank you for joining us.</p>');
+ * PHEM::send('user@example.com', 'Welcome!', 'Hello from MyStack');
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

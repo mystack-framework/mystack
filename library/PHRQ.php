@@ -3,11 +3,30 @@
 /**
  * ============================================================================
  * Class: PHRQ
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: HTTP Request Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Manages server-to-server and browser HTTP requests. Handles CORS/CSP policies, response statuses, large file streaming, and powers the Live Map.
+ * 
+ * Features:
+ * - Server-to-server HTTP client (GET, POST, multipart).
+ * - CORS and Content Security Policy (CSP) management.
+ * - Large file streaming and secure output.
+ * - Live Map integration for request tracing.
+ * 
+ * Usage Example:
+ * ```php
+ * $response = PHRQ::get('https://api.example.com/data');
+ * PHRQ::cross(true); // Self-aware cross-origin policy
+ * PHRQ::download('path/to/file.pdf');
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

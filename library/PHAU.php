@@ -2,32 +2,32 @@
 
 /**
  * ============================================================================
- * Class: PHAU (PHP Authentication & Authorization System)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHAU
+ * Title: Authentication & Identity Management
  * ============================================================================
  * 
- * PHAU is the core security layer for managing user identities, sessions, 
- * and permissions in the MyStack framework.
- *
+ * Comprehensive identity creation and verification system. Handles authentication flows, OAuth/OIDC provider integrations, callbacks, and secure user sessions across the application.
+ * 
  * Features:
- * - Secure Session management and JWT token processing.
- * - Password Hashing, Verification, and Identity Management.
- * - Role-Based Access Control (RBAC) validations.
- * - Deeply integrated with PHDB for rapid user lookups.
+ * - Identity creation, login, and secure session management.
+ * - Extensive OAuth/OIDC provider matrix and callbacks.
+ * - Multi-factor authentication integration hooks.
+ * - Role and permission checking.
  * 
  * Usage Example:
  * ```php
- * // Check if user is logged in
- * if (!PHAU::check()) {
- *     PHRO::redirect('/login');
+ * if (PHAU::check()) {
+ *     $user = PHAU::user();
  * }
- * 
- * // Log a user in
- * PHAU::login($userArray);
- * 
- * // Retrieve current user ID
- * $userId = PHAU::id();
+ * PHAU::attempt($email, $password);
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

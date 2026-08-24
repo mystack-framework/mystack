@@ -3,11 +3,28 @@
 /**
  * ============================================================================
  * Class: PHED
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Encryption & Key Management
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Secure, authenticated application encryption engine. Manages key lifecycles and provides foolproof encryption and decryption for sensitive payloads.
+ * 
+ * Features:
+ * - Authenticated symmetric encryption.
+ * - Secure key management and rotation.
+ * - Tamper-proof payload verification.
+ * 
+ * Usage Example:
+ * ```php
+ * $encrypted = PHED::encrypt('sensitive_data');
+ * $decrypted = PHED::decrypt($encrypted);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

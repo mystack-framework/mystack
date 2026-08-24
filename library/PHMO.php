@@ -1,10 +1,31 @@
 <?php
 
 /**
- * PHMO - zero-dependency health and observability support for MyStack.
- *
- * Runtime behaviour is intentionally isolated: dependency checks run only
- * when requested, while normal requests receive IDs and one structured log.
+ * ============================================================================
+ * Class: PHMO
+ * Title: Monitoring & Observability
+ * ============================================================================
+ * 
+ * Enterprise-grade observability tools. Tracks request/trace IDs, generates structured JSON logs, exposes health/ready probes, gathers metrics, and powers the debug dashboard.
+ * 
+ * Features:
+ * - Request and trace ID injection.
+ * - Structured JSON logging for external ingestion.
+ * - Health (`/health`) and Readiness (`/ready`) probes.
+ * - Latency, error metrics, and interactive dashboard.
+ * 
+ * Usage Example:
+ * ```php
+ * PHMO::configure(['enabled' => true]);
+ * PHMO::registerRoutes(); // Exposes /health & /ready
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 final class PHMO
 {

@@ -3,11 +3,29 @@
 /**
  * ============================================================================
  * Class: PHAP
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: API Routes & Resources
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Streamlined library for building robust REST APIs. Offers compact routing, powerful validation, authentication guards, resource formatting, automated pagination, and standardized JSON responses.
+ * 
+ * Features:
+ * - Compact REST API routes definition.
+ * - Built-in validation and authentication.
+ * - Resource transformation and automated pagination.
+ * - Standardized JSON response structures.
+ * 
+ * Usage Example:
+ * ```php
+ * PHAP::get('/api/users', [UserApi::class, 'index']);
+ * PHAP::response(['status' => 'success', 'data' => $users]);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

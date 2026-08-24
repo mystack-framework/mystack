@@ -2,45 +2,30 @@
 
 /**
  * ============================================================================
- * Class: PHPA (PHP Payment Architecture)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHPA
+ * Title: Payment & Courier Gateway
  * ============================================================================
  * 
- * PHPA is a unified, highly extensible, and massive payment gateway integration 
- * architecture natively built for the MyStack framework. It standardizes payment 
- * processing across the globe.
- *
+ * Unified facade for payment gateways and courier services. Features capability-aware adapters, secure webhooks, refunds processing, and shipment tracking.
+ * 
  * Features:
- * - 30 built-in gateway adapters with explicit per-operation capabilities.
- *   - International: Stripe, PayPal, Razorpay, Braintree, Square, Adyen, Mollie.
- *   - Bangladesh (BD): Bkash, Nagad, SSLCommerz, Aamarpay, SurjoPay, Upay.
- *   - Crypto: Binance, Coinbase, CoinPayments, MetaMask, TrustWallet.
- * - Unified interface, strict failure results, precise minor-unit conversion,
- *   timeouts, TLS validation, idempotency helpers, refunds, and signed webhooks.
- * - Dynamic logic injection for private/merchant-specific gateway contracts.
- * - Unified courier facade for 10 Bangladesh and 10 international carriers,
- *   with official auth/environment profiles and configurable contract APIs.
+ * - Unified payment gateway facade (Stripe, PayPal, local gateways).
+ * - Webhook signature verification and idempotency.
+ * - Refunds and transaction management.
+ * - Courier and shipment tracking adapters.
  * 
  * Usage Example:
  * ```php
- * // Configure the gateway
- * PHPA::bkash()->setKeys('APP_KEY', 'APP_SECRET', 'USERNAME', 'PASSWORD')->sandbox(true);
- * 
- * // Charge the customer
- * $payment = PHPA::bkash()->charge(500.00, 'BDT', 'ORDER_1001');
- * 
- * // After the customer callback, execute once, then query safely as needed
- * $executed = PHPA::bkash()->setKeys('APP_KEY', 'APP_SECRET', 'USERNAME', 'PASSWORD')
- *     ->sandbox(true)->execute($payment['transaction_id']);
- * $status = PHPA::bkash()->setKeys('APP_KEY', 'APP_SECRET', 'USERNAME', 'PASSWORD')
- *     ->sandbox(true)->verify($payment['transaction_id']);
- *
- * // Courier payloads follow the selected carrier's official request schema.
- * $shipment = PHPA::courier('steadfast')->setKeys('API_KEY', 'SECRET_KEY')
- *     ->create(['invoice' => 'ORDER_1001', 'recipient_name' => 'Customer',
- *         'recipient_phone' => '01700000000', 'recipient_address' => 'Dhaka',
- *         'cod_amount' => 500]);
+ * PHPA::charge($amount, $currency, $gatewayAdapter);
+ * PHPA::handleWebhook($payload, $signature);
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

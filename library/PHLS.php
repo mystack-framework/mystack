@@ -3,11 +3,30 @@
 /**
  * ============================================================================
  * Class: PHLS
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Local Storage & State Engine
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * SQLite-backed high-speed local state management. Provides atomic counters, TTL expiration, tagging, rate-limiting, corruption recovery, and concurrency locking.
+ * 
+ * Features:
+ * - SQLite-backed atomic state storage.
+ * - Time-To-Live (TTL) and auto-expiration.
+ * - Atomic counters and concurrency locks.
+ * - Rate-limiting and request throttling data.
+ * 
+ * Usage Example:
+ * ```php
+ * PHLS::set('rate_limit_ip', 1, 60); // Expires in 60s
+ * PHLS::increment('page_views');
+ * $views = PHLS::get('page_views');
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

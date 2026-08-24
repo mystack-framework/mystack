@@ -928,7 +928,7 @@ final class MyStackUpdater {
             'repository' => self::OWNER . '/' . self::REPOSITORY,
             'branch' => self::BRANCH,
             'root_files' => self::ROOT_FILES,
-            'paths' => ['library/*', 'src/js/*', 'docs/*'],
+            'paths' => ['library/*', 'src/js/*', 'docs/*', 'mystack-extension-main/*'],
             'deletes_local_files' => false,
             'hash' => 'sha256',
         ];
@@ -1025,7 +1025,7 @@ final class MyStackUpdater {
         if (str_contains($scope, "\0") || preg_match('#(^|/)\.\.(/|$)#', $scope)) {
             throw new InvalidArgumentException('Update scope contains an unsafe path.');
         }
-        if (!self::isAllowedPath($scope) && $scope !== 'library' && $scope !== 'src/js' && $scope !== 'docs') {
+        if (!self::isAllowedPath($scope) && $scope !== 'library' && $scope !== 'src/js' && $scope !== 'docs' && $scope !== 'mystack-extension-main') {
             throw new InvalidArgumentException("Update scope '$scope' is outside the framework update allowlist.");
         }
         return $scope;
@@ -1037,7 +1037,8 @@ final class MyStackUpdater {
         if (in_array($path, self::ROOT_FILES, true)) return true;
         return (str_starts_with($path, 'library/') && strlen($path) > 8)
             || (str_starts_with($path, 'src/js/') && strlen($path) > 7)
-            || (str_starts_with($path, 'docs/') && strlen($path) > 5);
+            || (str_starts_with($path, 'docs/') && strlen($path) > 5)
+            || (str_starts_with($path, 'mystack-extension-main/') && strlen($path) > 23);
     }
 
     private static function matchesScope(string $path, string $scope): bool {
@@ -1226,6 +1227,21 @@ final class MyStackUpdater {
     }
 
     private static function validateTextFile(string $file, string $path): void {
+        if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'vsix') {
+            $archive = new ZipArchive();
+            if ($archive->open($file) !== true) throw new RuntimeException("Remote VSIX '$path' is not a valid ZIP archive.");
+            try {
+                if ($archive->locateName('extension.vsixmanifest', ZipArchive::FL_NOCASE) === false
+                    || $archive->locateName('extension/package.json', ZipArchive::FL_NOCASE) === false) {
+                    throw new RuntimeException("Remote VSIX '$path' is missing required extension manifests.");
+                }
+                for ($index = 0; $index < $archive->numFiles; $index++) {
+                    $name = str_replace('\\', '/', (string) $archive->getNameIndex($index));
+                    if (str_starts_with($name, '/') || preg_match('#(^|/)\.\.(/|$)#', $name)) throw new RuntimeException("Remote VSIX '$path' contains an unsafe entry.");
+                }
+            } finally { $archive->close(); }
+            return;
+        }
         $content = file_get_contents($file);
         if (!is_string($content) || str_contains($content, "\0")) {
             throw new RuntimeException("Remote file '$path' is not a valid text framework file.");
@@ -3557,6 +3573,7 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             && in_array('library/*', $updatePolicy['paths'] ?? [], true)
             && in_array('src/js/*', $updatePolicy['paths'] ?? [], true)
             && in_array('docs/*', $updatePolicy['paths'] ?? [], true)
+            && in_array('mystack-extension-main/*', $updatePolicy['paths'] ?? [], true)
             && count($updatePolicy['root_files'] ?? []) === 13
             && in_array('.htaccess', $updatePolicy['root_files'] ?? [], true)
             && in_array('LICENSE', $updatePolicy['root_files'] ?? [], true)
@@ -3569,6 +3586,7 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             && str_contains($updaterSource, 'ZipArchive')
             && str_contains($updaterSource, 'Post-update verification failed; every changed file was rolled back.')
             && str_contains($updaterSource, 'CURLOPT_SSL_VERIFYPEER')
+            && str_contains($updaterSource, 'extension.vsixmanifest')
             && str_contains($updaterSource, "'--proto', '=https'"),
         'SHA-256/byte diff, strict allowlist, confirmation, staging, smoke and rollback'
     );
@@ -3672,6 +3690,38 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         ($aiDocumentation['public_methods'] ?? 0) . ' source-indexed public methods, portal, llms and machine API catalog'
     );
 
+    $extensionRoot = ROOT_DIR . '/mystack-extension-main';
+    $extensionPackage = is_file($extensionRoot . '/package.json') ? json_decode((string) file_get_contents($extensionRoot . '/package.json'), true) : null;
+    $extensionSnippets = is_file($extensionRoot . '/snippets/snippets.json') ? json_decode((string) file_get_contents($extensionRoot . '/snippets/snippets.json'), true) : null;
+    $extensionSource = is_file($extensionRoot . '/extension.js') ? (string) file_get_contents($extensionRoot . '/extension.js') : '';
+    $extensionStubOk = false;
+    try {
+        $extensionStub = (string) file_get_contents($extensionRoot . '/stubs/mystack-stubs.php');
+        token_get_all($extensionStub, TOKEN_PARSE); $extensionStubOk = true;
+    } catch (Throwable) { $extensionStubOk = false; }
+    $extensionVsixOk = false;
+    $extensionVsix = $extensionRoot . '/mystack-helper-' . (string) ($extensionPackage['version'] ?? '') . '.vsix';
+    if (is_file($extensionVsix) && class_exists('ZipArchive')) {
+        $archive = new ZipArchive();
+        if ($archive->open($extensionVsix) === true) {
+            $extensionVsixOk = $archive->locateName('extension.vsixmanifest', ZipArchive::FL_NOCASE) !== false
+                && $archive->locateName('extension/package.json', ZipArchive::FL_NOCASE) !== false;
+            $archive->close();
+        }
+    }
+    $check(
+        'Official MyStack VS Code extension',
+        is_array($extensionPackage)
+            && ($extensionPackage['name'] ?? '') === 'mystack-helper'
+            && ($extensionPackage['publisher'] ?? '') === 'Sakibweb'
+            && is_array($extensionSnippets) && count($extensionSnippets) > 2000
+            && $extensionStubOk && $extensionVsixOk
+            && str_contains($extensionSource, 'workspace.isTrusted')
+            && str_contains($extensionSource, "segment === '..'")
+            && str_contains($rootAccessGuard ?? (string) file_get_contents(ROOT_DIR . '/.htaccess'), 'mystack-extension(?:-main)?'),
+        (is_array($extensionSnippets) ? count($extensionSnippets) : 0) . ' snippets, source-derived stubs, trusted workspace and validated VSIX'
+    );
+
     $registeredConsoleCommands = [];
     foreach (MyStackConsoleKernel::commands() as $consoleGroup) {
         foreach (array_keys($consoleGroup) as $signature) $registeredConsoleCommands[] = strtok($signature, ' ');
@@ -3711,6 +3761,7 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             && str_contains($rootAccessGuard, 'AGENTS\\.md|CONTRIBUTING\\.md|MANUAL_BN\\.md|README\\.md|LICENSE|NOTICE')
             && str_contains($rootAccessGuard, 'RewriteRule ^\\..*$ - [F,L]')
             && str_contains($rootAccessGuard, '^(?!index\\.php$).*\\.php$')
+            && str_contains($rootAccessGuard, 'mystack-extension(?:-main)?')
             && str_contains($rootAccessGuard, '\\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml)')
             && str_contains($rootAccessGuard, 'Require all denied')
             && str_contains($cliSource, 'NO_COLOR')

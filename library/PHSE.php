@@ -3,11 +3,30 @@
 /**
  * ============================================================================
  * Class: PHSE
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: Session State Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Manages secure session lifecycles, expiring session values, and authenticated state. Ensures robust protection against session hijacking and fixation.
+ * 
+ * Features:
+ * - Secure session initialization and lifecycle management.
+ * - Expiring session values (Flash data).
+ * - Protection against hijacking and fixation.
+ * - Encrypted session storage options.
+ * 
+ * Usage Example:
+ * ```php
+ * PHSE::set('user_id', 123);
+ * PHSE::flash('success', 'Profile updated!');
+ * $userId = PHSE::get('user_id');
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

@@ -2,37 +2,30 @@
 
 /**
  * ============================================================================
- * Class: PHJS (PHP-JS Hybrid Bridge & NLP Engine)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHJS
+ * Title: PHP-to-JavaScript Bridge
  * ============================================================================
  * 
- * PHJS is an eternal, ultimate hybrid bridge that translates human-readable 
- * Natural Language Processing (NLP) syntax directly into Alpine.js, HTMX, 
- * and Vanilla JS attributes.
- *
+ * Innovative PHP-to-JavaScript DSL and typed builder. Enables declarative actions, request handling, and seamless application bridging without writing raw JS.
+ * 
  * Features:
- * - Massive Domain Specific Language (DSL) Parser and NLP Omniscient Engine.
- * - 100% Compatibility with Alpine.js and HTMX modifiers out of the box.
- * - Fuzzy intent recognition (e.g., 'toast Hello', 'hide modal').
- * - Fluent JS builder for chaining frontend interactivity directly from PHP.
- * - Typed PHP-to-JavaScript values, expressions and nested objects.
- * - Template literals, async/await, functions, classes and ES modules.
- * - Declarative program compiler with an explicit raw-expression escape hatch.
+ * - Declarative PHP-to-JavaScript DSL.
+ * - Typed builder for dynamic frontend actions.
+ * - Automated request handling and application bridging.
+ * - Toast notifications, DOM updates, and interactivity.
  * 
  * Usage Example:
  * ```php
- * // Write Alpine/HTMX logic in plain English
- * $buttonAttr = phjs("click of #submitBtn then show #loader");
- * 
- * // Generate Titanium chained JS
- * echo PHJS::gen('toast "Data Saved Successfully!"');
- *
- * // Build modern JavaScript safely from PHP
- * echo PHJS::module([
- *     ['type' => 'const', 'name' => 'now', 'value' => PHJS::expr('Date.now()')],
- *     ['type' => 'export', 'names' => ['now']],
- * ]);
+ * echo PHJS::click('toast "Data saved successfully!"');
+ * echo PHJS::submit('form_id', '/api/save');
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

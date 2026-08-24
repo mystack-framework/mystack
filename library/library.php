@@ -2,14 +2,12 @@
 
 /**
  * ============================================================================
- * File: library.php (MyStack Core Bootstrapper & Dynamic Importer)
- * Author: Sakibur Rahman (@sakibweb)
+ * File: library.php
+ * Title: Core Bootstrapper & Dynamic Importer
  * ============================================================================
  * 
- * This is the heart of the MyStack Framework. It initializes core classes, 
- * manages the directory registry via `DIR`, and provides the `import()` helper 
- * to dynamically load PHP components, scripts, CSS, and views with zero hassle.
- *
+ * The heart of the MyStack Framework. It initializes core classes, manages the directory registry via `DIR`, and provides the `import()` helper to dynamically load PHP components, scripts, CSS, and views with zero hassle.
+ * 
  * Features:
  * - Global `import()` function replacing `require`/`include`.
  * - Cross-environment Directory Path detection.
@@ -17,10 +15,17 @@
  * 
  * Usage Example:
  * ```php
- * // Inside any file to include a dependency
+ * require_once 'library/library.php';
  * import('app:Controllers/UserController');
- * import('css:styles.css');
+ * $path = DIR::path('component:HomeView');
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

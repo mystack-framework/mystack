@@ -2,33 +2,31 @@
 
 /**
  * ============================================================================
- * Class: PHDB (PHP Database Management & ORM Engine)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHDB
+ * Title: Database Engine
  * ============================================================================
  * 
- * The PHDB class is the ultimate auto-healing, bulletproof database executor 
- * for the MyStack framework. It provides highly secure (Prepared Statements), 
- * memory-efficient, and elegant methods for interacting with the database.
- *
+ * High-performance database abstraction layer providing prepared access, CRUD operations, analytics, transactions, streaming, schema synchronization, and seamless JSON/array column handling.
+ * 
  * Features:
- * - Zero-configuration Prepared Statements to completely prevent SQL Injection.
- * - Dynamic CRUD Operations: select, insert, update, delete, save, find.
- * - Smart Pagination, Advanced Analytics (sum, avg, max, min, count).
- * - Unbuffered row streaming for very large result sets via `PHDB::fast()`.
- * - Universal Array/JSON column management via `array_get`, `array_set`.
- * - Database Schema Synchronization and Table Creation.
+ * - Prepared statement wrappers for extreme security.
+ * - Elegant CRUD operations and query building.
+ * - Schema synchronization and dynamic table creation.
+ * - Transaction management and unbuffered streaming.
  * 
  * Usage Example:
  * ```php
- * // Select records securely
- * $users = PHDB::select('users', '*', ['status' => 'active']);
- * 
- * // Insert a new record
- * PHDB::insert('users', ['name' => 'Sakib', 'email' => 'sakib@example.com']);
- * 
- * // Update existing records
- * PHDB::update('users', ['role' => 'admin'], ['id' => 1]);
+ * $user = PHDB::find('users', $id);
+ * PHDB::insert('users', ['name' => 'Sakib', 'role' => 'admin']);
+ * PHDB::transaction(function() { // transaction logic });
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

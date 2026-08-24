@@ -3,11 +3,29 @@
 /**
  * ============================================================================
  * Class: PHJT
- * Author: Sakibur Rahman (@sakibweb)
+ * Title: JWT (JSON Web Token) Manager
  * ============================================================================
  * 
- * This class is a core component of the MyStack framework.
- * It provides essential functionalities tailored for high performance and security.
+ * Provides secure HMAC JWT creation, verification, algorithm selection, and key rotation strategies for stateless authentication.
+ * 
+ * Features:
+ * - Stateless JWT generation and verification.
+ * - Multiple hashing algorithm support (e.g., HS256, HS512).
+ * - Secure key rotation and expiry validation.
+ * 
+ * Usage Example:
+ * ```php
+ * PHJT::key('super_secret_key');
+ * $token = PHJT::encode(['user_id' => 123]);
+ * $payload = PHJT::decode($token);
+ * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 

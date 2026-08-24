@@ -2,29 +2,30 @@
 
 /**
  * ============================================================================
- * Class: PHEV (PHP Events & WebSocket Server)
- * Author: Sakibur Rahman (@sakibweb)
+ * Class: PHEV
+ * Title: Event & WebSocket Manager
  * ============================================================================
  * 
- * PHEV is the real-time heartbeat of the MyStack framework. It provides a native, 
- * robust WebSocket server and asynchronous event-loop system directly in PHP.
- *
+ * Powers real-time interactivity with WebSocket server capabilities, Server-Sent Events (SSE), StreamUI integration, and robust event broadcasting.
+ * 
  * Features:
- * - Real-time bi-directional communication over WebSockets (ws://).
- * - StreamUI Support for real-time frontend component hydration.
- * - Custom Event listeners and emitters.
- * - Client management, connection broadcasting, and handshake processing.
+ * - Built-in WebSocket server and client handlers.
+ * - Server-Sent Events (SSE) streaming.
+ * - Global event broadcasting and listeners.
+ * - StreamUI integration for reactive interfaces.
  * 
  * Usage Example:
  * ```php
- * // Start the WebSocket server on port 8000
- * PHEV::initialize('/websocket', '0.0.0.0', 8000);
- * 
- * // Listen for messages
- * PHEV::on('message', function($clientId, $message) {
- *     PHEV::broadcast("User $clientId says: $message");
- * });
+ * PHEV::broadcast('chat_room', ['user' => 'Sakib', 'msg' => 'Hello']);
+ * PHEV::listen('user_registered', function($data) { // handler });
  * ```
+ * 
+ * @package    MyStack
+ * @author     Sakibur Rahman (@sakibweb)
+ * @published  https://github.com/mystack-framework
+ * @web        https://mystack-framework.github.io
+ * @license    Apache License 2.0
+ * ============================================================================
  */
 
 
