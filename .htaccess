@@ -28,6 +28,7 @@
   RewriteRule ^(.*) - [E=BASE:%1]
   RewriteRule ^\..*$ - [F,L]
   RewriteRule ^(?:app|component|library)(?:/|$) - [F,L,NC]
+  RewriteRule ^mystack-extension(?:-main)?(?:/|$) - [F,L,NC]
   RewriteRule ^src/(?:cache/.*\.php|js/.*\.php)$ - [F,L,NC]
   # CLI source/launchers and framework metadata are local-only. Keep this
   # explicit rule in addition to FilesMatch for Apache/LiteSpeed portability.
