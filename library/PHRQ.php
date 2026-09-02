@@ -31,7 +31,8 @@
 
 
 
-class PHRQ {
+class PHRQ
+{
     private static ?array $liveMapHostInfo = null;
 
     /**
@@ -44,7 +45,8 @@ class PHRQ {
      * @param array $options cURL options.
      * @return mixed Response data.
      */
-    public static function php($method, $url, $headers = [], $body = null, $options = []) {
+    public static function php($method, $url, $headers = [], $body = null, $options = [])
+    {
         $ch = null;
         try {
             $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
@@ -53,38 +55,44 @@ class PHRQ {
             }
 
             $ch = curl_init($url);
-    
+
             if ($ch === false) {
                 throw new Exception('Failed to initialize cURL');
             }
-    
+
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
-    
+
             $normalizedHeaders = [];
             foreach ((array) $headers as $key => $value) {
                 $line = is_int($key) ? (string) $value : ((string) $key . ': ' . (string) $value);
-                if (preg_match('/[\r\n]/', $line)) throw new \InvalidArgumentException('HTTP headers cannot contain line breaks.');
+                if (preg_match('/[\r\n]/', $line))
+                    throw new \InvalidArgumentException('HTTP headers cannot contain line breaks.');
                 $normalizedHeaders[] = $line;
             }
-    
+
             if ($body !== null) {
                 if (is_array($body)) {
                     $body = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
                     $hasContentType = false;
                     foreach ($normalizedHeaders as $headerLine) {
-                        if (stripos($headerLine, 'Content-Type:') === 0) { $hasContentType = true; break; }
+                        if (stripos($headerLine, 'Content-Type:') === 0) {
+                            $hasContentType = true;
+                            break;
+                        }
                     }
-                    if (!$hasContentType) $normalizedHeaders[] = 'Content-Type: application/json';
+                    if (!$hasContentType)
+                        $normalizedHeaders[] = 'Content-Type: application/json';
                 }
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
             }
 
-            if ($normalizedHeaders !== []) curl_setopt($ch, CURLOPT_HTTPHEADER, $normalizedHeaders);
+            if ($normalizedHeaders !== [])
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $normalizedHeaders);
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
             curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-    
+
             foreach ($options as $key => $value) {
                 if ($key === 'ssl') {
                     continue;
@@ -98,12 +106,12 @@ class PHRQ {
             // request options. This is deliberately applied after custom options.
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-    
+
             $response = curl_exec($ch);
             if ($response === false) {
                 throw new Exception(curl_error($ch));
             }
-    
+
             $decoded_response = json_decode($response, true);
             if (json_last_error() === JSON_ERROR_NONE) {
                 return $decoded_response;
@@ -112,7 +120,8 @@ class PHRQ {
         } catch (\Throwable $e) {
             return $e->getMessage();
         } finally {
-            if ($ch instanceof \CurlHandle || is_resource($ch)) curl_close($ch);
+            if ($ch instanceof \CurlHandle || is_resource($ch))
+                curl_close($ch);
         }
     }
 
@@ -126,7 +135,8 @@ class PHRQ {
      * @param array $options XHR options.
      * @return string JavaScript code.
      */
-    public static function js($method, $url, $headers = [], $body = null, $options = []) {
+    public static function js($method, $url, $headers = [], $body = null, $options = [])
+    {
         $jsFunction = <<<JS
 async function(method, url, headers, body, options) {
     try {
@@ -198,8 +208,9 @@ JS;
      * @param string $contentType MIME type of the response content (default is 'application/json').
      * @param array $additionalHeaders Array of additional headers to set.
      */
-    public static function header($method = 'GET', $origin = '*', $contentType = 'application/json', $additionalHeaders = []) {
-        header('Content-Type: '.$contentType);
+    public static function header($method = 'GET', $origin = '*', $contentType = 'application/json', $additionalHeaders = [])
+    {
+        header('Content-Type: ' . $contentType);
         $headers = '*';
         $requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
         if ($method === 'auto') {
@@ -215,21 +226,22 @@ JS;
         }
         header("Access-Control-Allow-Methods: $method");
         header("Access-Control-Allow-Origin: $origin");
-        header("Access-Control-Allow-Headers: ".$headers);
+        header("Access-Control-Allow-Headers: " . $headers);
         header('Access-Control-Max-Age: 86400');
         foreach ($additionalHeaders as $key => $value) {
             header("$key: $value");
         }
     }
 
-    
+
     /**
      * Enable or disable CORS for API responses.
      *
      * @param bool $enable True to enable CORS, false to disable.
      * @param string $origin CORS origin (default is '*').
      */
-    public static function cross($enable = true, string|array $origin = '*', bool $credentials = false) {
+    public static function cross($enable = true, string|array $origin = '*', bool $credentials = false)
+    {
         if ($enable) {
             $requestedOrigin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
             $selfOrigin = self::requestOrigin();
@@ -268,21 +280,45 @@ JS;
                 header('Access-Control-Allow-Credentials: true');
             }
 
-            // Functional baseline CSP for PHJS: executable expressions currently
-            // require unsafe-eval and generated bootstrap blocks require inline.
-            // All other resource types remain same-origin first and object/embed
-            // execution is disabled.
             if (!self::hasResponseHeader('Content-Security-Policy')) {
                 $connectSources = ["'self'", 'https:', 'wss:'];
-                foreach ($allowed as $allowedOrigin) {
-                    if ($allowedOrigin !== '*' && $allowedOrigin !== $selfOrigin) $connectSources[] = $allowedOrigin;
+                $scriptSources = ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://static.cloudflareinsights.com", "https://cdn.jsdelivr.net"];
+                $styleSources = ["'self'", "'unsafe-inline'", "https:"];
+                $imgSources = ["'self'", 'data:', 'blob:', 'https:'];
+                $fontSources = ["'self'", 'data:', 'https:'];
+
+                if (in_array('*', $allowed, true)) {
+                    $connectSources[] = '*';
+                    $scriptSources[] = '*';
+                    $styleSources[] = '*';
+                    $imgSources[] = '*';
+                    $fontSources[] = '*';
+                } else {
+                    foreach ($allowed as $allowedOrigin) {
+                        if ($allowedOrigin !== '*' && $allowedOrigin !== $selfOrigin) {
+                            $connectSources[] = $allowedOrigin;
+                            $scriptSources[] = $allowedOrigin;
+                        }
+                    }
                 }
                 $connectSources[] = 'https://cloudflareinsights.com';
-                header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com https://cdn.jsdelivr.net; script-src-elem 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src " . implode(' ', array_unique($connectSources)) . "; worker-src 'self' blob:");
+                
+                $connectSrc = implode(' ', array_unique($connectSources));
+                $scriptSrc = implode(' ', array_unique($scriptSources));
+                $styleSrc = implode(' ', array_unique($styleSources));
+                $imgSrc = implode(' ', array_unique($imgSources));
+                $fontSrc = implode(' ', array_unique($fontSources));
+
+                header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src {$scriptSrc}; script-src-elem {$scriptSrc}; style-src {$styleSrc}; img-src {$imgSrc}; font-src {$fontSrc}; connect-src {$connectSrc}; worker-src 'self' blob:");
             }
+            
             if (strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
                 http_response_code($requestedOrigin !== '' && $responseOrigin === null ? 403 : 204);
                 exit(0);
+            }
+        } else {
+            if (!self::hasResponseHeader('Content-Security-Policy')) {
+                header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; script-src-elem 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com wss:; worker-src 'self' blob:");
             }
         }
     }
@@ -300,17 +336,23 @@ JS;
     private static function normalizeOrigin(string $origin, string $selfOrigin): ?string
     {
         $origin = trim($origin);
-        if ($origin === '*') return '*';
-        if ($origin === '' || strtolower($origin) === 'self') return $selfOrigin;
+        if ($origin === '*')
+            return '*';
+        if ($origin === '' || strtolower($origin) === 'self')
+            return $selfOrigin;
         if (!str_contains($origin, '://')) {
             $origin = (str_starts_with($selfOrigin, 'https://') ? 'https://' : 'http://') . $origin;
         }
         $parts = parse_url($origin);
-        if (!is_array($parts) || !in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true) || empty($parts['host'])) return null;
-        if (isset($parts['user']) || isset($parts['pass']) || !empty($parts['query']) || !empty($parts['fragment'])) return null;
-        if (isset($parts['path']) && $parts['path'] !== '' && $parts['path'] !== '/') return null;
+        if (!is_array($parts) || !in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true) || empty($parts['host']))
+            return null;
+        if (isset($parts['user']) || isset($parts['pass']) || !empty($parts['query']) || !empty($parts['fragment']))
+            return null;
+        if (isset($parts['path']) && $parts['path'] !== '' && $parts['path'] !== '/')
+            return null;
         $normalized = strtolower($parts['scheme']) . '://' . strtolower($parts['host']);
-        if (isset($parts['port'])) $normalized .= ':' . (int) $parts['port'];
+        if (isset($parts['port']))
+            $normalized .= ':' . (int) $parts['port'];
         return $normalized;
     }
 
@@ -329,7 +371,8 @@ JS;
     private static function hasResponseHeader(string $name): bool
     {
         foreach (headers_list() as $header) {
-            if (stripos($header, $name . ':') === 0) return true;
+            if (stripos($header, $name . ':') === 0)
+                return true;
         }
         return false;
     }
@@ -341,7 +384,8 @@ JS;
      * @param string|null $msg Custom message for the response (default is null).
      * @return array HTTP response information containing code and message.
      */
-    public static function status(int $code = 200, ?string $msg = null) {
+    public static function status(int $code = 200, ?string $msg = null)
+    {
         $statusMessages = [
             100 => 'Continue',
             101 => 'Switching Protocols',
@@ -954,7 +998,7 @@ JS;
             'code' => $code,
             'message' => $msg,
         ];
-    }    
+    }
 
     /**
      * Set HTTP response headers for file downloads.
@@ -962,19 +1006,21 @@ JS;
      * @param string $name Filename of the file being downloaded.
      * @param int $length Length of the file being downloaded.
      */
-    public static function file($name, $length) {
+    public static function file($name, $length)
+    {
         header('Content-Description: File Transfer');
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="'.$name.'"');
+        header('Content-Disposition: attachment; filename="' . $name . '"');
         header('Expires: 0');
         header('Cache-Control: must-revalidate');
         header('Pragma: public');
-        header('Content-Length: '.$length);
+        header('Content-Length: ' . $length);
     }
 
     private static function liveMapHostInfo(): array
     {
-        if (self::$liveMapHostInfo !== null) return self::$liveMapHostInfo;
+        if (self::$liveMapHostInfo !== null)
+            return self::$liveMapHostInfo;
         $serverIp = trim((string) ($_SERVER['SERVER_ADDR'] ?? $_SERVER['LOCAL_ADDR'] ?? ''));
         $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
         $host = preg_replace('/:\\d+$/', '', $host);
@@ -984,13 +1030,21 @@ JS;
         }
         if (!filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) && $host !== '' && function_exists('gethostbyname')) {
             $resolved = gethostbyname($host);
-            if ($resolved !== $host) $serverIp = $resolved;
+            if ($resolved !== $host)
+                $serverIp = $resolved;
         }
         $info = [
             'hostIP' => filter_var($serverIp, FILTER_VALIDATE_IP) ? $serverIp : null,
-            'hostLat' => null, 'hostLon' => null, 'hostCountryCode' => null,
-            'hostCountry' => null, 'hostCity' => null, 'hostArea' => null,
-            'hostIsp' => null, 'hostOrg' => null, 'hostAs' => null, 'hostVpn' => null,
+            'hostLat' => null,
+            'hostLon' => null,
+            'hostCountryCode' => null,
+            'hostCountry' => null,
+            'hostCity' => null,
+            'hostArea' => null,
+            'hostIsp' => null,
+            'hostOrg' => null,
+            'hostAs' => null,
+            'hostVpn' => null,
         ];
         $publicIp = filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
         if ($publicIp) {
@@ -1037,7 +1091,8 @@ JS;
      * @param int $limit Maximum number of livemap entries to store.
      * @param int $time Time window in seconds to consider entries as 'live'.
      */
-    public static function livemap($url = '/livemap', $skipList = [], $limit = 10, $time = 60 * 24) {
+    public static function livemap($url = '/livemap', $skipList = [], $limit = 10, $time = 60 * 24)
+    {
         if (!class_exists('PHDE') || !PHDE::isDebug()) {
             return;
         }
@@ -1048,7 +1103,7 @@ JS;
         $footprint = PHRO::footprint();
         $hostInfo = self::liveMapHostInfo();
         $skip = false;
-        
+
         $parsedRoot = parse_url(PHRO::root());
         $rootUrl = rtrim((string) ($parsedRoot['path'] ?? ''), '/');
         $requestUri = (string) ($footprint['REQUEST_URI'] ?? '/');
@@ -1056,7 +1111,7 @@ JS;
         if ($rootUrl !== '' && str_starts_with($nowURL, $rootUrl)) {
             $nowURL = substr($nowURL, strlen($rootUrl)) ?: '/';
         }
-        
+
         foreach ($skipList as $method => $skipUrl) {
             $skipPath = parse_url((string) $skipUrl, PHP_URL_PATH) ?: '/';
             if ($rootUrl !== '' && str_starts_with($skipPath, $rootUrl)) {
@@ -1068,7 +1123,7 @@ JS;
                 break;
             }
         }
-        
+
         if ($skip === false) {
             $data = [
                 'hostIP' => $footprint['hostIP'] ?? $hostInfo['hostIP'],
@@ -1093,10 +1148,6 @@ JS;
                 'clientArea' => $footprint['clientArea'] ?? $footprint['clientXArea'] ?? null,
                 'clientIsp' => $footprint['clientIsp'] ?? $footprint['clientXIsp'] ?? null,
                 'clientVpn' => $footprint['clientProxy'] ?? $footprint['clientXProxy'] ?? null,
-                // 'agent1' => $footprint['Sec-Ch-Ua'] ?? null,
-                // 'agent2' => $footprint['HTTP_USER_AGENT'] ?? null,
-                // 'agent3' => $footprint['User-Agent'] ?? null,
-                'clientPlatform' => $footprint['clientPlatform'] ?? null,
                 'clientDevice' => $footprint['clientDevice'] ?? null,
                 'clientIs_desktop' => $footprint['clientDesktop'] ?? null,
                 'clientIs_mobile' => $footprint['clientMobile'] ?? null,
@@ -1106,21 +1157,21 @@ JS;
                 'devicekey' => isset($footprint['clientDevicekey']) ? $footprint['clientDevicekey'] : null,
                 'requestTime' => isset($footprint['requestTime']) ? $footprint['requestTime'] : (isset($footprint['REQUEST_TIME']) ? $footprint['REQUEST_TIME'] : null),
                 'requestFLOAT' => isset($footprint['requestFLOAT']) ? $footprint['requestFLOAT'] : (isset($footprint['REQUEST_TIME_FLOAT']) ? $footprint['REQUEST_TIME_FLOAT'] : null),
-                'datetime' => isset($footprint['requestFLOAT']) ? date("Y-m-d H:i:s", (int)$footprint['requestFLOAT']) : (isset($footprint['REQUEST_TIME_FLOAT']) ? date("Y-m-d H:i:s", (int)$footprint['REQUEST_TIME_FLOAT']) : null)
+                'datetime' => isset($footprint['requestFLOAT']) ? date("Y-m-d H:i:s", (int) $footprint['requestFLOAT']) : (isset($footprint['REQUEST_TIME_FLOAT']) ? date("Y-m-d H:i:s", (int) $footprint['REQUEST_TIME_FLOAT']) : null)
             ];
             // $data = array_merge($footprint, $data);
-    
+
             PHLS::limitizer('livemap', $data, $limit, $time);
         }
 
-        PHRO::get($url, function() {
+        PHRO::get($url, function () {
             if (!class_exists('PHDE') || !PHDE::isDebug()) {
                 http_response_code(404);
                 return;
             }
             PHRQ::header("GET", "*", "text/html; charset=UTF-8", []);
-                ob_start();
-                print <<<EOT
+            ob_start();
+            print <<<EOT
                 <!DOCTYPE html>
                 <html lang="en">
                 <head>
@@ -2350,16 +2401,16 @@ JS;
                 </body>
                 </html>
                 EOT;
-                $livemapHtml = ob_get_clean();
-                $csrfToken = class_exists('PHRO') && is_callable(['PHRO', 'getToken'])
-                    ? json_encode(PHRO::getToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
-                    : 'null';
-                $csrfMeta = '<meta name="csrf-token" content="' . htmlspecialchars((string) json_decode($csrfToken), ENT_QUOTES, 'UTF-8') . '">';
-                $livemapHtml = str_replace('<head>', '<head>' . $csrfMeta, $livemapHtml);
-                print $livemapHtml;
+            $livemapHtml = ob_get_clean();
+            $csrfToken = class_exists('PHRO') && is_callable(['PHRO', 'getToken'])
+                ? json_encode(PHRO::getToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
+                : 'null';
+            $csrfMeta = '<meta name="csrf-token" content="' . htmlspecialchars((string) json_decode($csrfToken), ENT_QUOTES, 'UTF-8') . '">';
+            $livemapHtml = str_replace('<head>', '<head>' . $csrfMeta, $livemapHtml);
+            print $livemapHtml;
         });
 
-        PHRO::post($url, function() {
+        PHRO::post($url, function () {
             header('Content-Type: application/json; charset=utf-8');
             header('Cache-Control: no-store, max-age=0');
             header('X-Content-Type-Options: nosniff');
@@ -2373,11 +2424,12 @@ JS;
     /**
      * Stream data to the client.
      *
-     * @param int $sleepSec The number of seconds to sleep between data updates (min: 1, max: 300).
+     * @param int $sleep The number of seconds to sleep between data updates (min: 1, max: 300).
      * @param string $type The content type for the response (default: "text").
      * @param callable $callback The callback function to execute for generating data.
      */
-    public static function stream(int $sleep = 1, string $type = "text", ?callable $callback = null) {
+    public static function stream(int $sleep = 1, string $type = "text", ?callable $callback = null)
+    {
         if ($sleep < 1 || $sleep > 300) {
             throw new InvalidArgumentException("Sleep duration must be between 1 and 300 seconds.");
         }
