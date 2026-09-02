@@ -64,16 +64,16 @@ final class MyStackTui {
 
     public static function header(string $subtitle = 'Next-generation PHP application console'): void {
         $logo = [
-            ' __  __ __   __ ____  _____  _     ____ _  __',
-            '|  \\/  |\\ \\ / // ___||_   _|/ \\   / ___| |/ /',
+            ' __  __ __   __ ____  _____  _    _____ _  __',
+            '|  \\/  |\\ \\ / // ___||_   _|/ \\  /  ___| |/ /',
             '| |\\/| | \\ V / \\___ \\  | | / _ \\ | |   | \' / ',
             '| |  | |  | |   ___) | | |/ ___ \\| |___| . \\ ',
-            '|_|  |_|  |_|  |____/  |_/_/   \\_\\____|_|\\_\\',
+            '|_|  |_|  |_|  |____/  |_/_/   \\_\\_____|_|\\_\\',
         ];
         $colors = ['1;38;5;45', '1;38;5;39', '1;38;5;75', '1;38;5;111', '1;38;5;141'];
         echo "\n";
         foreach ($logo as $index => $line) echo self::paint('  ' . $line, $colors[$index]) . "\n";
-        echo self::paint('  M Y S T A C K   F R A M E W O R K', '1;38;5;45') . "\n";
+        echo self::paint('  ***  M Y S T A C K     F R A M E W O R K  ***', '1;38;5;45') . "\n";
         echo self::paint('  ' . $subtitle, '2;37') . "\n";
         echo self::paint('  ' . str_repeat('─', 47), '2;38;5;45') . "\n";
     }
@@ -1806,7 +1806,7 @@ final class MyStackConsoleKernel {
 
     private static function renderList(array $options): int {
         if (!empty($options['json'])) { self::emit(self::commands(), $options); return 0; }
-        MyStackTui::header('Console Kernel  •  intelligent, portable, dependency-free');
+        MyStackTui::header('#CLI • intelligent, portable, dependency-free');
         echo "\n  " . MyStackTui::paint('USAGE', '1;38;5;214') . "  mystack <command> [arguments] [options]\n";
         echo "         php mystack <command> [arguments] [options]\n";
         foreach (self::commands() as $category => $commands) {
