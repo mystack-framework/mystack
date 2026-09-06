@@ -154,6 +154,39 @@ class PHML {
         // Special / Obscure
         'var'       => ['var', 'variable'],
         'template'  => ['template', 'tpl', 'tmpl', 'tmp', 'blueprint'],
+
+        // Additional standard HTML5 elements (were missing; previously fuzzy-mis-mapped)
+        'area'      => ['area', 'hotspot'],
+        'base'      => ['base', 'base-url'],
+        'bdi'       => ['bdi'],
+        'bdo'       => ['bdo', 'bidirectional'],
+        'canvas'    => ['canvas', 'draw'],
+        'cite'      => ['cite', 'citation'],
+        'data'      => ['data', 'data-value'],
+        'datalist'  => ['datalist', 'options-list'],
+        'del'       => ['del', 'deleted', 'strikethrough'],
+        'dfn'       => ['dfn', 'definition'],
+        'embed'     => ['embed'],
+        'hgroup'    => ['hgroup', 'heading-group'],
+        'ins'       => ['ins', 'inserted'],
+        'kbd'       => ['kbd', 'keyboard', 'key'],
+        'map'       => ['map', 'image-map'],
+        'menu'      => ['menu', 'list-menu'],
+        'meter'     => ['meter', 'gauge'],
+        'noscript'  => ['noscript', 'no-js'],
+        'object'    => ['object', 'embed-object'],
+        'output'    => ['output', 'result'],
+        'param'     => ['param'],
+        'progress'  => ['progress', 'progress-bar'],
+        'q'         => ['q', 'quote', 'quotation'],
+        'rp'        => ['rp'],
+        'rt'        => ['rt', 'ruby-text'],
+        'ruby'      => ['ruby'],
+        'samp'      => ['samp', 'sample-output'],
+        'slot'      => ['slot', 'shadow-slot'],
+        'time'      => ['time', 'datetime'],
+        'track'     => ['track', 'subtitle'],
+        'wbr'       => ['wbr', 'word-break'],
     ];
 
     /**
@@ -795,9 +828,13 @@ class PHML {
             return is_callable($template) ? $template($compData) : self::render($template, $compData);
         }
 
-        $tagName = self::resolveTagAlias($name);
+        // A standard HTML/SVG element name always renders literally, taking precedence
+        // over convenience aliases (e.g. 'area'/'track' are also div/audio aliases).
+        $tagName = in_array(strtolower($name), self::VALID_TAGS, true) ? strtolower($name) : self::resolveTagAlias($name);
         
-        if ($tagName === $name) {
+        // Fuzzy "did you mean" only for unknown/typo names; a valid HTML tag or a
+        // registered alias canonical must render literally, never be fuzzy-swapped.
+        if ($tagName === $name && !isset(self::$tagAliases[$name]) && !in_array(strtolower($name), self::VALID_TAGS, true)) {
             $bestMatch = null;
             $shortestDistance = -1;
 
@@ -863,6 +900,9 @@ class PHML {
             else $attrStr .= " $k=\"" . htmlspecialchars((string)$v) . "\"";
         }
         
+        if (in_array(strtolower($tagName), self::VOID_ELEMENTS, true)) {
+            return "<{$tagName}{$attrStr}/>";
+        }
         return "<{$tagName}{$attrStr}>{$content}</{$tagName}>";
     }
 
@@ -872,6 +912,20 @@ class PHML {
     const VOID_ELEMENTS = [
         'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 
         'track', 'wbr', 'feTurbulence', 'feDisplacementMap', 'path', 'circle', 'rect', 'line', 'polyline', 'stop'
+    ];
+
+    // Standard HTML/SVG element names. A call matching one of these renders that
+    // tag literally and is never fuzzy-corrected to a different element.
+    const VALID_TAGS = [
+        'a','abbr','address','area','article','aside','audio','b','base','bdi','bdo','blockquote','body',
+        'br','button','canvas','caption','cite','code','col','colgroup','data','datalist','dd','del','details',
+        'dfn','dialog','div','dl','dt','em','embed','fieldset','figcaption','figure','footer','form','h1','h2',
+        'h3','h4','h5','h6','head','header','hgroup','hr','html','i','iframe','img','input','ins','kbd','label',
+        'legend','li','link','main','map','mark','menu','meta','meter','nav','noscript','object','ol','optgroup',
+        'option','output','p','param','picture','pre','progress','q','rp','rt','ruby','s','samp','script','section',
+        'select','slot','small','source','span','strong','style','sub','summary','sup','svg','table','tbody','td',
+        'template','textarea','tfoot','th','thead','time','title','tr','track','u','ul','var','video','wbr',
+        'g','defs','use','polygon','ellipse','text','filter','lineargradient','radialgradient','mask','pattern',
     ];
 
     /**

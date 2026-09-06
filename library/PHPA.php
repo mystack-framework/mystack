@@ -1336,7 +1336,8 @@ class PHPA_Twocheckout extends PHPA_BaseGateway {
         if (is_callable($this->customChargeLogic)) { return call_user_func($this->customChargeLogic, $this, $amount, $currency, $orderId, $options); }
         if ($error = $this->validatePayment($amount, $currency, $orderId)) return $error;
         if ($error = $this->requireKeys(2)) return $error;
-        $res = $this->request('POST', 'https://api.2checkout.com/rest/6.0/orders/', ["Accept: application/json"], ['Amount' => $amount, 'Currency' => $currency, 'ExternalReference' => $orderId]);
+        $auth = base64_encode("{$this->key1}:{$this->key2}");
+        $res = $this->request('POST', 'https://api.2checkout.com/rest/6.0/orders/', ["Accept: application/json", "Authorization: Basic $auth"], ['Amount' => $amount, 'Currency' => $currency, 'ExternalReference' => $orderId]);
         return ['success' => $res['code'] == 200, 'transaction_id' => $res['data']['RefNo'] ?? null];
     }
     public function verify(string $transactionId): array {
@@ -1924,10 +1925,12 @@ class PHPA_Nagad extends PHPA_BaseGateway {
     }
     
     public function verify(string $paymentRefId): array {
-        if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $transactionId ?? $paymentRefId ?? $paymentId); }
+        if (is_callable($this->customVerifyLogic)) { return call_user_func($this->customVerifyLogic, $this, $paymentRefId); }
+        if ($error = $this->requireKeys(3)) return $error;
         $urlBase = $this->isSandbox ? "http://sandbox.mynagad.com:10080/remote-payment-gateway-1.0/api/dfs" : "https://api.mynagad.com/api/dfs";
         $res = $this->request('GET', "$urlBase/verify/payment/" . rawurlencode($paymentRefId), [], null, ['allow_insecure_sandbox' => true]);
-        return ['success' => ($res['data']['status'] ?? '') === 'Success'];
+        if ($res['code'] !== 200) return $this->responseFailure($res, 'verify');
+        return ['success' => ($res['data']['status'] ?? '') === 'Success', 'transaction_id' => $res['data']['paymentRefId'] ?? $paymentRefId, 'status' => $res['data']['status'] ?? null];
     }
     public function refund(string $transactionId, ?float $amount = null): array { return parent::refund($transactionId, $amount); }
 }

@@ -77,6 +77,8 @@ class PHJC {
     private static $minify = false;
     private static $resolvedPaths = [];
     private static $slots = [];
+    private static int $forelseSeq = 0;
+    private static array $onceMap = [];
 
     // ==========================================
     // FAST UI & DX HELPERS
@@ -378,9 +380,28 @@ class PHJC {
                 if (!isset($stacks[$stackName])) $stacks[$stackName] = '';
                 $stacks[$stackName] .= trim($match[3]) . "\n";
             }
+            preg_match_all('/@prepend\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)(.*?)@endprepend/is', $content, $pmatches, PREG_SET_ORDER);
+            foreach ($pmatches as $pm) {
+                $stackName = trim($pm[1]);
+                $stacks[$stackName] = trim($pm[2]) . "\n" . ($stacks[$stackName] ?? '');
+            }
+
+            // @hasSection / @sectionMissing resolve against collected sections (child view)
+            $content = preg_replace_callback('/@hasSection\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)(.*?)(?:@else(.*?))?@endif/si', function ($m) use ($sections) {
+                return isset($sections[trim($m[1])]) ? $m[2] : ($m[3] ?? '');
+            }, $content);
+            $content = preg_replace_callback('/@sectionMissing\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)(.*?)(?:@else(.*?))?@endif/si', function ($m) use ($sections) {
+                return !isset($sections[trim($m[1])]) ? $m[2] : ($m[3] ?? '');
+            }, $content);
 
             // 4. লেআউটে সেকশনগুলো বসানো
             if ($layoutContent !== '') {
+                $layoutContent = preg_replace_callback('/@hasSection\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)(.*?)(?:@else(.*?))?@endif/si', function ($m) use ($sections) {
+                    return isset($sections[trim($m[1])]) ? $m[2] : ($m[3] ?? '');
+                }, $layoutContent);
+                $layoutContent = preg_replace_callback('/@sectionMissing\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)(.*?)(?:@else(.*?))?@endif/si', function ($m) use ($sections) {
+                    return !isset($sections[trim($m[1])]) ? $m[2] : ($m[3] ?? '');
+                }, $layoutContent);
                 foreach ($sections as $name => $body) {
                     $layoutContent = preg_replace('/@(yield|render|insert|show|content)\s*\(\s*[\'"]?' . preg_quote($name, '/') . '[\'"]?\s*\)/i', $body, $layoutContent);
                 }
@@ -394,8 +415,8 @@ class PHJC {
                 // মূল কন্টেন্ট এখন লেআউটসহ
                 $content = $layoutContent;
             } else {
-                $content = preg_replace('/@(section|block|define|push|append|inject)\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)/i', '', $content);
-                $content = preg_replace('/@(endsection|endblock|enddefine|endpush|endappend|endinject)/i', '', $content);
+                $content = preg_replace('/@(section|block|define|push|append|inject|prepend)\s*\(\s*[\'"]?(.*?)[\'"]?\s*\)/i', '', $content);
+                $content = preg_replace('/@(endsection|endblock|enddefine|endpush|endappend|endinject|endprepend)/i', '', $content);
             }
 
             // 5. fragment ট্যাগগুলো মুছে যাবে, 
@@ -464,6 +485,11 @@ class PHJC {
     }
 
     private static function injectComponentsAndIncludes($content) {
+        // @component('name', [data]) ... @endcomponent  -> alias of <x-name>
+        $content = preg_replace_callback('/@component\s*\(\s*([\'"][^\'"]+[\'"])\s*(?:,\s*(\[.*?\]))?\s*\)(.*?)@endcomponent/s', function ($m) {
+            return self::parseComponentDirective($m[1], $m[2] ?? '', $m[3]);
+        }, $content);
+
         // @include | @partial | @import
         $content = preg_replace_callback('/@(include|partial|import)\s*\(\s*[\'"]?(.*?)[\'"]?\s*(?:,\s*(\[.*?\]))?\s*\)/i', function($m) {
             $viewPath = self::resolveViewPath($m[2]);
@@ -497,8 +523,15 @@ class PHJC {
 
         // FALLBACK TO PHUI (If name starts with ui- and no file exists)
         if (!$viewFile && str_starts_with($name, 'ui-')) {
-            $slug = str_replace('-', ':', substr($name, 3));
-            if (class_exists('PHUI') && PHUI::exists($slug)) {
+            $raw = substr($name, 3);
+            $candidates = ['ui:' . $raw, str_replace('-', ':', $raw), 'ui:' . str_replace('-', ':', $raw), $raw];
+            $slug = null;
+            if (class_exists('PHUI')) {
+                foreach ($candidates as $cand) {
+                    if (PHUI::exists($cand)) { $slug = $cand; break; }
+                }
+            }
+            if ($slug !== null) {
                 $attributes = [];
                 preg_match_all('/(:?[\w\-]+)(?:=["\'](.*?)["\'])?/', $attributeString, $matches, PREG_SET_ORDER);
                 foreach ($matches as $match) {
@@ -545,22 +578,58 @@ class PHJC {
         return $phpCodeStart . self::injectComponentsAndIncludes($componentHtml) . $phpCodeEnd;
     }
 
+    /**
+     * Compile-time handler for @component('name', [data]) ... @endcomponent.
+     * Mirrors parseComponentTag but takes a PHP array literal for data and uses
+     * the captured body as the default {{ $slot }}. Named slots are provided by
+     * @slot/@endslot through the existing PHJC::slot() store.
+     */
+    private static function parseComponentDirective(string $nameRaw, string $dataCode, string $slotContent): string {
+        $name = trim($nameRaw, "'\"");
+        $cleanName = str_replace('-', '.', $name);
+        $viewFile = self::resolveViewPath($cleanName);
+        if (!$viewFile) {
+            // PHUI registry fallback so @component('ui:xxx') works like <x-ui-xxx> and PHUI::ui('ui:xxx')
+            if (class_exists('PHUI') && \PHUI::exists($name)) {
+                $data = trim($dataCode) !== '' ? trim($dataCode) : '[]';
+                return "<?php echo \\PHUI::ui(" . var_export($name, true) . ", array_merge(\$__phjc_data ?? [], $data, ['slot' => " . var_export($slotContent, true) . "])); ?>";
+            }
+            throw new \Exception("PHJC Template Error: Component '{$cleanName}' not found in component/ or app/ folders.");
+        }
+        $componentHtml = file_get_contents($viewFile);
+        if ($componentHtml === false) {
+            throw new \RuntimeException("Unable to read component: {$cleanName}");
+        }
+        $componentHtml = str_ireplace('{{ $slot }}', $slotContent, $componentHtml);
+        $data = trim($dataCode) !== '' ? trim($dataCode) : '[]';
+        $phpCodeStart = "<?php (function() use (\$__phjc_data) { extract(\$__phjc_data); extract({$data}); ?>";
+        $phpCodeEnd = "<?php })(); ?>";
+        return $phpCodeStart . self::injectComponentsAndIncludes($componentHtml) . $phpCodeEnd;
+    }
+
     private static function compileDirectives($content) {
-        $content = preg_replace_callback('/<script\b[^>]*>(.*?)<\/script>/is', function($m) {
+        // @verbatim: protect blocks from compilation
+        $verbatim = [];
+        $content = preg_replace_callback('/@verbatim(.*?)@endverbatim/si', function ($m) use (&$verbatim) {
+            $key = '@@PHJCVERB' . count($verbatim) . '@@';
+            $verbatim[$key] = $m[1];
+            return $key;
+        }, $content);
+
+        // <script> {{ }} interpolation
+        $content = preg_replace_callback('/<script\b[^>]*>(.*?)<\/script>/is', function ($m) {
             $scriptBody = preg_replace('/\{\{\s*(.+?)\s*\}\}/', '<?php echo json_encode($1); ?>', $m[1]);
             return str_replace($m[1], $scriptBody, $m[0]);
         }, $content);
 
-        $content = preg_replace_callback('/\{\{\s*(.+?)\s*\}\}/', function($m) {
+        // {{ }} echo with filters, {!! !!} raw, @php
+        $content = preg_replace_callback('/\{\{\s*(.+?)\s*\}\}/', function ($m) {
             return self::compileEchoWithFilters($m[1]);
         }, $content);
-
         $content = preg_replace('/\{\!\!\s*(.+?)\s*\!\!\}/', '<?php echo $1 ?? \'\'; ?>', $content);
         $content = preg_replace('/@php(.*?)@endphp/s', '<?php $1 ?>', $content);
 
         // PHUI kit directives. Keep @section reserved for layout composition.
-        // Each UI directive intentionally occupies one template line so nested
-        // PHP expressions inside its data array remain safe to compile.
         $content = preg_replace_callback(
             '/^[ \t]*@(ui|element|uisection|uilayout|uipage)\s*\(\s*([\'"])([a-z0-9:._-]+)\2\s*(?:,\s*(.+))?\s*\)[ \t]*$/im',
             static function ($match) {
@@ -578,37 +647,100 @@ class PHJC {
             $content
         );
 
-        $content = preg_replace_callback('/@foreach\s*\((.+?)\s+as\s+(.+?)\)/', function($m) {
-            return "<?php \n \PHJC::startLoop({$m[1]});\n foreach({$m[1]} as {$m[2]}): \n \$loop = \PHJC::currentLoop(); \n ?>";
-        }, $content);
-        $content = preg_replace('/@endforeach/', '<?php \PHJC::endLoop(); endforeach; ?>', $content);
-
+        // Custom directives
         if (!empty(self::$customDirectives)) {
             $directiveNames = array_map('preg_quote', array_keys(self::$customDirectives));
             $pattern = '/@(' . implode('|', $directiveNames) . ')\s*(?:\((.*?)\))?/s';
-            $content = preg_replace_callback($pattern, function($m) {
+            $content = preg_replace_callback($pattern, function ($m) {
                 return call_user_func(self::$customDirectives[$m[1]], $m[2] ?? null);
             }, $content);
         }
 
+        // Balanced-paren argument subpattern (handles nested parens/quotes)
+        $bp = '((?:[^()]++|\((?1)\))*)';
+
+        // @foreach with $loop
+        $content = preg_replace_callback('/@foreach\s*\(' . $bp . '\)/', function ($m) {
+            $args = trim($m[1]);
+            if (preg_match('/^(.*?)\s+as\s+(.*)$/is', $args, $mm)) { $coll = trim($mm[1]); $iter = trim($mm[2]); }
+            else { $coll = $args; $iter = '$__value'; }
+            return "<?php \n \PHJC::startLoop({$coll});\n foreach({$coll} as {$iter}): \n \$loop = \PHJC::currentLoop(); \n ?>";
+        }, $content);
+        $content = str_replace('@endforeach', '<?php \PHJC::endLoop(); endforeach; ?>', $content);
+
+        // @forelse(...)...@empty...@endforelse
+        $content = preg_replace_callback('/@forelse\s*\(' . $bp . '\)(.*?)@empty(.*?)@endforelse/s', function ($m) {
+            $args = trim($m[1]);
+            if (preg_match('/^(.*?)\s+as\s+(.*)$/is', $args, $mm)) { $coll = trim($mm[1]); $iter = trim($mm[2]); }
+            else { $coll = $args; $iter = '$__value'; }
+            $id = ++self::$forelseSeq;
+            return "<?php \$__empty_$id = true; foreach($coll as $iter): \$__empty_$id = false; ?>{$m[2]}<?php endforeach; if(\$__empty_$id): ?>{$m[3]}<?php endif; ?>";
+        }, $content);
+
+        // @each('view', $items, $key)
+        $content = preg_replace_callback('/@each\s*\(' . $bp . '\)/', function ($m) {
+            $parts = self::splitTopLevel($m[1]);
+            $view = trim($parts[0] ?? "''");
+            $items = trim($parts[1] ?? '[]');
+            $keyVar = trim(trim($parts[2] ?? '$item'), "\$'\"");
+            return "<?php foreach($items as \$$keyVar): echo \\PHJC::view($view, array_merge(get_defined_vars(), [" . var_export($keyVar, true) . " => \$$keyVar])); endforeach; ?>";
+        }, $content);
+
+        // Balanced conditionals/loops
+        $content = preg_replace('/@if\s*\(' . $bp . '\)/', '<?php if($1): ?>', $content);
+        $content = preg_replace('/@elseif\s*\(' . $bp . '\)/', '<?php elseif($1): ?>', $content);
+        $content = preg_replace('/@unless\s*\(' . $bp . '\)/', '<?php if(!($1)): ?>', $content);
+        $content = preg_replace('/@isset\s*\(' . $bp . '\)/', '<?php if(isset($1)): ?>', $content);
+        $content = preg_replace('/@empty\s*\(' . $bp . '\)/', '<?php if(empty($1)): ?>', $content);
+        $content = preg_replace('/@for\s*\(' . $bp . '\)/', '<?php for($1): ?>', $content);
+        $content = preg_replace('/@while\s*\(' . $bp . '\)/', '<?php while($1): ?>', $content);
+        $content = preg_replace('/@switch\s*\(' . $bp . '\)/', '<?php switch($1): ?>', $content);
+        $content = preg_replace('/@case\s*\(' . $bp . '\)/', '<?php case $1: ?>', $content);
+        $content = preg_replace('/@dump\s*\(' . $bp . '\)/', '<?php var_dump($1); ?>', $content);
+        $content = preg_replace('/@dd\s*\(' . $bp . '\)/', '<?php var_dump($1); die; ?>', $content);
+
+        // @js / @json (JS-context safe JSON)
+        $content = preg_replace('/@js\s*\(' . $bp . '\)/', '<?php echo json_encode($1, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>', $content);
+        $content = preg_replace('/@json\s*\(' . $bp . '\)/', '<?php echo json_encode($1, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>', $content);
+
+        // @asset('path') -> base-path-safe URL
+        $content = preg_replace('/@asset\s*\(\s*[\'"](.*?)[\'"]\s*\)/', '<?php echo \\DIR::link("$1"); ?>', $content);
+
+        // Form attribute directives
+        $content = preg_replace('/@checked\s*\(' . $bp . '\)/', "<?php echo ($1) ? 'checked' : ''; ?>", $content);
+        $content = preg_replace('/@selected\s*\(' . $bp . '\)/', "<?php echo ($1) ? 'selected' : ''; ?>", $content);
+        $content = preg_replace('/@disabled\s*\(' . $bp . '\)/', "<?php echo ($1) ? 'disabled' : ''; ?>", $content);
+        $content = preg_replace('/@readonly\s*\(' . $bp . '\)/', "<?php echo ($1) ? 'readonly' : ''; ?>", $content);
+        $content = preg_replace('/@required\s*\(' . $bp . '\)/', "<?php echo ($1) ? 'required' : ''; ?>", $content);
+
+        // @class([...]) conditional classes -> full class attribute (Blade-style)
+        $content = preg_replace_callback('/@class\s*\(' . $bp . '\)/', function ($m) {
+            return "<?php echo 'class=\"' . htmlspecialchars(\\PHJC::classes(" . $m[1] . "), ENT_QUOTES, 'UTF-8') . '\"'; ?>";
+        }, $content);
+
+        // @once ... @endonce
+        $content = preg_replace_callback('/@once(.*?)@endonce/s', function ($m) {
+            return "<?php if (\\PHJC::once('" . md5($m[1]) . "')): ?>" . $m[1] . "<?php endif; ?>";
+        }, $content);
+
+        // @slot('name') ... @endslot -> capture rendered body into the named-slot store
+        $content = preg_replace_callback('/@slot\s*\(\s*[\'"](.*?)[\'"]\s*\)(.*?)@endslot/s', function ($m) {
+            return "<?php \\PHJC::slot(" . var_export($m[1], true) . ", (function () { ob_start(); ?>" . $m[2] . "<?php return ob_get_clean(); })()); ?>";
+        }, $content);
+
+        // No-paren / simple directives
         $compilers = [
-            '/@if\s*\((.*)\)/' => '<?php if($1): ?>',
-            '/@elseif\s*\((.*)\)/' => '<?php elseif($1): ?>',
             '/@else/' => '<?php else: ?>',
             '/@endif/' => '<?php endif; ?>',
-            '/@isset\s*\((.*)\)/' => '<?php if(isset($1)): ?>',
             '/@endisset/' => '<?php endif; ?>',
-            '/@empty\s*\((.*)\)/' => '<?php if(empty($1)): ?>',
             '/@endempty/' => '<?php endif; ?>',
-            '/@for\s*\((.*)\)/' => '<?php for($1): ?>',
+            '/@endunless/' => '<?php endif; ?>',
             '/@endfor/' => '<?php endfor; ?>',
-            '/@while\s*\((.*)\)/' => '<?php while($1): ?>',
             '/@endwhile/' => '<?php endwhile; ?>',
-            '/@switch\s*\((.*)\)/' => '<?php switch($1): ?>',
-            '/@case\s*\((.*)\)/' => '<?php case $1: ?>',
             '/@default/' => '<?php default: ?>',
             '/@break/' => '<?php break; ?>',
-            '/@endswitch/' => '<?php endswitch; ?>',            
+            '/@continue/' => '<?php continue; ?>',
+            '/@endswitch/' => '<?php endswitch; ?>',
             '/@auth/' => '<?php if(!empty($_SESSION[\'user\'])): ?>',
             '/@endauth/' => '<?php endif; ?>',
             '/@guest/' => '<?php if(empty($_SESSION[\'user\'])): ?>',
@@ -616,25 +748,53 @@ class PHJC {
             '/@error\s*\(\s*[\'"](.*?)[\'"]\s*\)/' => '<?php if(isset($_SESSION[\'errors\'][\'$1\'])): ?>',
             '/@enderror/' => '<?php endif; ?>',
             '/@csrf/' => '<?php echo \'<input type="hidden" name="csrf_token" value="\'.(class_exists(\'PHRO\') ? \PHRO::getToken() : ($_SESSION[\'csrf_token\'] ?? \'\')).\'">\'; ?>',
-            '/@dump\s*\((.*)\)/' => '<?php var_dump($1); ?>',
-            '/@dd\s*\((.*)\)/' => '<?php var_dump($1); die; ?>',
         ];
-
         $content = preg_replace(array_keys($compilers), array_values($compilers), $content);
 
-        // Individual complex replacements
-        $content = preg_replace('/@old\s*\(\s*[\'"](.*?)[\'"]\s*(?:,\s*(.*?))?\s*\)/', '<?php echo htmlspecialchars($_REQUEST[\'$1\'] ?? $2 ?? \'\'); ?>', $content);
+        // @old / @method
+        $content = preg_replace_callback('/@old\s*\(\s*[\'"](.*?)[\'"]\s*(?:,\s*(.*?))?\s*\)/s', function ($m) {
+            $default = isset($m[2]) && trim($m[2]) !== '' ? trim($m[2]) : "''";
+            return "<?php echo htmlspecialchars((string)(\$_REQUEST[" . var_export($m[1], true) . "] ?? $default), ENT_QUOTES, 'UTF-8'); ?>";
+        }, $content);
         $content = preg_replace('/@method\s*\(\s*[\'"](.*?)[\'"]\s*\)/', '<?php echo \'<input type="hidden" name="_method" value="$1">\'; ?>', $content);
+
+        // restore @verbatim
+        foreach ($verbatim as $key => $raw) {
+            $content = str_replace($key, $raw, $content);
+        }
 
         return $content;
     }
 
+    /** Split a directive argument list on top-level commas only. */
+    private static function splitTopLevel(string $args): array {
+        $parts = []; $buf = ''; $depth = 0; $quote = null; $len = strlen($args);
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $args[$i];
+            if ($quote !== null) {
+                $buf .= $ch;
+                if ($ch === '\\' && $i + 1 < $len) { $buf .= $args[++$i]; continue; }
+                if ($ch === $quote) { $quote = null; }
+                continue;
+            }
+            if ($ch === '"' || $ch === "'") { $quote = $ch; $buf .= $ch; continue; }
+            if ($ch === '(' || $ch === '[' || $ch === '{') { $depth++; $buf .= $ch; continue; }
+            if ($ch === ')' || $ch === ']' || $ch === '}') { $depth--; $buf .= $ch; continue; }
+            if ($ch === ',' && $depth === 0) { $parts[] = $buf; $buf = ''; continue; }
+            $buf .= $ch;
+        }
+        $parts[] = $buf;
+        return $parts;
+    }
+
     private static function compileEchoWithFilters(string $expression): string {
-        $parts = explode('|', $expression);
+        $parts = self::splitFilters($expression);
         $var = trim(array_shift($parts));
+        $raw = false;
         foreach ($parts as $filterStr) {
             $filterStr = trim($filterStr);
-            if (preg_match('/(\w+)\((.*?)\)/', $filterStr, $m)) { $filter = $m[1]; $arg = $m[2]; } 
+            if ($filterStr === '') continue;
+            if (preg_match('/^(\w+)\((.*?)\)$/s', $filterStr, $m)) { $filter = $m[1]; $arg = $m[2]; }
             else { $filter = $filterStr; $arg = null; }
             switch ($filter) {
                 case 'upper': $var = "strtoupper((string)$var)"; break;
@@ -644,9 +804,45 @@ class PHJC {
                 case 'default': $var = "(!empty($var) ? $var : $arg)"; break;
                 case 'json': $var = "json_encode($var)"; break;
                 case 'date': $var = "date($arg, strtotime($var))"; break;
+                case 'e': case 'escape': break;
+                case 'raw': $raw = true; break;
+                case 'striptags': $var = "strip_tags((string)$var)"; break;
+                case 'nl2br': $var = "nl2br((string)$var)"; break;
+                case 'trim': $var = "trim((string)$var)"; break;
+                case 'urlencode': $var = "urlencode((string)$var)"; break;
+                case 'number': case 'number_format': $var = "number_format((float)$var, " . ($arg !== null ? $arg : '0') . ")"; break;
+                case 'money': $var = "number_format((float)$var, 2)"; break;
+                case 'slug': $var = "trim(preg_replace('/[^A-Za-z0-9]+/', '-', strtolower((string)$var)), '-')"; break;
+                case 'limit': case 'truncate': $var = "mb_substr((string)$var, 0, " . ($arg !== null ? $arg : '100') . ")"; break;
+                case 'words': $var = "implode(' ', array_slice(preg_split('/\\s+/', trim((string)$var)), 0, " . ($arg !== null ? $arg : '50') . "))"; break;
             }
         }
-        return "<?php echo htmlspecialchars((string) ($var ?? ''), ENT_QUOTES, 'UTF-8'); ?>"; 
+        if ($raw) return "<?php echo ($var ?? ''); ?>";
+        return "<?php echo htmlspecialchars((string) ($var ?? ''), ENT_QUOTES, 'UTF-8'); ?>";
+    }
+
+    /** Split an echo expression on top-level `|` filter separators, ignoring `||`, quotes and brackets. */
+    private static function splitFilters(string $expression): array {
+        $parts = []; $buf = ''; $depth = 0; $quote = null; $len = strlen($expression);
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $expression[$i];
+            if ($quote !== null) {
+                $buf .= $ch;
+                if ($ch === '\\' && $i + 1 < $len) { $buf .= $expression[++$i]; continue; }
+                if ($ch === $quote) { $quote = null; }
+                continue;
+            }
+            if ($ch === '"' || $ch === "'") { $quote = $ch; $buf .= $ch; continue; }
+            if ($ch === '(' || $ch === '[' || $ch === '{') { $depth++; $buf .= $ch; continue; }
+            if ($ch === ')' || $ch === ']' || $ch === '}') { $depth--; $buf .= $ch; continue; }
+            if ($ch === '|' && $depth === 0) {
+                if (($expression[$i + 1] ?? '') === '|') { $buf .= '||'; $i++; continue; }
+                $parts[] = $buf; $buf = ''; continue;
+            }
+            $buf .= $ch;
+        }
+        $parts[] = $buf;
+        return $parts;
     }
 
     private static function evaluateView(string $__phjc_path, array $__phjc_data): string {
@@ -784,6 +980,38 @@ class PHJC {
         self::$bodyPart = '';
         self::$css = '';
         self::$js = '';
+        self::$forelseSeq = 0;
+        self::$onceMap = [];
+    }
+
+    /**
+     * Return true only the first time a given key is seen in this request.
+     * Backs the @once ... @endonce directive.
+     */
+    public static function once(string $key): bool {
+        if (isset(self::$onceMap[$key])) {
+            return false;
+        }
+        self::$onceMap[$key] = true;
+        return true;
+    }
+
+    /**
+     * Merge a conditional class map into a class string (Blade-style @class).
+     * Integer-keyed values are always included; string keys are included when truthy.
+     */
+    public static function classes(array $map): string {
+        $out = [];
+        foreach ($map as $key => $value) {
+            if (is_int($key)) {
+                if ($value !== null && $value !== '' && $value !== false) {
+                    $out[] = (string) $value;
+                }
+            } elseif ($value) {
+                $out[] = (string) $key;
+            }
+        }
+        return implode(' ', $out);
     }
 
     public static function head(array $data) {

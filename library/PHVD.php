@@ -141,6 +141,33 @@ class PHVD
         'pattern' => 'validatePattern',
         'start_num' => 'validateStartWithNumber',
         'card_format' => 'validateCardFormat',
+        'prohibited' => 'validateProhibited',
+        'lowercase' => 'validateLowercase',
+        'uppercase' => 'validateUppercase',
+        'contains' => 'validateContains',
+        'ascii' => 'validateAscii',
+        'utf8' => 'validateUtf8',
+        'hex' => 'validateHex',
+        'name' => 'validateName',
+        'bengali' => 'validateBengali',
+        'positive' => 'validatePositive',
+        'negative' => 'validateNegative',
+        'non_negative' => 'validateNonNegative',
+        'multiple_of' => 'validateMultipleOf',
+        'even' => 'validateEven',
+        'odd' => 'validateOdd',
+        'decimal' => 'validateDecimal',
+        'time' => 'validateTime',
+        'timestamp' => 'validateTimestamp',
+        'date_equals' => 'validateDateEquals',
+        'iban' => 'validateIban',
+        'bic' => 'validateBic',
+        'isbn' => 'validateIsbn',
+        'imei' => 'validateImei',
+        'jwt' => 'validateJwt',
+        'data_uri' => 'validateDataUri',
+        'csv' => 'validateCsv',
+        'url_https' => 'validateUrlHttps',
     ];
 
     // --- Character Sets for 'exist' Rule ---
@@ -263,6 +290,33 @@ class PHVD
         'pattern' => 'The :field format does not match the required pattern.',
         'start_num' => 'The :field must start with the number: :values.',
         'card_format' => 'The :field must be a valid formatted card number.',
+        'prohibited' => 'The :field field must be empty.',
+        'lowercase' => 'The :field must be lowercase.',
+        'uppercase' => 'The :field must be uppercase.',
+        'contains' => 'The :field must contain at least one of: :values.',
+        'ascii' => 'The :field must contain only ASCII characters.',
+        'utf8' => 'The :field must be valid UTF-8 text.',
+        'hex' => 'The :field must be a valid hexadecimal value.',
+        'name' => 'The :field must be a valid name.',
+        'bengali' => 'The :field must contain Bengali text.',
+        'positive' => 'The :field must be a positive number.',
+        'negative' => 'The :field must be a negative number.',
+        'non_negative' => 'The :field must be zero or greater.',
+        'multiple_of' => 'The :field must be a multiple of :value.',
+        'even' => 'The :field must be an even number.',
+        'odd' => 'The :field must be an odd number.',
+        'decimal' => 'The :field must have a valid number of decimal places.',
+        'time' => 'The :field must be a valid time (HH:MM or HH:MM:SS).',
+        'timestamp' => 'The :field must be a valid Unix timestamp.',
+        'date_equals' => 'The :field must be equal to :value.',
+        'iban' => 'The :field must be a valid IBAN.',
+        'bic' => 'The :field must be a valid BIC/SWIFT code.',
+        'isbn' => 'The :field must be a valid ISBN.',
+        'imei' => 'The :field must be a valid IMEI number.',
+        'jwt' => 'The :field must be a valid JSON Web Token.',
+        'data_uri' => 'The :field must be a valid data URI.',
+        'csv' => 'The :field must be a comma-separated list.',
+        'url_https' => 'The :field must be a valid HTTPS URL.',
     ];
 
     public static function check(array $rules, array|bool|null $data = null, bool $debug = false): array
@@ -1235,5 +1289,207 @@ class PHVD
     private static function validateCardFormat($value): bool
     {
         return preg_match('/^(\d{4}[- ]?){3}\d{4,7}$/', $value);
+    }
+
+    // --- Extended rule set (presence, text, numeric, date/time, identity formats) ---
+    private static function validateProhibited($value): bool
+    {
+        return self::isEmpty($value);
+    }
+    private static function validateLowercase($value): bool
+    {
+        return is_string($value) && $value !== '' && function_exists('mb_strtolower') && $value === mb_strtolower($value);
+    }
+    private static function validateUppercase($value): bool
+    {
+        return is_string($value) && $value !== '' && function_exists('mb_strtoupper') && $value === mb_strtoupper($value);
+    }
+    private static function validateContains($value, $params): bool
+    {
+        foreach ($params as $needle) {
+            if ((string) $needle !== '' && str_contains((string) $value, (string) $needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    private static function validateAscii($value): bool
+    {
+        return is_string($value) && preg_match('/^[\x00-\x7F]*$/', $value) === 1;
+    }
+    private static function validateUtf8($value): bool
+    {
+        return is_string($value) && function_exists('mb_check_encoding') && mb_check_encoding($value, 'UTF-8');
+    }
+    private static function validateHex($value): bool
+    {
+        return is_string($value) && preg_match('/^(0x)?[0-9a-fA-F]+$/', $value) === 1;
+    }
+    private static function validateName($value): bool
+    {
+        return is_string($value) && preg_match('/^[\p{L}]+(?:[\s\'.-]+[\p{L}]+)*$/u', $value) === 1;
+    }
+    private static function validateBengali($value): bool
+    {
+        return is_string($value) && preg_match('/[\x{0980}-\x{09FF}]/u', $value) === 1;
+    }
+    private static function validatePositive($value): bool
+    {
+        return is_numeric($value) && $value > 0;
+    }
+    private static function validateNegative($value): bool
+    {
+        return is_numeric($value) && $value < 0;
+    }
+    private static function validateNonNegative($value): bool
+    {
+        return is_numeric($value) && $value >= 0;
+    }
+    private static function validateMultipleOf($value, $params): bool
+    {
+        if (!is_numeric($value) || !isset($params[0]) || !is_numeric($params[0]) || (float) $params[0] === 0.0) {
+            return false;
+        }
+        return abs(fmod((float) $value, (float) $params[0])) < 1e-9;
+    }
+    private static function validateEven($value): bool
+    {
+        return is_numeric($value) && ((int) $value % 2) === 0;
+    }
+    private static function validateOdd($value): bool
+    {
+        return is_numeric($value) && ((int) $value % 2) !== 0;
+    }
+    private static function validateDecimal($value, $params): bool
+    {
+        if (!is_numeric($value)) {
+            return false;
+        }
+        $string = (string) $value;
+        if (!preg_match('/^-?\d+(?:\.(\d+))?$/', $string, $m)) {
+            return false;
+        }
+        $decimals = isset($m[1]) ? strlen($m[1]) : 0;
+        if (isset($params[1])) {
+            return $decimals >= (int) $params[0] && $decimals <= (int) $params[1];
+        }
+        if (isset($params[0])) {
+            return $decimals <= (int) $params[0];
+        }
+        return $decimals > 0;
+    }
+    private static function validateTime($value): bool
+    {
+        return is_string($value) && preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $value) === 1;
+    }
+    private static function validateTimestamp($value): bool
+    {
+        return is_numeric($value) && preg_match('/^\d{1,11}$/', (string) $value) === 1;
+    }
+    private static function validateDateEquals($value, $params): bool
+    {
+        if (!isset($params[0])) {
+            return false;
+        }
+        $a = strtotime((string) $value);
+        $b = strtotime((string) $params[0]);
+        return $a !== false && $b !== false && date('Y-m-d', $a) === date('Y-m-d', $b);
+    }
+    private static function validateIban($value): bool
+    {
+        $iban = strtoupper(str_replace(' ', '', (string) $value));
+        if (!preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]{1,30}$/', $iban)) {
+            return false;
+        }
+        $rearranged = substr($iban, 4) . substr($iban, 0, 4);
+        $remainder = 0;
+        for ($i = 0, $length = strlen($rearranged); $i < $length; $i++) {
+            $char = $rearranged[$i];
+            $digits = ctype_digit($char) ? $char : (string) (ord($char) - 55);
+            for ($j = 0, $dl = strlen($digits); $j < $dl; $j++) {
+                $remainder = ($remainder * 10 + (int) $digits[$j]) % 97;
+            }
+        }
+        return $remainder === 1;
+    }
+    private static function validateBic($value): bool
+    {
+        return (bool) preg_match('/^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$/', strtoupper((string) $value));
+    }
+    private static function validateIsbn($value): bool
+    {
+        $clean = strtoupper(str_replace(['-', ' '], '', (string) $value));
+        if (preg_match('/^\d{9}[\dX]$/', $clean)) {
+            $sum = 0;
+            for ($i = 0; $i < 10; $i++) {
+                $sum += ($clean[$i] === 'X' ? 10 : (int) $clean[$i]) * (10 - $i);
+            }
+            return $sum % 11 === 0;
+        }
+        if (preg_match('/^\d{13}$/', $clean)) {
+            $sum = 0;
+            for ($i = 0; $i < 13; $i++) {
+                $sum += (int) $clean[$i] * ($i % 2 === 0 ? 1 : 3);
+            }
+            return $sum % 10 === 0;
+        }
+        return false;
+    }
+    private static function validateImei($value): bool
+    {
+        $clean = preg_replace('/[\s-]/', '', (string) $value);
+        return preg_match('/^\d{15}$/', $clean) === 1 && self::luhn($clean);
+    }
+    private static function validateJwt($value): bool
+    {
+        $parts = explode('.', (string) $value);
+        if (count($parts) !== 3) {
+            return false;
+        }
+        foreach ($parts as $part) {
+            if (!preg_match('#^[A-Za-z0-9_-]+$#', $part)) {
+                return false;
+            }
+        }
+        $header = json_decode(self::base64UrlDecode($parts[0]), true);
+        $payload = json_decode(self::base64UrlDecode($parts[1]), true);
+        return is_array($header) && isset($header['alg']) && is_array($payload);
+    }
+    private static function validateDataUri($value): bool
+    {
+        return is_string($value) && preg_match('~^data:[-a-zA-Z0-9!#$&^_.+/]+;base64,[A-Za-z0-9+/\r\n]*={0,2}$~', $value) === 1;
+    }
+    private static function validateCsv($value): bool
+    {
+        return is_string($value) && preg_match('/^[^,]+(?:,[^,]+)*$/', $value) === 1;
+    }
+    private static function validateUrlHttps($value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_URL) !== false && str_starts_with(strtolower((string) $value), 'https://');
+    }
+
+    private static function luhn(string $digits): bool
+    {
+        $sum = 0;
+        $alternate = false;
+        for ($i = strlen($digits) - 1; $i >= 0; $i--) {
+            $n = (int) $digits[$i];
+            if ($alternate) {
+                $n *= 2;
+                if ($n > 9) {
+                    $n -= 9;
+                }
+            }
+            $sum += $n;
+            $alternate = !$alternate;
+        }
+        return $sum % 10 === 0;
+    }
+
+    private static function base64UrlDecode(string $data): string
+    {
+        $base64 = strtr($data, '-_', '+/');
+        $padding = (4 - strlen($base64) % 4) % 4;
+        return (string) base64_decode($base64 . str_repeat('=', $padding), true);
     }
 }

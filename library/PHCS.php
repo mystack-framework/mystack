@@ -4353,6 +4353,22 @@ class PHCS {
             ['pattern' => '/^(in)?visible$/', 'handler' => 'handleVisibility', 'priority' => 10],
             ['pattern' => '/^decoration-opacity-(\d+)$/', 'handler' => 'handleDecorationOpacity', 'priority' => 10],
             ['pattern' => '/^underline-offset-(\d+)$/', 'handler' => 'handleUnderlineOffset', 'priority' => 10],
+
+            // Extended utilities: direction, spacing, scroll, i18n, rendering
+            ['pattern' => '/^(rtl|ltr)$/', 'handler' => 'handleDirection', 'priority' => 5],
+            ['pattern' => '/^word-spacing-(.+)$/', 'handler' => 'handleWordSpacing', 'priority' => 5],
+            ['pattern' => '/^object-(center|top|bottom|left|right|left-top|left-bottom|right-top|right-bottom)$/', 'handler' => 'handleObjectPosition', 'priority' => 9],
+            ['pattern' => '/^overscroll-(?:([xy])-)?(auto|contain|none)$/', 'handler' => 'handleOverscroll', 'priority' => 5],
+            ['pattern' => '/^writing-(horizontal-tb|horizontal-bt|vertical-rl|vertical-lr|sideways-rl|sideways-lr|stacked-right|stacked-left)$/', 'handler' => 'handleWritingMode', 'priority' => 5],
+            ['pattern' => '/^text-orientation-(mixed|upright|sideways-left|sideways-right|sideways|use-glyph-orientation)$/', 'handler' => 'handleTextOrientation', 'priority' => -5],
+            ['pattern' => '/^image-rendering-(auto|pixelated|crisp-edges|smooth)$/', 'handler' => 'handleImageRendering', 'priority' => 5],
+            ['pattern' => '/^scrollbar-gutter-(auto|stable|both-edges)$/', 'handler' => 'handleScrollbarGutter', 'priority' => 5],
+            ['pattern' => '/^content-visibility-(auto|visible|hidden)$/', 'handler' => 'handleContentVisibility', 'priority' => 5],
+            ['pattern' => '/^contain-(none|strict|content|layout|paint|style|size|inline-size|block-size)$/', 'handler' => 'handleContain', 'priority' => 5],
+            ['pattern' => '/^clear-(left|right|both|none|start|end)$/', 'handler' => 'handleClear', 'priority' => 5],
+            ['pattern' => '/^box-(border|content)$/', 'handler' => 'handleBoxSizing', 'priority' => 5],
+            ['pattern' => '/^tab-(\d+)$/', 'handler' => 'handleTabSize', 'priority' => 10],
+            ['pattern' => '/^field-sizing-(content|fixed)$/', 'handler' => 'handleFieldSizing', 'priority' => 5],
         ];
         
         foreach($handlers as $h) {
@@ -14222,6 +14238,59 @@ CSS;
         }
         
         return $cssFromBs;
+    }
+
+    // --- Extended utility set: direction, spacing, scroll, i18n, rendering ---
+    private function handleDirection(string $baseClassPart, array $matches): ?array {
+        return ['direction' => $matches[1]];
+    }
+    private function handleWordSpacing(string $baseClassPart, array $matches): ?array {
+        $map = ['tighter' => '-0.05em', 'tight' => '-0.025em', 'normal' => '0', 'wide' => '0.05em', 'wider' => '0.1em', 'widest' => '0.2em'];
+        $v = $matches[1];
+        if (isset($map[$v])) return ['word-spacing' => $map[$v]];
+        if (preg_match('/^[\d.]+(px|rem|em|%)$/', $v)) return ['word-spacing' => $v];
+        return null;
+    }
+    private function handleObjectPosition(string $baseClassPart, array $matches): ?array {
+        $map = ['center' => 'center', 'top' => 'top', 'bottom' => 'bottom', 'left' => 'left', 'right' => 'right',
+            'left-top' => 'left top', 'left-bottom' => 'left bottom', 'right-top' => 'right top', 'right-bottom' => 'right bottom'];
+        $v = $matches[1];
+        return isset($map[$v]) ? ['object-position' => $map[$v]] : null;
+    }
+    private function handleOverscroll(string $baseClassPart, array $matches): ?array {
+        $axis = $matches[1] ?? '';
+        $prop = $axis === 'x' ? 'overscroll-behavior-x' : ($axis === 'y' ? 'overscroll-behavior-y' : 'overscroll-behavior');
+        return [$prop => $matches[2]];
+    }
+    private function handleWritingMode(string $baseClassPart, array $matches): ?array {
+        return ['writing-mode' => $matches[1]];
+    }
+    private function handleTextOrientation(string $baseClassPart, array $matches): ?array {
+        return ['text-orientation' => $matches[1]];
+    }
+    private function handleImageRendering(string $baseClassPart, array $matches): ?array {
+        return ['image-rendering' => $matches[1]];
+    }
+    private function handleScrollbarGutter(string $baseClassPart, array $matches): ?array {
+        return ['scrollbar-gutter' => $matches[1]];
+    }
+    private function handleContentVisibility(string $baseClassPart, array $matches): ?array {
+        return ['content-visibility' => $matches[1]];
+    }
+    private function handleContain(string $baseClassPart, array $matches): ?array {
+        return ['contain' => $matches[1]];
+    }
+    private function handleClear(string $baseClassPart, array $matches): ?array {
+        return ['clear' => $matches[1]];
+    }
+    private function handleBoxSizing(string $baseClassPart, array $matches): ?array {
+        return ['box-sizing' => $matches[1] === 'border' ? 'border-box' : 'content-box'];
+    }
+    private function handleTabSize(string $baseClassPart, array $matches): ?array {
+        return ['tab-size' => (int) $matches[1]];
+    }
+    private function handleFieldSizing(string $baseClassPart, array $matches): ?array {
+        return ['field-sizing' => $matches[1]];
     }
 
 }

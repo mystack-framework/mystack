@@ -651,6 +651,133 @@ class PHEM {
         echo htmlspecialchars(print_r(self::$log, true), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         echo '</pre>';
     }
+
+    /**
+     * Queue an SMTP email for asynchronous delivery through the local console queue.
+     *
+     * Captures the current PHEM::smtp()/PHEM::smtpLogin() configuration and the
+     * message into a private .mystack/console.sqlite job row. The existing
+     * queue:work worker resolves PHEM_MailQueueHandler, restores the captured
+     * configuration and delivers the mail with the queue's built-in retry,
+     * backoff and failed-job handling. No queue-system code is modified.
+     *
+     * Security note: the job payload contains SMTP credentials and message
+     * content inside the private .mystack store. Keep its HTTP access guard
+     * enabled and treat this state as single-host local data.
+     *
+     * @param string $from Sender's email address.
+     * @param string $name Sender's name.
+     * @param string $to Recipient's email address.
+     * @param string $cc CC email addresses.
+     * @param string $bcc BCC email addresses.
+     * @param string $subject Email subject.
+     * @param string $message Email message body.
+     * @param int $delay Seconds to wait before the job becomes available.
+     * @param int $tries Maximum delivery attempts (1-100).
+     * @return array status/id/job on success, or status/message on failure.
+     */
+    public static function queue($from, $name, $to, $cc, $bcc, $subject, $message, $delay = 0, $tries = 3) {
+        try {
+            if (empty(self::$smtpHost) || (int) self::$smtpPort <= 0 || (string) self::$smtpPassword === '') {
+                throw new \InvalidArgumentException('Configure PHEM::smtp() and PHEM::smtpLogin() before queueing mail.');
+            }
+            self::assertHeaderSafe((string) $name, 'sender name');
+            self::assertHeaderSafe((string) $subject, 'subject');
+            $fromEmail = self::validateEmail((string) $from);
+            if (array_merge(self::extractEmails($to), self::extractEmails($cc), self::extractEmails($bcc)) === []) {
+                throw new \InvalidArgumentException('At least one valid recipient address is required.');
+            }
+            $root = defined('ROOT_DIR') ? ROOT_DIR : (class_exists('DIR') ? DIR::getRootDir() : '');
+            if ((string) $root === '') {
+                throw new \RuntimeException('The project root could not be resolved for the queue store.');
+            }
+            $directory = rtrim(str_replace('\\', '/', (string) $root), '/') . '/.mystack';
+            if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+                throw new \RuntimeException('Unable to create the private .mystack queue directory.');
+            }
+            $payload = json_encode([
+                'host' => (string) self::$smtpHost,
+                'port' => (int) self::$smtpPort,
+                'secure' => (string) self::$smtpSecure,
+                'username' => (string) self::$smtpUsername,
+                'password' => (string) self::$smtpPassword,
+                'local' => (string) (self::$local ?: (php_uname('n') ?: 'localhost')),
+                'from' => $fromEmail,
+                'name' => (string) $name,
+                'to' => $to,
+                'cc' => $cc,
+                'bcc' => $bcc,
+                'subject' => (string) $subject,
+                'message' => (string) $message,
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $pdo = new \PDO('sqlite:' . $directory . '/console.sqlite', null, null, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+            ]);
+            $pdo->exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL');
+            $pdo->exec('CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT "pending", attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, available_at INTEGER NOT NULL, reserved_at INTEGER, completed_at INTEGER, error TEXT, created_at INTEGER NOT NULL)');
+            $statement = $pdo->prepare('INSERT INTO jobs(job,payload,max_attempts,available_at,created_at) VALUES(?,?,?,?,?)');
+            $statement->execute([
+                'PHEM_MailQueueHandler',
+                $payload,
+                max(1, min(100, (int) $tries)),
+                time() + max(0, (int) $delay),
+                time(),
+            ]);
+            return ['status' => true, 'id' => (int) $pdo->lastInsertId(), 'job' => 'PHEM_MailQueueHandler'];
+        } catch (\Throwable $e) {
+            return ['status' => false, 'message' => 'Failed to queue email: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Restore a queued SMTP configuration and deliver one email message.
+     *
+     * Sets the private connection state directly (mirroring PHEM::smtp() and
+     * PHEM::smtpLogin()) so console workers never depend on request superglobals.
+     *
+     * @param array $payload A payload created by PHEM::queue().
+     * @return array The smtpSend() status array.
+     */
+    public static function queueSend(array $payload) {
+        $host = (string) ($payload['host'] ?? '');
+        $secure = strtolower((string) ($payload['secure'] ?? ''));
+        $server = $host;
+        if ($secure === 'tls') $server = 'tcp://' . $host;
+        if ($secure === 'ssl') $server = 'ssl://' . $host;
+        self::$smtpHost = $host;
+        self::$smtpPort = (int) ($payload['port'] ?? 0);
+        self::$smtpSecure = $secure;
+        self::$smtpServer = $server;
+        self::$local = (string) ($payload['local'] ?? '') ?: 'localhost';
+        self::$smtpUsername = (string) ($payload['username'] ?? '');
+        self::$smtpPassword = (string) ($payload['password'] ?? '');
+        return self::smtpSend(
+            (string) ($payload['from'] ?? ''),
+            (string) ($payload['name'] ?? ''),
+            (string) ($payload['to'] ?? ''),
+            (string) ($payload['cc'] ?? ''),
+            (string) ($payload['bcc'] ?? ''),
+            (string) ($payload['subject'] ?? ''),
+            (string) ($payload['message'] ?? '')
+        );
+    }
+}
+
+/**
+ * Console queue handler for PHEM::queue() mail jobs.
+ *
+ * Resolved by the existing queue:work worker through class_exists(); it restores
+ * the queued SMTP configuration, delivers the message and throws on failure so
+ * the queue's retry, backoff and failed-job handling applies unchanged.
+ */
+final class PHEM_MailQueueHandler {
+    public static function handle(array $payload): void {
+        $result = PHEM::queueSend($payload);
+        if (empty($result['status'])) {
+            throw new \RuntimeException('PHEM queued mail delivery failed: ' . ($result['message'] ?? 'unknown error'));
+        }
+    }
 }
 
 ?>

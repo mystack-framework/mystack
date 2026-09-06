@@ -6,16 +6,17 @@
  * Title: QR Code Generator
  * ============================================================================
  * 
- * Memory-safe, high-performance QR code generator. Produces SVG or Data-URI PNG images dynamically without requiring heavy external dependencies.
+ * Memory-safe, high-performance QR code generator. The public API produces a
+ * base64 Data-URI PNG image dynamically without requiring heavy external dependencies.
  * 
  * Features:
- * - Memory-safe QR code generation.
- * - Outputs to SVG or base64 Data-URI.
+ * - Memory-safe QR code generation with bounded output size.
+ * - Base64 Data-URI PNG output (requires the GD extension).
  * - Customizable error correction and styling.
  * 
  * Usage Example:
  * ```php
- * $qrUri = PHQR::generate('https://mystack-framework.github.io');
+ * $qrUri = PHQR::make('https://mystack-framework.github.io');
  * echo "<img src='{$qrUri}'>";
  * ```
  * 

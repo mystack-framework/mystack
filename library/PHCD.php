@@ -631,8 +631,8 @@ HTML;
      *                                    - If empty string, skips no files.
      *                                    - If true, skips no files.
      *                                    - If false, skips all files.
-     * @return string Returns a JSON-encoded array containing the list of files relative to the "/src" directory 
-     *                for the specified packages and types.
+     * @return array Returns the list of installed file paths relative to the "/src" directory
+     *               for the specified packages and types.
      */
     public static function get($package = true, $type = true, $skipPKG = true, $skipFILE = true) {
         $results = [];

@@ -438,6 +438,23 @@ class PHJS {
     public static function fetch(string $url, array $opts = []): string { return "fetch(".self::encode($url).", ".self::encodeFunction($opts).").then(r => r.json()).then(d => console.log(d));"; }
     public static function raw(string $code): string { return $code . ";"; }
 
+    // --- Browser conveniences (pure JS emitters; no runtime dependency) ---
+    public static function confirm(string $message): string { return "window.confirm(" . self::encode($message) . ")"; }
+    public static function prompt(string $message, string $default = ''): string { return "window.prompt(" . self::encode($message) . ", " . self::encode($default) . ")"; }
+    public static function open(string $url, string $target = '_blank', string $features = ''): string { return "window.open(" . self::encode($url) . ", " . self::encode($target) . ($features !== '' ? ", " . self::encode($features) : '') . ")"; }
+    public static function back(): string { return "history.back();"; }
+    public static function print(): string { return "window.print();"; }
+    public static function focus(string $selector): string { return self::ele($selector) . "?.focus();"; }
+    public static function blur(string $selector): string { return self::ele($selector) . "?.blur();"; }
+    public static function scrollTo(string $selector, string $behavior = 'smooth'): string { self::assertIdentifier($behavior); return self::ele($selector) . "?.scrollIntoView({behavior:" . self::encode($behavior) . ",block:'start'});"; }
+    public static function copy(mixed $text): string { return "navigator.clipboard.writeText(" . self::encodeValue($text) . ");"; }
+    public static function stopPropagation(string $eventVar = 'e'): string { self::assertIdentifier($eventVar); return "$eventVar.stopPropagation();"; }
+    public static function matchMedia(string $query): string { return "window.matchMedia(" . self::encode($query) . ")"; }
+    public static function raf(mixed $callback): string { return "requestAnimationFrame(" . self::encodeValue($callback) . ")"; }
+    public static function geolocation(mixed $onSuccess, array $options = []): string { return "navigator.geolocation.getCurrentPosition(" . self::encodeValue($onSuccess) . ", null, " . self::encodeFunction($options) . ");"; }
+    public static function debounce(mixed $callback, int $wait = 250): string { $wait = max(0, $wait); return "(function(f,t){var id;return function(){var a=arguments,c=this;clearTimeout(id);id=setTimeout(function(){f.apply(c,a)},t);};})(" . self::encodeValue($callback) . ", $wait)"; }
+    public static function throttle(mixed $callback, int $wait = 250): string { $wait = max(1, $wait); return "(function(f,t){var last=0;return function(){var n=Date.now(),a=arguments,c=this;if(n-last>=t){last=n;f.apply(c,a);}};})(" . self::encodeValue($callback) . ", $wait)"; }
+
     // --- APP JS Engine (PHJS Core) ---
     public static function appReady(string $code): string { return "APP.ready(function(APP) { $code });"; }
     public static function appNavigate(string $url): string { return "APP.navigate(".self::encode($url).");"; }

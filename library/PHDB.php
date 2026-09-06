@@ -145,6 +145,10 @@ class PHDB {
      * changing databases, tables, or application data.
      */
     public static function checker(): array {
+        $driver = self::active();
+        if ($driver !== null) {
+            return $driver->probe(self::driverConfig());
+        }
         $startedAt = microtime(true);
         $probe = null;
 
@@ -203,6 +207,21 @@ class PHDB {
      * @return void
      */
     public static function connect() {
+        $driver = self::active();
+        if ($driver !== null) {
+            try {
+                if (!$driver->isConnected()) {
+                    $driver->connect(self::driverConfig());
+                }
+                if (!self::$shutdownRegistered) {
+                    register_shutdown_function([self::class, 'close']);
+                    self::$shutdownRegistered = true;
+                }
+            } catch (\Throwable $error) {
+                self::handleError($error->getMessage(), false);
+            }
+            return;
+        }
         mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
         try {
@@ -249,6 +268,14 @@ class PHDB {
      * @return bool TRUE if disconnected, FALSE if transaction is active
      */
     public static function disconnect() {
+        $driver = self::active();
+        if ($driver !== null) {
+            if (!self::$inTransaction && $driver->isConnected()) {
+                $driver->disconnect();
+                return true;
+            }
+            return false;
+        }
         if (self::$conn) {
             if (self::$inTransaction === false) {
                 self::$conn->close();
@@ -397,6 +424,10 @@ class PHDB {
      * @return mixed Array of fetched data, a single row, TRUE on success, or FALSE on failure.
      */
     public static function query(string $query, array $params = [], bool $single = false) {
+        $driver = self::active();
+        if ($driver !== null) {
+            return self::queryVia($driver, $query, $params, $single);
+        }
         if (self::$activeStreams > 0) {
             self::handleError(
                 'A PHDB::fast() stream is still active. Finish iterating or release the Generator before running another query.',
@@ -612,6 +643,11 @@ class PHDB {
      * @return \Generator<int, array<string, mixed>, void, void>
      */
     public static function fast(string $query, array $params = [], string|array $columns = '*'): \Generator {
+        $driver = self::active();
+        if ($driver !== null) {
+            yield from self::fastVia($driver, $query, $params, $columns);
+            return;
+        }
         $stmt = null;
         $resultObj = null;
         $metadata = null;
@@ -924,17 +960,36 @@ class PHDB {
         $values = array_values($data);
         $placeholders = array_fill(0, count($keys), '?');
         if ($overwrite) {
-            if (!array_key_exists('name', $data)) {
+            $driver = self::active();
+            if ($driver !== null) {
+                $conflict = self::pickConflictTarget($driver, $table, array_keys($data));
+                if ($conflict !== null) {
+                    $conflictLower = array_map(static fn($c): string => strtolower((string) $c), $conflict);
+                    $updates = [];
+                    foreach (array_keys($data) as $col) {
+                        if (!in_array(strtolower((string) $col), $conflictLower, true)) {
+                            $updates[] = "`$col`=excluded.`$col`";
+                        }
+                    }
+                    $sql = "INSERT INTO `$table` (" . implode(', ', $keys) . ") VALUES (" . implode(', ', $placeholders) . ")";
+                    $sql .= ' ON CONFLICT (' . implode(', ', array_map(static fn($c): string => "`$c`", $conflict)) . ')';
+                    $sql .= $updates !== [] ? ' DO UPDATE SET ' . implode(', ', $updates) : ' DO NOTHING';
+                    return self::query($sql, $values);
+                }
+            } elseif (!array_key_exists('name', $data)) {
                 throw new \InvalidArgumentException("Overwrite mode requires a 'name' field.");
-            }
-            $result = self::select($table, '*', ['name' => $data['name']]);
-            if (is_array($result) && count($result) > 0) {
-                $sql = "UPDATE `$table` SET " . implode(', ', array_map(function($key) { return "`$key` = ?"; }, array_keys($data))) . " WHERE `name` = ?";
-                return self::query($sql, array_merge($values, [$data['name']]));
+            } else {
+                $result = self::select($table, '*', ['name' => $data['name']]);
+                if (is_array($result) && count($result) > 0) {
+                    $sql = "UPDATE `$table` SET " . implode(', ', array_map(function($key) { return "`$key` = ?"; }, array_keys($data))) . " WHERE `name` = ?";
+                    return self::query($sql, array_merge($values, [$data['name']]));
+                }
             }
         }
         $sql = "INSERT INTO `$table` (" . implode(', ', $keys) . ") VALUES (" . implode(', ', $placeholders) . ") ";
-        $sql .= " ON DUPLICATE KEY UPDATE " . implode(', ', array_map(function($key) { return "`$key` = VALUES(`$key`)"; }, array_keys($data)));
+        if (self::active() === null) {
+            $sql .= " ON DUPLICATE KEY UPDATE " . implode(', ', array_map(function($key) { return "`$key` = VALUES(`$key`)"; }, array_keys($data)));
+        }
         return self::query($sql, $values);
     }
 
@@ -979,11 +1034,27 @@ class PHDB {
 
             // Add ON DUPLICATE KEY UPDATE if overwrite is true
             if ($overwrite) {
-                $updates = [];
-                foreach ($keys as $key) {
-                    $updates[] = "`$key`=VALUES(`$key`)";
+                $driver = self::active();
+                if ($driver === null) {
+                    $updates = [];
+                    foreach ($keys as $key) {
+                        $updates[] = "`$key`=VALUES(`$key`)";
+                    }
+                    $sql .= " ON DUPLICATE KEY UPDATE " . implode(',', $updates);
+                } else {
+                    $conflict = self::pickConflictTarget($driver, $table, $keys);
+                    if ($conflict !== null) {
+                        $conflictLower = array_map(static fn($c): string => strtolower((string) $c), $conflict);
+                        $updates = [];
+                        foreach ($keys as $key) {
+                            if (!in_array(strtolower((string) $key), $conflictLower, true)) {
+                                $updates[] = "`$key`=excluded.`$key`";
+                            }
+                        }
+                        $sql .= ' ON CONFLICT (' . implode(',', array_map(static fn($c): string => "`$c`", $conflict)) . ')';
+                        $sql .= $updates !== [] ? ' DO UPDATE SET ' . implode(',', $updates) : ' DO NOTHING';
+                    }
                 }
-                $sql .= " ON DUPLICATE KEY UPDATE " . implode(',', $updates);
             }
 
             return self::query($sql, $values);
@@ -1175,6 +1246,9 @@ class PHDB {
 
                     // FULLTEXT
                     if (preg_match('/^FULLTEXT\((.*?)\)$/i', $key, $match)) {
+                        if (self::active() !== null) {
+                            throw new \RuntimeException('FULLTEXT search requires the mysqli driver.');
+                        }
                         $cols = $match[1];
                         $fullTextColumns = array_map('trim', explode(',', $cols));
                         $fullTextColumns = array_map(
@@ -1643,6 +1717,10 @@ class PHDB {
     public static function addDB(string $dbname, string $collation = 'utf8mb4_unicode_ci') {
         self::assertIdentifier($dbname, 'database name');
         self::assertIdentifier($collation, 'collation');
+        $driver = self::active();
+        if ($driver !== null) {
+            return $driver->name() === 'sqlite' ? true : self::query('SELECT 1');
+        }
         $query = "CREATE DATABASE IF NOT EXISTS `$dbname` CHARACTER SET utf8mb4 COLLATE $collation";
         return self::query($query);
     }
@@ -1664,6 +1742,10 @@ class PHDB {
      */
     public static function createTable(string $table_name, array $columns, mixed $sync = true) {
         self::assertIdentifier($table_name, 'table name');
+        $driver = self::active();
+        if ($driver !== null) {
+            return self::createTableVia($driver, $table_name, $columns, $sync);
+        }
         if ($columns === []) throw new \InvalidArgumentException('Table schema cannot be empty.');
         if ($sync === "") $sync = true;
         $sync = (bool) $sync;
@@ -1884,6 +1966,16 @@ class PHDB {
      */
     public static function truncateTable(string $table_name) {
         self::assertIdentifier($table_name, 'table name');
+        $driver = self::active();
+        if ($driver !== null && $driver->name() === 'sqlite') {
+            // SQLite has no TRUNCATE; DELETE empties the table, and clearing
+            // sqlite_sequence restores the AUTOINCREMENT counter like TRUNCATE.
+            $emptied = self::query('DELETE FROM `' . $table_name . '`');
+            if ($emptied !== false && self::query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'", [], true) !== null) {
+                self::query('DELETE FROM sqlite_sequence WHERE name = ?', [$table_name]);
+            }
+            return $emptied;
+        }
         $sql = "TRUNCATE TABLE `$table_name`";
         return self::query($sql);
     }
@@ -1922,9 +2014,20 @@ class PHDB {
             $keyword = trim($conditions);
             if ($keyword !== '') {
                 $or = [];
-                foreach (self::columns($table) as $column) {
-                    self::assertIdentifier((string) $column, 'column name');
-                    $or[$column . ' LIKE'] = $keyword;
+                $driver = self::active();
+                if ($driver !== null) {
+                    // PostgreSQL rejects LIKE on non-text columns; restrict the
+                    // all-column keyword search to text-like columns there.
+                    foreach ($driver->columns($table) as $column) {
+                        if (preg_match('/(char|text|clob|json|uuid)/i', (string) ($column['Type'] ?? ''))) {
+                            $or[$column['Field'] . ' LIKE'] = $keyword;
+                        }
+                    }
+                } else {
+                    foreach (self::columns($table) as $column) {
+                        self::assertIdentifier((string) $column, 'column name');
+                        $or[$column . ' LIKE'] = $keyword;
+                    }
                 }
                 if ($or) $where['OR'] = $or;
             }
@@ -1947,8 +2050,10 @@ class PHDB {
      */
     public static function columns(string $table, string|array|null $filter = null, string|array|null $skip = null) {
         self::assertIdentifier($table, 'table name');
-        $sql = "SHOW COLUMNS FROM `$table`";
-        $result = self::query($sql);
+        $driver = self::active();
+        $result = $driver !== null
+            ? $driver->columns($table)
+            : self::query("SHOW COLUMNS FROM `$table`");
         if (is_array($result)) {
             $columns = array_column($result, 'Field');
             if ($filter) {
@@ -2575,6 +2680,10 @@ class PHDB {
      * @return bool TRUE on success, FALSE on failure (automatically rolls back)
      */
     public static function transaction(callable $callback) {
+        $driver = self::active();
+        if ($driver !== null) {
+            return self::transactionVia($driver, $callback);
+        }
         try {
             if (!self::$conn) {
                 self::connect();
@@ -2631,6 +2740,10 @@ class PHDB {
      * @throws InvalidArgumentException If invalid table name or options provided
      */
     public static function clean(string $table, array $options = []) {
+        if (self::active() !== null) {
+            self::handleError('PHDB::clean() currently supports only the mysqli driver.', true);
+            return false;
+        }
         // Validate table name
         if (!is_string($table) || !preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $table)) {
             throw new InvalidArgumentException("Invalid table name provided");
@@ -3081,6 +3194,10 @@ class PHDB {
      */
     private static function primaryKey(string $table) {
         self::assertIdentifier($table, 'table name');
+        $driver = self::active();
+        if ($driver !== null) {
+            return $driver->primaryKey($table);
+        }
         $tableInfo = self::query("SHOW KEYS FROM `$table` WHERE Key_name = 'PRIMARY'");
         if (is_array($tableInfo) && !empty($tableInfo)) {
             return $tableInfo[0]['Column_name'];
@@ -3096,9 +3213,772 @@ class PHDB {
      * @return void
      */
     public static function close() {
+        $driver = self::active();
+        if ($driver !== null) {
+            $driver->disconnect();
+            return;
+        }
         if (self::$conn) {
             self::$conn->close();
             self::$conn = null;
+        }
+    }
+
+    /**
+     * Opt-in driver selection. Default 'mysqli' keeps the original inline path
+     * byte-for-byte unchanged; an unset/empty value also resolves to mysqli.
+     *
+     * @var string
+     */
+    public static $driver = 'mysqli';
+
+    /** @var int|null Optional port for TCP drivers (mysqli derives it from host/php.ini). */
+    public static ?int $port = null;
+
+    /** @var array Driver-specific connection options (e.g. pgsql sslmode/channel_binding). */
+    public static array $options = [];
+
+    /** @var PHDB_Driver|null Cached non-mysqli driver instance. */
+    private static ?PHDB_Driver $active = null;
+
+    /**
+     * Resolve the active non-mysqli driver, or NULL when the legacy mysqli path applies.
+     */
+    private static function active(): ?PHDB_Driver {
+        $name = strtolower(trim((string) self::$driver));
+        if ($name === '' || $name === 'mysqli') {
+            self::$active = null;
+            return null;
+        }
+        if (self::$active instanceof PHDB_Driver && self::$active->name() === $name) {
+            return self::$active;
+        }
+        $driver = match ($name) {
+            'sqlite' => new PHDB_SqliteDriver(),
+            'pgsql'  => new PHDB_PgsqlDriver(),
+            default  => throw new \InvalidArgumentException('Unsupported PHDB driver: ' . $name),
+        };
+        if (!$driver->isAvailable()) {
+            throw new \RuntimeException('PHDB driver is not available on this host: ' . $name);
+        }
+        self::$active = $driver;
+        return $driver;
+    }
+
+    /**
+     * Snapshot of the public connection configuration for driver use.
+     */
+    private static function driverConfig(): array {
+        return [
+            'host' => self::$host,
+            'port' => self::$port,
+            'username' => self::$username,
+            'password' => self::$password,
+            'dbname' => self::$dbname,
+            'charset' => self::$charset,
+            'options' => self::$options,
+        ];
+    }
+
+    /**
+     * Driver-backed query executor mirroring query()'s public return contract.
+     */
+    private static function queryVia(PHDB_Driver $driver, string $query, array $params, bool $single) {
+        if (self::$activeStreams > 0) {
+            self::handleError('A PHDB::fast() stream is still active. Finish iterating or release the Generator before running another query.', false);
+            return false;
+        }
+        if (self::isPotentiallyMalicious($query)) {
+            self::handleError('Potential SQL injection attempt detected via pattern match.', false);
+            return false;
+        }
+        $query = trim($query);
+        if ($query === '') return false;
+        try {
+            if (!$driver->isConnected()) {
+                $driver->connect(self::driverConfig());
+            }
+            $result = $driver->run($query, $params);
+            self::$lastAffectedRows = $result->affected;
+            if ($result->insertId !== null) {
+                self::$lastInsertId = $result->insertId;
+            }
+            return $result->isSelect ? ($single ? ($result->rows[0] ?? null) : $result->rows) : true;
+        } catch (\Throwable $error) {
+            self::handleError($error->getMessage(), true);
+            return false;
+        }
+    }
+
+    /**
+     * Driver-backed unbuffered stream mirroring fast()'s guard and bookkeeping.
+     */
+    private static function fastVia(PHDB_Driver $driver, string $query, array $params, string|array $columns): \Generator {
+        $opened = false;
+        $rowsRead = 0;
+        try {
+            if (self::$activeStreams > 0) {
+                throw new \RuntimeException('Another PHDB::fast() stream is already active on this connection.');
+            }
+            $query = trim($query);
+            if ($query === '') {
+                throw new \InvalidArgumentException('PHDB::fast() table or query cannot be empty.');
+            }
+            $isSql = preg_match('/^(SELECT|SHOW|DESCRIBE|EXPLAIN|PRAGMA|WITH)\b/i', ltrim($query)) === 1;
+            if (!$isSql) {
+                $table = self::assertIdentifier($query, 'table name');
+                $selectedColumns = is_array($columns) ? implode(', ', $columns) : $columns;
+                $where = $params;
+                $params = [];
+                $query = 'SELECT ' . self::formatColumn($selectedColumns) . ' FROM `' . $table . '`' . self::buildFastWhere($where, $params);
+                $isSql = true;
+            }
+            if (self::isPotentiallyMalicious($query)) {
+                throw new \RuntimeException('Potential SQL injection attempt detected via pattern match.');
+            }
+            if (!$isSql) {
+                throw new \InvalidArgumentException('PHDB::fast() only supports queries that return a result set.');
+            }
+            if (!$driver->isConnected()) {
+                $driver->connect(self::driverConfig());
+            }
+            self::$activeStreams++;
+            $opened = true;
+            foreach ($driver->stream($query, $params) as $row) {
+                $rowsRead++;
+                yield $row;
+            }
+        } catch (\Throwable $error) {
+            self::handleError($error->getMessage(), true);
+        } finally {
+            self::$lastAffectedRows = $rowsRead;
+            if ($opened) {
+                self::$activeStreams = max(0, self::$activeStreams - 1);
+            }
+        }
+    }
+
+    /**
+     * Driver-backed transaction mirroring transaction()'s semantics.
+     */
+    private static function transactionVia(PHDB_Driver $driver, callable $callback) {
+        try {
+            if (!$driver->isConnected()) {
+                $driver->connect(self::driverConfig());
+            }
+            $driver->begin();
+            self::$inTransaction = true;
+            $result = $callback();
+            if ($result === false) {
+                $driver->rollback();
+                self::$inTransaction = false;
+                self::handleError('Transaction failed: Callback returned false', true);
+                return false;
+            }
+            $driver->commit();
+            self::$inTransaction = false;
+            return true;
+        } catch (\Exception $error) {
+            if ($driver->isConnected() && self::$inTransaction) {
+                $driver->rollback();
+                self::$inTransaction = false;
+            }
+            self::handleError('Transaction failed: ' . $error->getMessage(), true);
+            return false;
+        } finally {
+            if ($driver->isConnected()) {
+                self::disconnect();
+            }
+        }
+    }
+
+    /**
+     * Driver-backed createTable. Reuses parseSchema() shortcodes and normalizes the
+     * resulting type for the active dialect. Synchronization adds missing columns
+     * and drops undeclared columns (data in dropped columns is lost); column
+     * reorder and automatic type change are not applied on non-mysqli drivers.
+     * Foreign-key shortcodes are stripped on this path.
+     */
+    private static function createTableVia(PHDB_Driver $driver, string $table_name, array $columns, mixed $sync): bool {
+        if ($sync === '') $sync = true;
+        $sync = (bool) $sync;
+        $definitions = [];
+        foreach ($columns as $name => $def) {
+            if (is_int($name)) { $name = $def; $def = 'text'; }
+            $name = (string) $name;
+            self::assertIdentifier($name, 'column name');
+            $def = preg_replace('/fk\([^)]*\)/i', '', (string) $def);
+            $definitions[$name] = $driver->normalizeColumn(self::parseSchema($def));
+        }
+        try {
+            if (!$driver->isConnected()) {
+                $driver->connect(self::driverConfig());
+            }
+            if (!$driver->tableExists($table_name)) {
+                $driver->run($driver->createTableSql($table_name, $definitions));
+                return true;
+            }
+            if (!$sync) return true;
+            $existing = array_column($driver->columns($table_name), 'Field');
+            foreach ($definitions as $column => $type) {
+                if (!in_array($column, $existing, true)) {
+                    $driver->run('ALTER TABLE ' . $driver->quoteIdentifier($table_name)
+                        . ' ADD COLUMN ' . $driver->quoteIdentifier($column) . ' ' . $type);
+                }
+            }
+            foreach ($existing as $column) {
+                if (!array_key_exists($column, $definitions)) {
+                    $driver->run('ALTER TABLE ' . $driver->quoteIdentifier($table_name)
+                        . ' DROP COLUMN ' . $driver->quoteIdentifier((string) $column));
+                }
+            }
+            return true;
+        } catch (\Throwable $error) {
+            self::handleError("Sync failed for '$table_name': " . $error->getMessage(), true);
+            return false;
+        }
+    }
+
+    /**
+     * Choose an ON CONFLICT target: the first PK/UNIQUE constraint whose columns
+     * are all present in the insert payload, or NULL when none qualifies.
+     */
+    private static function pickConflictTarget(PHDB_Driver $driver, string $table, array $dataColumns): ?array {
+        $present = array_map(static fn($c): string => strtolower((string) $c), $dataColumns);
+        foreach ($driver->uniqueConstraints($table) as $columns) {
+            $lower = array_map(static fn($c): string => strtolower((string) $c), $columns);
+            if ($lower !== [] && array_diff($lower, $present) === []) {
+                return $columns;
+            }
+        }
+        return null;
+    }
+}
+
+/**
+ * Normalized, driver-neutral statement outcome used to keep PHDB's public
+ * return shapes identical across drivers.
+ */
+final class PHDB_Result {
+    public function __construct(
+        public readonly bool $isSelect,
+        public readonly array $rows = [],
+        public readonly int $affected = 0,
+        public readonly int|string|null $insertId = null,
+    ) {}
+}
+
+/**
+ * Contract every PHDB driver fulfills so PHDB can delegate without changing its
+ * public API or return shapes. Implemented by the built-in SQLite driver; the
+ * default mysqli path intentionally does not route through this interface.
+ */
+interface PHDB_Driver {
+    public function name(): string;
+    public function isAvailable(): bool;
+    public function connect(array $config): void;
+    public function isConnected(): bool;
+    public function disconnect(): void;
+    public function run(string $sql, array $params = []): PHDB_Result;
+    public function stream(string $sql, array $params = []): \Generator;
+    public function quoteIdentifier(string $name): string;
+    public function tableExists(string $table): bool;
+    public function columns(string $table): array;
+    public function primaryKey(string $table): string;
+    public function uniqueConstraints(string $table): array;
+    public function normalizeColumn(string $mysqlDefinition): string;
+    public function createTableSql(string $table, array $definitions): string;
+    public function begin(): void;
+    public function commit(): void;
+    public function rollback(): void;
+    public function probe(array $config): array;
+}
+
+/**
+ * PDO SQLite driver (Phase 1 reference non-mysqli driver). pdo_sqlite is a
+ * required MyStack extension, so this path is fully testable without a server.
+ */
+final class PHDB_SqliteDriver implements PHDB_Driver {
+    private ?\PDO $pdo = null;
+
+    public function name(): string { return 'sqlite'; }
+    public function isAvailable(): bool { return extension_loaded('pdo_sqlite'); }
+
+    public function connect(array $config): void {
+        $file = (string) ($config['dbname'] ?? '');
+        if ($file === '') {
+            throw new \RuntimeException('PHDB sqlite driver requires PHDB::$dbname to be a file path or :memory:.');
+        }
+        if ($file !== ':memory:') {
+            $directory = dirname($file);
+            if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+                throw new \RuntimeException('PHDB sqlite storage directory could not be created.');
+            }
+        }
+        $this->pdo = new \PDO('sqlite:' . $file, null, null, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+        ]);
+        $this->pdo->exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;');
+    }
+
+    public function isConnected(): bool { return $this->pdo instanceof \PDO; }
+    public function disconnect(): void { $this->pdo = null; }
+
+    public function run(string $sql, array $params = []): PHDB_Result {
+        $isSelect = preg_match('/^(SELECT|SHOW|DESCRIBE|EXPLAIN|PRAGMA|WITH)\b/i', ltrim($sql)) === 1;
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute(array_values($params));
+        if ($isSelect) {
+            $rows = $statement->fetchAll();
+            return new PHDB_Result(true, $rows, count($rows));
+        }
+        return new PHDB_Result(false, [], $statement->rowCount(), $statement->rowCount() > 0 ? $this->pdo->lastInsertId() : null);
+    }
+
+    public function stream(string $sql, array $params = []): \Generator {
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute(array_values($params));
+        while (($row = $statement->fetch(\PDO::FETCH_ASSOC)) !== false) {
+            yield $row;
+        }
+    }
+
+    public function quoteIdentifier(string $name): string {
+        return '"' . str_replace('"', '""', $name) . '"';
+    }
+
+    public function tableExists(string $table): bool {
+        $statement = $this->pdo->prepare('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=?');
+        $statement->execute([$table]);
+        return (bool) $statement->fetchColumn();
+    }
+
+    public function columns(string $table): array {
+        $rows = $this->pdo->query('PRAGMA table_info(' . $this->quoteIdentifier($table) . ')')->fetchAll();
+        $fields = [];
+        foreach ($rows as $row) {
+            $notNull = (int) ($row['notnull'] ?? 0) === 1;
+            $isPk = (int) ($row['pk'] ?? 0) > 0;
+            $fields[] = [
+                'Field' => (string) $row['name'],
+                'Type' => strtolower((string) ($row['type'] ?? '')),
+                'Null' => $notNull || $isPk ? 'NO' : 'YES',
+                'Key' => $isPk ? 'PRI' : '',
+                'Default' => $row['dflt_value'] ?? null,
+                'Extra' => $isPk && strtolower((string) $row['type']) === 'integer' ? 'auto_increment' : '',
+            ];
+        }
+        return $fields;
+    }
+
+    public function primaryKey(string $table): string {
+        foreach ($this->columns($table) as $column) {
+            if ($column['Key'] === 'PRI') return $column['Field'];
+        }
+        $columns = array_column($this->columns($table), 'Field');
+        return $columns !== [] ? $columns[0] : 'id';
+    }
+
+    public function uniqueConstraints(string $table): array {
+        $quoted = $this->quoteIdentifier($table);
+        $result = [];
+        $pk = [];
+        foreach ($this->pdo->query('PRAGMA table_info(' . $quoted . ')') as $row) {
+            if ((int) ($row['pk'] ?? 0) > 0) { $pk[(int) $row['pk']] = (string) $row['name']; }
+        }
+        if ($pk !== []) { ksort($pk); $result[] = array_values($pk); }
+        foreach ($this->pdo->query('PRAGMA index_list(' . $quoted . ')') as $index) {
+            if ((int) ($index['unique'] ?? 0) !== 1 || ($index['origin'] ?? '') === 'pk') continue;
+            $info = $this->pdo->prepare('PRAGMA index_info(' . $this->quoteIdentifier((string) $index['name']) . ')');
+            $info->execute();
+            $cols = array_column($info->fetchAll(), 'name');
+            if ($cols !== []) $result[] = $cols;
+        }
+        return $result;
+    }
+
+    public function normalizeColumn(string $mysqlDefinition): string {
+        $definition = trim($mysqlDefinition);
+        $rest = '';
+        if (preg_match('/^(\S+(?:\([^)]*\))?(?:\s+unsigned)?)(.*)$/is', $definition, $m)) {
+            $type = trim($m[1]);
+            $rest = $m[2];
+        } else {
+            $type = $definition;
+        }
+        $rest = preg_replace('/\s+(CHARACTER\s+SET\s+\w+|COLLATE\s+\w+)/i', '', $rest);
+        $rest = preg_replace('/\s+ON\s+UPDATE\s+CURRENT_TIMESTAMP/i', '', $rest);
+        $lower = strtolower($type);
+        if (str_contains(strtolower($definition), 'auto_increment')) {
+            return 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        }
+        $converted = preg_replace([
+            '/^(bigint|int|integer|smallint|mediumint|tinyint)(\(\d+\))?(\s+unsigned)?$/i',
+            '/^(double|float)(\(\d+,\d+\))?$/i',
+            '/^decimal(\(\d+,\d+\))?$/i',
+            '/^(char|varchar)\(\d+\)$/i',
+            '/^(tinytext|text|mediumtext|longtext)$/i',
+            '/^(json)$/i',
+            '/^(binary|varbinary|tinyblob|blob|mediumblob|longblob)$/i',
+            '/^(datetime|timestamp|date|time)$/i',
+            '/^year(\(\d+\))?$/i',
+        ], [
+            'INTEGER',
+            'REAL',
+            'NUMERIC$1',
+            'TEXT',
+            'TEXT',
+            'TEXT',
+            'BLOB',
+            'TEXT',
+            'INTEGER',
+        ], $lower);
+        return trim($converted . $rest);
+    }
+
+    public function createTableSql(string $table, array $definitions): string {
+        $columns = [];
+        foreach ($definitions as $name => $type) {
+            $columns[] = $this->quoteIdentifier($name) . ' ' . $type;
+        }
+        return 'CREATE TABLE IF NOT EXISTS ' . $this->quoteIdentifier($table) . ' (' . implode(', ', $columns) . ')';
+    }
+
+    public function begin(): void { if (!$this->pdo->inTransaction()) $this->pdo->beginTransaction(); }
+    public function commit(): void { if ($this->pdo->inTransaction()) $this->pdo->commit(); }
+    public function rollback(): void { if ($this->pdo->inTransaction()) $this->pdo->rollBack(); }
+
+    public function probe(array $config): array {
+        $startedAt = microtime(true);
+        try {
+            $this->connect($config);
+            $status = $this->pdo->query('SELECT 1')->fetchColumn() !== false;
+            return ['status' => $status, 'driver' => 'sqlite', 'configured' => true,
+                'latency_ms' => round((microtime(true) - $startedAt) * 1000, 2)];
+        } catch (\Throwable $error) {
+            return ['status' => false, 'driver' => 'sqlite', 'configured' => true,
+                'latency_ms' => round((microtime(true) - $startedAt) * 1000, 2), 'error' => $error->getMessage()];
+        } finally {
+            $this->disconnect();
+        }
+    }
+}
+
+/**
+ * PDO PostgreSQL driver. PHDB's CRUD builders emit MySQL-dialect SQL (backtick
+ * identifiers, `?` placeholders); this driver translates backtick identifiers to
+ * standard double-quoted identifiers and maps MySQL schema types to PostgreSQL,
+ * so the public return shapes stay identical across drivers.
+ */
+final class PHDB_PgsqlDriver implements PHDB_Driver {
+    private ?\PDO $pdo = null;
+
+    public function name(): string { return 'pgsql'; }
+    public function isAvailable(): bool {
+        return class_exists('PDO') && in_array('pgsql', \PDO::getAvailableDrivers(), true);
+    }
+
+    public function connect(array $config): void {
+        $options = is_array($config['options'] ?? null) ? $config['options'] : [];
+        $dsn = 'pgsql:host=' . ($config['host'] ?: '127.0.0.1')
+            . ';port=' . ((int) ($config['port'] ?? 5432) ?: 5432)
+            . ';dbname=' . (string) ($config['dbname'] ?? '')
+            . ';sslmode=' . (string) ($options['sslmode'] ?? 'require');
+        if (!empty($options['channel_binding'])) {
+            $dsn .= ';channel_binding=' . (string) $options['channel_binding'];
+        }
+        $this->pdo = new \PDO($dsn, (string) ($config['username'] ?? ''), (string) ($config['password'] ?? ''), [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+            \PDO::ATTR_STRINGIFY_FETCHES => false,
+            // Emulated prepares send one fully-quoted simple query, which is the
+            // compatible mode for transaction poolers (Neon/PgBouncer); native
+            // server-side PREPARE/EXECUTE can abort pooled transactions.
+            \PDO::ATTR_EMULATE_PREPARES => true,
+        ]);
+    }
+
+    public function isConnected(): bool { return $this->pdo instanceof \PDO; }
+    public function disconnect(): void { $this->pdo = null; }
+
+    /** Convert MySQL backtick identifiers to standard double-quoted identifiers. */
+    private function translate(string $sql): string {
+        return (string) preg_replace_callback(
+            "/'(?:[^']|'')*'|`([^`]*)`/",
+            static fn(array $m): string => isset($m[1]) ? '"' . $m[1] . '"' : $m[0],
+            $sql
+        );
+    }
+
+    public function run(string $sql, array $params = []): PHDB_Result {
+        $isSelect = preg_match('/^(SELECT|SHOW|DESCRIBE|EXPLAIN|PRAGMA|WITH)\b/i', ltrim($sql)) === 1;
+        $statement = $this->pdo->prepare($this->translate($sql));
+        $statement->execute(array_values($params));
+        if ($isSelect) {
+            $rows = $statement->fetchAll();
+            return new PHDB_Result(true, $rows, count($rows));
+        }
+        $affected = $statement->rowCount();
+        $insertId = null;
+        // Only fetch lastval() outside an open transaction: a failed statement
+        // aborts the whole PostgreSQL transaction block (e.g. under connection
+        // pooling), and id() is rarely needed mid-transaction.
+        if ($affected > 0 && !$this->pdo->inTransaction() && preg_match('/^\s*INSERT\b/i', $sql)) {
+            try {
+                $insertId = $this->pdo->lastInsertId();
+            } catch (\Throwable $ignored) {
+                $insertId = null;
+            }
+        }
+        return new PHDB_Result(false, [], $affected, $insertId);
+    }
+
+    public function stream(string $sql, array $params = []): \Generator {
+        // True server-side cursor so large result sets are not buffered client-side
+        // (emulated prepares would otherwise fetch everything). Runs inside a
+        // transaction so the pooler pins one backend for the cursor lifetime.
+        $interpolated = $this->interpolate($sql, $params);
+        $cursor = 'phdb_stream_' . bin2hex(random_bytes(5));
+        $owned = !$this->pdo->inTransaction();
+        if ($owned) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            $this->pdo->exec('DECLARE ' . $this->quoteIdentifier($cursor) . ' CURSOR FOR ' . $interpolated);
+            $fetch = $this->pdo->prepare('FETCH 1000 FROM ' . $this->quoteIdentifier($cursor));
+            while (true) {
+                $fetch->execute();
+                $batch = $fetch->fetchAll();
+                if ($batch === []) {
+                    break;
+                }
+                foreach ($batch as $row) {
+                    yield $row;
+                }
+            }
+        } finally {
+            try {
+                $this->pdo->exec('CLOSE ' . $this->quoteIdentifier($cursor));
+            } catch (\Throwable $ignored) {
+            }
+            if ($owned) {
+                try {
+                    $this->pdo->rollBack();
+                } catch (\Throwable $ignored) {
+                }
+            }
+        }
+    }
+
+    /** Translate backticks and inline `?` placeholders as safely-quoted literals. */
+    private function interpolate(string $sql, array $params): string {
+        $sql = $this->translate($sql);
+        $values = array_values($params);
+        $length = strlen($sql);
+        $out = '';
+        $inString = false;
+        $index = 0;
+        $position = 0;
+        while ($index < $length) {
+            $char = $sql[$index];
+            if ($inString) {
+                $out .= $char;
+                if ($char === "'") {
+                    if ($index + 1 < $length && $sql[$index + 1] === "'") {
+                        $out .= "'";
+                        $index += 2;
+                        continue;
+                    }
+                    $inString = false;
+                }
+                $index++;
+                continue;
+            }
+            if ($char === "'") {
+                $inString = true;
+                $out .= $char;
+                $index++;
+                continue;
+            }
+            if ($char === '?') {
+                if ($position >= count($values)) {
+                    throw new \RuntimeException('Not enough parameters for query placeholders.');
+                }
+                $out .= $this->literal($values[$position++]);
+                $index++;
+                continue;
+            }
+            $out .= $char;
+            $index++;
+        }
+        return $out;
+    }
+
+    private function literal(mixed $value): string {
+        if ($value === null) return 'NULL';
+        if (is_bool($value)) return $value ? '1' : '0';
+        if (is_int($value) || is_float($value)) return (string) $value;
+        return $this->pdo->quote((string) $value);
+    }
+
+    public function quoteIdentifier(string $name): string {
+        return '"' . str_replace('"', '""', $name) . '"';
+    }
+
+    public function tableExists(string $table): bool {
+        $statement = $this->pdo->prepare(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?"
+        );
+        $statement->execute([$table]);
+        return (bool) $statement->fetchColumn();
+    }
+
+    public function columns(string $table): array {
+        $primary = $this->primaryKey($table);
+        $statement = $this->pdo->prepare(
+            'SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position'
+        );
+        $statement->execute([$table]);
+        $fields = [];
+        foreach ($statement->fetchAll() as $row) {
+            $default = $row['column_default'];
+            $autoIncrement = is_string($default) && str_starts_with($default, 'nextval');
+            $fields[] = [
+                'Field' => (string) $row['column_name'],
+                'Type' => (string) $row['data_type'],
+                'Null' => strtoupper((string) $row['is_nullable']) === 'NO' ? 'NO' : 'YES',
+                'Key' => $row['column_name'] === $primary ? 'PRI' : '',
+                'Default' => $autoIncrement ? null : $default,
+                'Extra' => $autoIncrement ? 'auto_increment' : '',
+            ];
+        }
+        return $fields;
+    }
+
+    public function primaryKey(string $table): string {
+        $statement = $this->pdo->prepare(
+            "SELECT kcu.column_name FROM information_schema.table_constraints tc
+             JOIN information_schema.key_column_usage kcu
+               ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+             WHERE tc.table_schema = current_schema() AND tc.table_name = ? AND tc.constraint_type = 'PRIMARY KEY'
+             LIMIT 1"
+        );
+        $statement->execute([$table]);
+        $pk = $statement->fetchColumn();
+        if (is_string($pk) && $pk !== '') return $pk;
+        $columns = array_column($this->rawColumns($table), 'column_name');
+        return $columns !== [] ? (string) $columns[0] : 'id';
+    }
+
+    private function rawColumns(string $table): array {
+        $statement = $this->pdo->prepare(
+            'SELECT column_name FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position'
+        );
+        $statement->execute([$table]);
+        return $statement->fetchAll();
+    }
+
+    public function uniqueConstraints(string $table): array {
+        $statement = $this->pdo->prepare(
+            "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name, kcu.ordinal_position
+             FROM information_schema.table_constraints tc
+             JOIN information_schema.key_column_usage kcu
+               ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+             WHERE tc.table_schema = current_schema() AND tc.table_name = ?
+               AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE')
+             ORDER BY tc.constraint_name, kcu.ordinal_position"
+        );
+        $statement->execute([$table]);
+        $groups = [];
+        foreach ($statement->fetchAll() as $row) {
+            $name = (string) $row['constraint_name'];
+            $groups[$name]['type'] = (string) $row['constraint_type'];
+            $groups[$name]['cols'][] = (string) $row['column_name'];
+        }
+        $primary = [];
+        $unique = [];
+        foreach ($groups as $group) {
+            if (($group['type'] ?? '') === 'PRIMARY KEY') $primary[] = $group['cols'];
+            else $unique[] = $group['cols'];
+        }
+        return array_merge($primary, $unique);
+    }
+
+    public function normalizeColumn(string $mysqlDefinition): string {
+        $definition = trim($mysqlDefinition);
+        if (str_contains(strtolower($definition), 'auto_increment')) {
+            return 'BIGSERIAL PRIMARY KEY';
+        }
+        $rest = '';
+        if (preg_match('/^(\S+(?:\([^)]*\))?)(.*)$/is', $definition, $m)) {
+            $type = trim($m[1]);
+            $rest = $m[2];
+        } else {
+            $type = $definition;
+        }
+        $rest = preg_replace('/\s+(CHARACTER\s+SET\s+\w+|COLLATE\s+\w+)/i', '', $rest);
+        $rest = preg_replace('/\s+ON\s+UPDATE\s+CURRENT_TIMESTAMP/i', '', $rest);
+        $rest = preg_replace('/\s+UNSIGNED/i', '', $rest);
+        $lower = strtolower($type);
+        $converted = preg_replace([
+            '/^bigint(\(\d+\))?$/i',
+            '/^(int|integer|mediumint)(\(\d+\))?$/i',
+            '/^(smallint|tinyint)(\(\d+\))?$/i',
+            '/^decimal(\(\d+,\d+\))?$/i',
+            '/^double(\(\d+,\d+\))?$/i',
+            '/^float(\(\d+,\d+\))?$/i',
+            '/^(char|varchar)\((\d+)\)$/i',
+            '/^(tinytext|text|mediumtext|longtext)$/i',
+            '/^json$/i',
+            '/^(binary|varbinary|tinyblob|blob|mediumblob|longblob)$/i',
+            '/^datetime$/i',
+            '/^(timestamp|date|time)$/i',
+            '/^year(\(\d+\))?$/i',
+        ], [
+            'BIGINT',
+            'INTEGER',
+            'SMALLINT',
+            'NUMERIC$1',
+            'DOUBLE PRECISION',
+            'REAL',
+            '$1($2)',
+            'TEXT',
+            'JSONB',
+            'BYTEA',
+            'TIMESTAMP',
+            '$1',
+            'INTEGER',
+        ], $lower);
+        return trim($converted . $rest);
+    }
+
+    public function createTableSql(string $table, array $definitions): string {
+        $columns = [];
+        foreach ($definitions as $name => $type) {
+            $columns[] = $this->quoteIdentifier($name) . ' ' . $type;
+        }
+        return 'CREATE TABLE IF NOT EXISTS ' . $this->quoteIdentifier($table) . ' (' . implode(', ', $columns) . ')';
+    }
+
+    public function begin(): void { if (!$this->pdo->inTransaction()) $this->pdo->beginTransaction(); }
+    public function commit(): void { if ($this->pdo->inTransaction()) $this->pdo->commit(); }
+    public function rollback(): void { if ($this->pdo->inTransaction()) $this->pdo->rollBack(); }
+
+    public function probe(array $config): array {
+        $startedAt = microtime(true);
+        try {
+            $this->connect($config);
+            $status = $this->pdo->query('SELECT 1')->fetchColumn() !== false;
+            return ['status' => $status, 'driver' => 'pgsql', 'configured' => true,
+                'latency_ms' => round((microtime(true) - $startedAt) * 1000, 2)];
+        } catch (\Throwable $error) {
+            return ['status' => false, 'driver' => 'pgsql', 'configured' => true,
+                'latency_ms' => round((microtime(true) - $startedAt) * 1000, 2), 'error' => $error->getMessage()];
+        } finally {
+            $this->disconnect();
         }
     }
 }

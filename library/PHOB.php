@@ -3,22 +3,24 @@
 /**
  * ============================================================================
  * Class: PHOB
- * Title: Browser & Device Observer
+ * Title: PHP Obfuscator Bridge
  * ============================================================================
  * 
- * Parses User-Agent strings and network data to provide browser capabilities, device types, operating systems, and identity helpers.
+ * Bridges the optional proprietary `phob` PHP extension for protected code
+ * packaging: file protection/obfuscation/minification, license-bound runtime
+ * loading and a stable server device identifier.
  * 
  * Features:
- * - Device type detection (Mobile, Tablet, Desktop).
- * - Browser and OS capability parsing.
- * - Identity and fingerprinting helpers.
+ * - Extension capability detection (PHOB::capability()).
+ * - Protected build of PHP files with key/pass/license/device/expiry config.
+ * - License-checked runtime loading of protected files (PHOB::use()).
+ * - Server machine identifier for license binding (PHOB::deviceID()).
  * 
  * Usage Example:
  * ```php
- * if (PHOB::isMobile()) {
- *     // Serve mobile-optimized layout
+ * if (PHOB::capability()['status']) {
+ *     PHOB::build('app/Secret.php', 'build/Secret.php', [], [], [], ['license' => '...']);
  * }
- * $os = PHOB::os();
  * ```
  * 
  * @package    MyStack
@@ -63,14 +65,16 @@ class PHOB {
     }
 
     /**
-     * Protect a PHP file by generating a secure, obfuscated output file
+     * Build protected output from one or more PHP files using the phob extension.
      *
-     * @param string $inputPath Path to the input PHP file
-     * @param string $outputPath Path for the protected output file
-     * @param array $config Configuration array (key, pass, license, device, expiry)
-     * @param array|null $skipList Optional array of files to skip
+     * @param string|array $input      Input PHP file path(s)
+     * @param string|array $output     Protected output path(s)
+     * @param array        $skip       Files to skip
+     * @param array        $skipName   Names the renamer must never rewrite
+     * @param array        $customName Additional custom name map
+     * @param array        $config     Configuration array (key, pass, license, device, expiry, obfuscate, minify)
      * @return bool True on success, false on failure
-     * @throws RuntimeException If PHOB is not initialized
+     * @throws Error If the phob extension is not loaded
      */
     public static function build(string|array $input, string|array $output, array $skip = [], array $skipName = [], array $customName = [], array $config = []) {
         if (self::ext() === true) {
