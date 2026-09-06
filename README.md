@@ -9,11 +9,14 @@ The framework is designed to run from a domain root or any subdirectory on Apach
 - Zero Composer/NPM runtime dependency
 - Portable root/subfolder routing via `DIR`, `PHCO`, and `PHRO`
 - Fluent HTTP router, middleware, CSRF and layered request guard
-- MySQL/MariaDB CRUD, transactions, analytics, schema sync, and unbuffered streaming
+- MySQL/MariaDB CRUD, transactions, analytics, schema sync, and unbuffered streaming, with opt-in `PHDB::$driver` (`sqlite`, `pgsql`) — default mysqli path unchanged
 - SQLite-backed local state with TTL, counters, tags, bounded locking, and recovery
-- PHUI registry with 1,300+ reusable entries and PHML composition
-- PHP-native Tailwind-style PHCS utility processing
-- Self-contained PHJS SPA/reactivity/directive runtime served as `/app.js`
+- PHUI registry with 100+ theme-aware components (1,300+ entries) and PHML composition; render via `PHUI::ui()`, `@component/@slot`, or `<x-ui-*>` — e.g. `ui:calendar`, `ui:skeleton`, `ui:empty-state`, `ui:carousel`, `ui:command-palette`
+- PHP-native Tailwind-style PHCS utility processing with an extensible handler registry and arbitrary `[prop:value]` fallback
+- Self-contained PHJS SPA/reactivity/directive runtime served as `/app.js`, with declarative actions (`toggle/open/toast/navigate/copy/…`) and PHP browser-convenience emitters (`confirm`, `debounce`, `throttle`, `matchMedia`, `geolocation`, …)
+- PHJC Blade-style views: `@extends/@section/@yield`, `@component/@slot`, `@class`, `@verbatim`, `@forelse`, `@each`, `@once`, form-attribute directives, and `PHML::init()` auto asset pipeline (`autoAssets` toggles the injected `/app.js`)
+- Extended PHVD validation (IBAN, BIC, ISBN, IMEI, JWT, UTF-8/`utf8`/Bengali, numeric sign/multiple/decimal, time/timestamp/date_equals, and more)
+- PHEM mail with an additive `PHEM::queue()`/`queueSend()` bridge to the local console queue
 - Service Worker, page/cache de-duplication, offline and Web Push support
 - OAuth/OIDC provider matrix, JWT, encryption, OTP/TOTP and Authenticator lifecycle
 - Payment gateway and Bangladesh/international courier facades
@@ -50,6 +53,7 @@ No Composer or NPM installation is required.
 ├── index.php                 Application bootstrap and routes
 ├── mystack                   CLI, diagnostics and updater
 ├── mystack.cmd               Windows CMD/PowerShell launcher; `php mystack` remains supported
+├── mystack.sh                Linux/macOS shell launcher (works without the executable bit)
 ├── library/                  30 framework libraries + loader
 ├── app/                      Flat backend/controller/model directory
 ├── component/                Flat view/component directory
@@ -62,7 +66,8 @@ No Composer or NPM installation is required.
 ├── CONTRIBUTING.md           Public request and contribution workflow
 ├── NOTICE                    Ownership, attribution and official-brand notice
 ├── LICENSE                   Apache License 2.0
-└── MANUAL_BN.md              Full Bengali manual
+├── MANUAL_BN.md              Full Bengali manual
+└── MANUAL_EN.md              Full English manual
 ```
 
 Do not create subdirectories inside `app/` or `component/`. Use framework path resolution instead of hardcoded hosting paths.
@@ -183,6 +188,8 @@ foreach (PHDB::fast('SELECT id, email FROM users WHERE status = ?', ['active']) 
 
 Schema synchronization can add, modify, and remove columns to match the declaration. Review destructive schema changes before deploying them to production and maintain verified backups.
 
+`PHDB::$driver` is opt-in and defaults to `mysqli`; unset/empty also uses the unchanged legacy path. `sqlite` and `pgsql` are available in the core non-mysqli path (atomic upsert, cursor streaming on pgsql); `clean()`, FULLTEXT `MATCH...AGAINST`, and schema-sync reorder/type-change stay mysqli-only and fail loudly elsewhere.
+
 ## UI and browser runtime
 
 Render registered UI:
@@ -195,7 +202,11 @@ echo PHUI::element('button:primary', [
 ]);
 ```
 
+Components render three equivalent ways — `PHUI::ui('ui:button-primary', ['slot' => 'Save'])`, `@component('ui:button-primary')Save@endcomponent`, or `<x-ui-button-primary>Save</x-ui-button-primary>`. Slugs follow `type:name` (`ui:`, `form:`, `data:`, `section:`, `shell:`, `auth:`, `payment:`, `courier:`) with tone variants (`ui:badge-success`, `ui:alert-danger`, …). All variants use semantic theme tokens (`bg-primary`, `bg-success`, `text-muted-foreground`, `border-border`), so they follow `data-theme="light|dark"` or a custom theme automatically. Missing values render the key name as an inline hint (`{{key|key}}`).
+
 PHCS processes utility classes without a Node build. PHJS is served by PHRO as `/app.js`; `src/js/PHJS-min.php` is its canonical PHP-aware source. PHJS provides directives, state, components, requests, SPA navigation, forms, keymaps, accessibility, storage, UI helpers, OAuth/2FA/payment bridges, devtools, prefetch, cache and Service Worker integration without requiring Alpine, HTMX, React, or Vue.
+
+For full PHJS/PHUI usage patterns and examples, see the *PHJS usage guide* and *PHUI usage guide* in `MANUAL_BN.md`.
 
 When changing PHJS runtime behavior, synchronize all related builds and run `php mystack smoke`.
 
@@ -279,6 +290,8 @@ php mystack doctor
 php mystack doctor --fix
 php mystack audit
 php mystack smoke
+php mystack test:app
+php mystack extension:check
 php mystack update --check
 php mystack update [path]
 php mystack update [path] --yes
@@ -286,7 +299,7 @@ php mystack update [path] --yes
 
 Application commands are flat `app/*Command.php` classes generated by `make:command` and discovered automatically. Migrations, seeders, jobs and schedules are opt-in: no web request starts a blocking worker. Queue/scheduler state lives privately in `.mystack/console.sqlite`, uses WAL and atomic reservation, and is intended for one application host. Run daemon workers through the hosting platform's process supervisor. Destructive rollback, pruning and flush operations require `--yes` or interactive confirmation.
 
-Both invocation styles are supported: `php mystack ...` always works when PHP is available, while `mystack ...` works directly on Unix/macOS through the executable shebang and on Windows CMD/PowerShell through `mystack.cmd` without PowerShell execution-policy dependency. Run `php mystack cli:install` once to create a user-level launcher; if its directory is not already in `PATH`, the command prints the exact directory to add. `--json` keeps machine output free from TUI decoration; `NO_COLOR=1` or `--no-ansi` disables terminal colors.
+Both invocation styles are supported: `php mystack ...` always works when PHP is available, while `mystack ...` works directly on Unix/macOS through the executable shebang or `mystack.sh` (which invokes `php` directly, so it also works where the executable bit is unavailable, such as SMB/NFS mounts), and on Windows CMD/PowerShell through `mystack.cmd` without PowerShell execution-policy dependency. Run `php mystack cli:install` once to create a user-level launcher; if its directory is not already in `PATH`, the command prints the exact directory to add. `--json` keeps machine output free from TUI decoration; `NO_COLOR=1` or `--no-ansi` disables terminal colors.
 
 Interactive output uses the adaptive MyStack TUI: ASCII brand header, semantic status badges, framed comparisons and real operation-stage progress. `update --check` focuses on changed files and summarizes unchanged files; add `--verbose` to display the complete comparison.
 
@@ -313,23 +326,27 @@ Also perform environment-specific tests that a local smoke suite cannot guarante
 - [Complete AI context](llms-full.txt)
 
 - [বাংলা পূর্ণাঙ্গ ম্যানুয়াল](MANUAL_BN.md)
+- [Complete English manual](MANUAL_EN.md)
 - [AI/Agent engineering contract](AGENTS.md)
 - [Apache License 2.0](LICENSE)
 - [Ownership and attribution notice](NOTICE)
 - [Contribution policy](CONTRIBUTING.md)
 
-## License
+## Documentation workflow
 
 Regenerate and verify source-linked documentation whenever a public framework API changes:
 
 ```bash
 php mystack docs:build
 php mystack docs:check
+php mystack extension:check
 ```
 
 The builder scans `library/*.php` without executing library code, creates one reference page per source file, and refreshes the searchable portal, API JSON and both `llms` discovery files. Executable code remains authoritative for runtime behavior. MyStack uses a rolling `main` branch and does not declare a fixed framework version.
 
 `.github/workflows/docs.yml` publishes only the generated `docs/` artifact to GitHub Pages. Enable GitHub Pages with **GitHub Actions** as its source once; subsequent pushes to `main` publish documentation automatically without exposing executable PHP source through the documentation site.
+
+## License
 
 MyStack is licensed under the Apache License 2.0. Copyright © 2026 Sakibur Rahman (`sakibweb`). You may use, copy, modify and distribute the code under the License, but must preserve the License, applicable copyright/attribution notices and the [NOTICE](NOTICE), and must identify modified files. The license grants no right to claim authorship of the original framework or present an unofficial modified distribution as the official MyStack Framework.
 

@@ -25,9 +25,9 @@ Never invent a method, configuration key, provider capability, or runtime depend
 | `src/js/` | PHJS runtime/build sources, Service Worker, and optional browser assets | Treat `PHJS-min.php` as canonical; see synchronization rules below. |
 | `src/cache/css`, `src/cache/js`, `src/cache/php` | Generated component builds | Directories are auto-created. Do not rename generated files to hashes or opaque names. |
 | `.mystack/` | Private PHLS/PHMO runtime state and structured logs | Never expose publicly or commit runtime data. Keep its access guard intact. |
-| `mystack`, `mystack.cmd` | Extensible console kernel plus portable Unix/Windows launcher | Preserve `php mystack`, direct `mystack`, original commands, executable PHP syntax and smoke coverage. |
+| `mystack`, `mystack.cmd`, `mystack.sh` | Extensible console kernel plus portable Unix/Windows/macOS launchers; `mystack.sh` invokes `php` directly so it also works where the executable/shebang bit is unavailable | Preserve `php mystack`, direct `mystack`, original commands, executable PHP syntax and smoke coverage. |
 | `docs/`, `llms.txt`, `llms-full.txt` | Source-generated human and AI documentation, API catalog and static portal | Regenerate with `mystack docs:build`; do not hand-edit generated API files. |
-| `mystack-extension-main/` | Official VS Code helper source, generated stubs/snippets and packaged VSIX | Keep source-derived metadata, package validation, workspace trust and traversal guards green. |
+| `mystack-extension-main/` | Official VS Code helper source, generated stubs/snippets and packaged VSIX | Keep source-derived metadata, package validation, workspace trust and traversal guards green; verify with `mystack extension:check`. |
 
 `app/` and `component/` intentionally use a flat layout. Framework-owned runtime folders may have their own internal structure.
 
@@ -52,6 +52,8 @@ PHJT::algorithm('HS512');
 
 // Configure optional services here.
 
+PHML::init(); // start the view/asset pipeline (auto PHCS CSS + PHJS /app.js injection)
+
 import('app:HomeController', 'component:HomeView');
 
 PHRO::get('/', [HomeController::class, 'index']);
@@ -65,6 +67,7 @@ Order-sensitive rules:
 - Configure `PHDE`, timezone, guards, keys, cross-origin behavior, storage, and optional services before registering application routes.
 - Call `PHRO::guard()` before protected request processing.
 - Register `PHFY`, `PHMO`, PHCD, debug UIs, and application routes before `PHRO::listen()`.
+- Call `PHML::init()` once before `PHRO::listen()` for apps that render PHML/PHJC views; it buffers output and auto-injects the PHCS stylesheet and PHJS `/app.js` runtime (register the runtime with `PHJC::app('/app.js', producer)`).
 - Keep `PHRO::listen()` at the end of the request bootstrap.
 - Debug-only UIs must remain unavailable when `PHDE::isDebug()` is false.
 
@@ -107,29 +110,29 @@ All libraries are loaded by `library/library.php`.
 | `PHRO` | Router, route metadata, middleware, CSRF, security guard, WAF, proxy/IP resolution, tracking, sitemap/robots/manifest, channels, and asset routes. |
 | `PHOB` | Browser/device capability build and identity helpers. |
 | `PHEV` | WebSocket server, SSE, StreamUI, clients, events, and broadcasts. |
-| `PHEM` | Native SMTP, IMAP, and POP3 mail operations. |
-| `PHML` | Markup DSL, layouts, partials, blocks, components, head/body and asset composition. |
-| `PHCS` | PHP-native utility CSS processing and build engine. |
-| `PHJS` | PHP-to-JavaScript DSL, typed builder, declarative actions, request and application bridge. |
-| `PHJC` | View/page composition, HTML/JS rendering, slots, layouts, assets, metadata, and compiled component cache. |
+| `PHEM` | Native SMTP, IMAP, and POP3 mail operations plus an additive `queue()`/`queueSend()` mail bridge to the local console queue. |
+| `PHML` | Markup DSL, layouts, partials, blocks, components, head/body and asset composition. `PHML::init()` buffers output and auto-injects the PHCS stylesheet and PHJS `/app.js`; `autoAssets(false)` disables the auto script tag. |
+| `PHCS` | PHP-native utility CSS processing and build engine, with an extensible handler registry and an arbitrary `[prop:value]` fallback. |
+| `PHJS` | PHP-to-JavaScript DSL, typed builder, declarative actions (`toggle/open/toast/navigate/copy/…`), browser-convenience emitters (`confirm`, `debounce`, `throttle`, `matchMedia`, `geolocation`, …), request and application bridge. |
+| `PHJC` | View/page composition with Blade-style directives (`@extends/@section/@yield`, `@component/@slot`, `@class`, `@verbatim`, `@forelse`, `@each`, `@once`, form-attribute directives), HTML/JS rendering, slots, layouts, assets, metadata, and compiled component cache. |
 | `PHCO` | Secure project-scoped cookies, base path, and namespace prefix. |
 | `PHSE` | Secure session lifecycle and expiring session values. |
 | `PHLS` | SQLite-backed local state, atomic counters, TTL, tags, rate-limit data, recovery, and locking. |
-| `PHDB` | Prepared database access, CRUD, analytics, transactions, streaming, schema synchronization, and JSON/array columns. |
+| `PHDB` | Prepared database access, CRUD, analytics, transactions, streaming, schema synchronization, and JSON/array columns. Opt-in `PHDB::$driver` (default `mysqli`; `sqlite` and `pgsql` core paths available). |
 | `PHRQ` | Server/browser HTTP requests, CORS/CSP policy, response status, streaming, file output, and Live Map. |
 | `PHQR` | Memory-safe QR code data-URI generation. |
 | `PHED` | Authenticated application encryption and key management. |
 | `PHTP` | OTP/TOTP plus account-level Authenticator enrollment, replay protection, and recovery. |
 | `PHTM` | Timezone, parsing, calculation, modification, and formatting. |
-| `PHVD` | Input validation and database-aware rules. |
+| `PHVD` | Input validation and database-aware rules, plus an extended pure-format set (`iban`, `bic`, `isbn`, `imei`, `jwt`, `utf8`, `bengali`, numeric sign/multiple/decimal, time/timestamp/date_equals, and more). |
 | `PHCD` | Authorized, atomic client-package installation/update and package UI. |
 | `PHJT` | HMAC JWT creation, verification, algorithm selection, and key rotation. |
 | `PHTR` | Translation provider requests and response parsing. |
 | `PHAU` | Identity creation/checking, verification flows, OAuth/OIDC provider matrix and callbacks. |
-| `PHOP` | Image, video, ZIP and text processing helpers. |
+| `PHOP` | Image, video, ZIP and text processing helpers. Video operations require host-provided FFmpeg and `exec()`. |
 | `PHAI` | AI provider bridge, clustering, MCP server/tools/prompts/resources and guarded remote bridge. |
 | `PHAP` | Compact REST API routes, validation, auth, resources, pagination and JSON responses. |
-| `PHUI` | Registered UI elements, sections, layouts, pages, placeholders, aliases and searchable catalog. |
+| `PHUI` | Registered theme-aware UI components (100+ families, 1,300+ entries) — elements, sections, layouts, pages, placeholders, aliases and searchable catalog; render via `PHUI::ui()`, `@component/@slot`, or `<x-ui-*>` (e.g. `ui:calendar`, `ui:skeleton`, `ui:empty-state`, `ui:carousel`). |
 | `PHPA` | Payment gateway facade, capability-aware gateway adapters, webhooks/refunds, and courier facade. |
 | `PHFY` | ntfy public/private notifications, PHLS subscriptions, VAPID/Web Push and PHJS client configuration. |
 | `PHMO` | Request/trace IDs, JSON logs, health/ready probes, metrics, alerts, retention, and debug dashboard. |
@@ -175,6 +178,7 @@ PHDB::update('users', ['status' => 'disabled'], ['id' => $id]);
 - Use `PHLS` for local single-server state, counters, TTL, locks, and subscriptions. It is not a multi-server shared database.
 - Keep PHLS calls non-fatal at request-protection boundaries; preserve its corruption recovery and bounded retry behavior.
 - Use `PHSE` for request/user session state and `PHCO` for client cookies; do not substitute one storage type for another without considering lifetime and trust.
+- `PHDB::$driver` is opt-in and defaults to `mysqli`; an unset/empty value also uses the unchanged legacy mysqli path. Only `sqlite` and `pgsql` are available in the core non-mysqli path today. On those drivers `createTable()` synchronizes by adding and dropping columns, `insert()`/`batchInsert()` overwrite uses atomic `ON CONFLICT` upsert, and pgsql `fast()` streams via a server-side cursor. `clean()`, FULLTEXT `MATCH...AGAINST`, and schema-sync column reorder/type-change remain mysqli-only and must fail loudly (never silently wrong) or be documented as not auto-applied on other drivers. Add new engines behind the `PHDB_Driver` seam without altering the mysqli path.
 
 ## 8. Frontend, PHUI, PHCS and PHJS
 
@@ -194,6 +198,7 @@ echo PHUI::element('button:primary', [
 - Do not introduce Blade, Twig, React, Vue, Alpine, or HTMX as a required runtime dependency.
 - PHJS is self-contained. Compatibility helpers may recognize Alpine/HTMX-like behavior, but application behavior must work through PHJS without loading those libraries.
 - Prefer PHJS HTML directives and PHP builders over page-specific inline JavaScript when equivalent behavior exists.
+- PHJS/PHUI/PHJC usage patterns and copy-paste examples live in the *PHJS usage guide* and *PHUI usage guide* in `MANUAL_BN.md`; the exhaustive per-method/per-component reference is generated by `mystack docs:build` (`docs/api/*.md`, `PHUI::catalog()`).
 - Preserve SPA navigation boundaries: only same-origin document links are intercepted; mailto, tel, download, external, non-HTML, and native links remain native.
 - Preserve one-time initialization, request de-duplication, destination CSS preparation, page cache, touch/hover intent prefetch, Service Worker, accessibility, toast, and cleanup lifecycles.
 
@@ -220,6 +225,7 @@ Do not merely copy PHP interpolation into plain `.js`; preserve equivalent resol
 - Verify signed webhooks before processing and make fulfillment idempotent.
 - PHFY public topics are public by nature. Put user-specific data only in authorized private delivery, and keep browser permission opt-in.
 - PHAI remote URL/bridge access must remain allowlisted, TLS-verified, timeout-bounded, and protected against private-network SSRF unless explicitly authorized.
+- `PHEM::queue()` stores the SMTP credentials and message body inside the private `.mystack/console.sqlite` job payload. Keep the `.mystack` and root `.env` (PHLS) access guards intact, treat queue state as single-host, and do not expose or log that payload.
 
 ## 10. Observability and production behavior
 
@@ -256,20 +262,22 @@ php mystack audit
 php mystack smoke
 php mystack docs:build
 php mystack docs:check
+php mystack extension:check
+php mystack test:app
 php mystack update --check
 ```
 
 - `doctor` is read-only; `doctor --fix` applies bounded formatting/permission repair.
 - `audit` is a read-only production review.
 - `smoke` is the canonical framework regression suite and must remain green.
-- Application commands are auto-discovered only from flat `app/*Command.php` files with valid static `commandName()`, `description()` and `handle()` methods.
+- Application commands are auto-discovered only from flat `app/*Command.php` files with valid static `commandName()`, `description()` and `handle()` methods. Discovery parses source tokens and never executes application code during list, help, doctor, audit or dispatch lookup; `commandName()`/`description()` must return literal strings.
 - `php mystack` remains the universal fallback. Direct `mystack` uses the Unix shebang or Windows launchers; `cli:install` may create a user-level shim but must not silently mutate system PATH. Preserve plain `--json` output and honor `NO_COLOR`/`--no-ansi`.
 - Generated migrations, seeders, jobs and schedules are opt-in. Never run user migration/seeder code during discovery, help, doctor, audit or ordinary web requests.
 - Queue and scheduler state in `.mystack/console.sqlite` is private, WAL-backed, atomic local single-host state. It is not a distributed queue; long-running workers require an external process supervisor.
 - Destructive CLI operations such as rollback, cache pruning, queue flush/forget and schedule removal must retain confirmation/`--yes` gates.
 - `update` compares the official GitHub `main` branch by SHA-256/exact bytes, prompts before changes, validates staged files, runs smoke, and rolls back on failure.
-- Update scope is strictly limited to `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, and `mystack.cmd`. VSIX files require ZIP and extension-manifest validation. Keep root HTTP denial for private metadata, extension development files and both CLI files. It never deletes unmatched local files.
-- `docs:build` derives public signatures from current `library/*.php` without executing library code. `docs:check` and smoke reject stale API catalogs. Keep the portal, API JSON, `llms` files and per-library references synchronized.
+- Update scope is strictly limited to `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `MANUAL_EN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, `mystack.cmd`, and `mystack.sh`. VSIX files require ZIP and extension-manifest validation. Keep root HTTP denial for private metadata, extension development files and both CLI files. It never deletes unmatched local files.
+- `docs:build` derives public signatures from current `library/*.php` without executing library code. `docs:check` rejects stale API catalogs, and `extension:check` separately verifies AI-discoverable documentation plus the VS Code extension stubs, snippets, trusted-workspace/traversal guards and packaged VSIX; these artifact checks are outside `smoke`. Keep the portal, API JSON, `llms` files and per-library references synchronized.
 - The Pages workflow publishes only `docs/`. Keep root and `docs/` copies of both `llms` files synchronized. Do not generate static `robots.txt` or `sitemap.xml`; PHRO provides those routes dynamically.
 - MyStack follows the rolling official `main` branch and has no fixed framework version. Do not invent, display or document a MyStack release/version number.
 - Before handoff, run syntax checks for changed PHP, relevant targeted tests, and `php mystack smoke` for framework changes.

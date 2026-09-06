@@ -25,6 +25,7 @@
 17. [সব library-র পূর্ণ catalog](#17-সব-library-র-পূর্ণ-catalog)
 18. [Deployment, cache ও production checklist](#18-deployment-cache-ও-production-checklist)
 19. [Troubleshooting ও verification](#19-troubleshooting-ও-verification)
+20. [AI discovery ও স্বয়ংক্রিয় API documentation](#20-ai-discovery-ও-স্বয়ংক্রিয়-api-documentation)
 
 ## 1. পরিচিতি ও ক্ষমতা
 
@@ -196,17 +197,19 @@ $debug = PHDE::isDebug();
 | `php mystack doctor --fix` | bounded safe fix |
 | `php mystack audit` | production-oriented read-only audit |
 | `php mystack smoke` / `test` | full framework regression suite |
+| `php mystack test:app` | flat `app/*Test.php` discover করে application test run |
+| `php mystack extension:check` | AI-discoverable documentation ও VS Code extension artifact verify |
 | `php mystack update --check` | GitHub `main` SHA/byte diff, কোনো change নয় |
 | `php mystack update [path]` | allowlisted path compare, confirm, apply |
 | `php mystack update [path] --yes` | prompt ছাড়া verified apply |
 
-`make:command Report` একটি flat `app/ReportCommand.php` বানায়; `commandName()`, `description()` ও `handle()` থাকলে পরের invocation-এ command auto-discover হয়। Queue/scheduler metadata `.mystack/console.sqlite`-এ WAL mode-এ থাকে এবং single-host application state—multi-server shared queue নয়। `queue:work --daemon`, `schedule:work --daemon` এবং `websocket:start` সাধারণ HTTP request-এ নয়, hosting supervisor/system service থেকে চালাতে হবে। Cleanup, rollback, forget ও flush-এ interactive confirmation বা `--yes` প্রয়োজন। Migration file আগে সফল `up()` চালায়, তারপর local applied registry-তে লিখে; `down()` ছাড়া rollback হয় না। Production schema change-এর আগে database backup/restore drill বাধ্যতামূলক।
+`make:command Report` একটি flat `app/ReportCommand.php` বানায়; `commandName()`, `description()` ও `handle()` থাকলে পরের invocation-এ command auto-discover হয়। Discovery শুধু source token পড়ে—`list`, `help`, `doctor`, `audit` বা dispatch lookup-এ কোনো application code execute হয় না, তাই `commandName()`/`description()` অবশ্যই literal string রিটার্ন করতে হবে। Queue/scheduler metadata `.mystack/console.sqlite`-এ WAL mode-এ থাকে এবং single-host application state—multi-server shared queue নয়। `queue:work` শুরুতে `--timeout` (default ৯০০ সেকেন্ড)-এর বেশি পুরনো `running` reservation auto-reclaim করে `pending`-এ ফিরিয়ে দেয় (crashed worker recovery)। ॏ `queue:work --daemon`, `schedule:work --daemon` এবং `websocket:start` সাধারণ HTTP request-এ নয়, hosting supervisor/system service থেকে চালাতে হবে। Cleanup, rollback, forget ও flush-এ interactive confirmation বা `--yes` প্রয়োজন। Migration file আগে সফল `up()` চালায়, তারপর local applied registry-তে লিখে; `down()` ছাড়া rollback হয় না। Production schema change-এর আগে database backup/restore drill বাধ্যতামূলক।
 
-`php mystack` সব OS-এ মূল fallback। Unix/macOS executable shebang এবং Windows CMD/PowerShell-এর policy-independent `mystack.cmd` launcher দিয়ে `mystack`-ও ব্যবহার করা যায়। `php mystack cli:install` user-level launcher তৈরি করে এবং প্রয়োজন হলে কোন directory `PATH`-এ দিতে হবে তা জানায়; এটি নিজে system PATH silently বদলায় না। `--json` machine-readable output অপরিবর্তিত রাখে; `NO_COLOR=1` বা `--no-ansi` color/TUI escape code বন্ধ করে।
+`php mystack` সব OS-এ মূল fallback। Unix/macOS executable shebang এবং Windows CMD/PowerShell-এর policy-independent `mystack.cmd` launcher দিয়ে, আর Unix/macOS-এ executable shebang বা `mystack.sh` (সরাসরি `php` চালায়, তাই executable bit না-থাকলেও চলে) দিয়ে `mystack`-ও ব্যবহার করা যায়। `php mystack cli:install` user-level launcher তৈরি করে (Unix/macOS-এ `~/.local/bin/mystack`, Windows-এ `%LOCALAPPDATA%\MyStack\bin\mystack.cmd`) এবং প্রয়োজন হলে কোন directory `PATH`-এ দিতে হবে তা জানায়; এটি নিজে system PATH silently বদলায় না। Unix/macOS-এ `cli:install` প্রজেক্টের `mystack` executable bit-ও মেরামত করে (non-POSIX filesystem-এ কপির সময় যা হারায়), আর `cli:status` সেটা `project_direct_executable` হিসেবে রিপোর্ট করে। machine-readable output অপরিবর্তিত রাখে; `NO_COLOR=1` বা `--no-ansi` color/TUI escape code বন্ধ করে।
 
 Interactive mode-এ ASCII MyStack header, semantic INFO/SUCCESS/WARNING/ERROR badge, framed comparison এবং বাস্তব operation-stage progress দেখায়। `update --check` defaultভাবে changed file-এ focus করে এবং unchanged count দেখায়; সব file দেখতে `--verbose` দিন।
 
-Updater Release/version ব্যবহার করে না। এটি official rolling `main` snapshot থেকে `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, `mystack.cmd` file-by-file নেয়। VSIX package-এ ZIP path ও required extension manifest verify করা হয়। Root `.htaccess` private framework metadata, extension development files ও CLI file-এর HTTP access deny করে। Stage, hash, text/PHP/JS/VSIX validation এবং smoke pass না হলে rollback করে; upstream-এ অনুপস্থিত বলে local file delete করে না।
+Updater Release/version ব্যবহার করে না। এটি official rolling `main` snapshot থেকে `library/*`, `src/js/*`, `docs/*`, `mystack-extension-main/*`, `.htaccess`, `.github/CODEOWNERS`, `.github/workflows/docs.yml`, `AGENTS.md`, `CONTRIBUTING.md`, `LICENSE`, `MANUAL_BN.md`, `MANUAL_EN.md`, `NOTICE`, `README.md`, `llms.txt`, `llms-full.txt`, `mystack`, `mystack.cmd` file-by-file নেয়। VSIX package-এ ZIP path ও required extension manifest verify করা হয়। Root `.htaccess` private framework metadata, extension development files ও CLI file-এর HTTP access deny করে। Stage, hash, text/PHP/JS/VSIX validation এবং smoke pass না হলে rollback করে; upstream-এ অনুপস্থিত বলে local file delete করে না।
 
 ### License, ownership ও contribution
 
@@ -605,6 +608,20 @@ $sent = PHEM::smtpSend(
 
 IMAP/POP configuration/login/get/send APIs-ও আছে। Debug log-এ credential বা message secret প্রকাশ করবেন না।
 
+ধীর বা ব্যস্ত SMTP server-এ request block না করে async mail delivery-র জন্য `queue()` ব্যবহার করা যায়। এটি বর্তমান SMTP config ও message টা private `.mystack/console.sqlite` job row-এ capture করে; existing `queue:work` worker `PHEM_MailQueueHandler` resolve করে restore ও deliver করে, এবং fail করলে queue-এর built-in retry/backoff/failed handling প্রয়োগ হয় — কোনো queue system code পরিবর্তন লাগে না।
+
+```php
+PHEM::smtp('smtp.example.com', 465, 'ssl');
+PHEM::smtpLogin('sender@example.com', 'password');
+$queued = PHEM::queue(
+    'sender@example.com', 'My App', 'user@example.com', '', '',
+    'Welcome', '<p>Your account is ready.</p>',
+    $delay = 0, $tries = 3
+);
+```
+
+`queueSend($payload)` শুধু worker context-এ queued payload restore করে `smtpSend()` চালায়; সাধারণ app code থেকে সরাসরি কল করার দরকার নেই। Note: job payload-এ SMTP credential ও message content private `.mystack` store-এ থাকে, তাই এর HTTP access guard সক্রিয় রাখুন এবং এটি single-host local state ধরুন।
+
 ### PHEV
 
 ```php
@@ -789,7 +806,7 @@ PHCD::initialize('/cdn', DIR::path('css'), DIR::path('js'));
 | `PHDB` | database/ORM | `error`, `id`, `affected`, `checker`, `connect`, `disconnect`, `query`, `fast`, `first`, `scalar`, `save`, `insert`, `batchInsert`, `update`, `delete`, `select`, `find`, `specificSelect`, `getValue`, `getSpecificValue`, `addDB`, `createTable`, `dropTable`, `alterTable`, `truncateTable`, `findBy`, `search`, `columns`, `deleteBy`, `paginate`, `sum`, `avg`, `max`, `min`, `count`, `exists`, `api`, `transaction`, `clean`, `array`, `array_get`, `array_set`, `close` |
 | `PHDE` | debug/error | `enableErrorReporting`, `disableErrorReporting`, `customErrorHandler`, `debug`, `isDebug`, `errors`, `errorJSON`, `getType`, `displayErrors`, `api`, `apibar`, `file`, `memory` |
 | `PHED` | encryption | `hide`, `make`, `score`, `key` |
-| `PHEM` | SMTP/IMAP/POP3 | `smtp`, `imap`, `pop`, `smtpLogin`, `imapLogin`, `popLogin`, `smtpGet`, `imapSend`, `popSend`, `imapGet`, `popGet`, `smtpSend`, `showLog` |
+| `PHEM` | SMTP/IMAP/POP3 | `smtp`, `imap`, `pop`, `smtpLogin`, `imapLogin`, `popLogin`, `smtpGet`, `imapSend`, `popSend`, `imapGet`, `popGet`, `smtpSend`, `showLog`, `queue`, `queueSend` |
 | `PHEV` | WebSocket/SSE/StreamUI | `allowWebWorker`, `initialize`, `start`, `restart`, `stop`, `running`, `clients`, `debugClients`, `getHandler`, `handler`, `message`, `broadcast`, `disconnect`, `initHeaders`, `sendSE`, `setRetry`, `stream`, `streamUInew`, `streamUI` |
 | `PHFY` | ntfy/Web Push | `configure`, `config`, `public`, `private`, `send`, `clientConfig`, `webPushCapability`, `cryptoCapability`, `registerRoutes`, `privateFeed` |
 | `PHJC` | component/view compiler | `fastUI`, `ui`, `icon`, `slot`, `layout`, `clearCache`, `view`, `includeView`, loop helpers, `share`, `directive`, `minify`, `metaPreset`, `breadcrumb`, `head`, `buildHead`, `newHTML`, `singleHTML`, `mergeHTML`, `p2j`, `h2p`, `css`, `generateId`, `import`, `header`, `body`, `streamJS`, `newJS`, `phjs`, `use`, `render`, builder magic methods |
@@ -1013,6 +1030,13 @@ registerRoutes, dashboard, report, health, metrics, log, finishRequest
 | Document/assets | `autoAssets`, `use`, `meta`, `title`, `js`, `css`, `uiConfig`, `head`, `footer`, `html`, `body` document composition ও asset attachment। |
 | Cache/map | `getFlatAttrMap()` normalized attribute map দেয়; `clearCache()` parser/tree cache clear করে। |
 
+**`PHML::init()` — bootstrap ও auto-asset pipeline:** `index.php`-এ `PHRO::listen()`-এর আগে **একবার** `PHML::init()` কল করতে হয়। এটি meta defaults সেট করে এবং একটা output buffer খোলে যার callback `PHML::process()`। request শেষে `process()` buffered HTML-টা নিয়ে: (১) PHCS চালায় — ব্যবহৃত utility class গুলো থেকে per-route CSS cache file (`src/cache/css/<route>.css`) বানায়, (২) PHJS চালায় — `data-phjs`/`x-on` directive থেকে per-route JS cache file বানায়, (৩) SEO `meta` tags, `<link>` (CSS), এবং `autoAssets` চালু থাকলে `<script src="/app.js">` (PHJS runtime) inject করে। Content-এ আগে থেকে `<html>…</head>…</body>` থাকলে সেগুলোর ভেতরে inject করে, না থাকলে পুরো shell নিজে বানায়।
+
+- Runtime টা serve করার জন্য আলাদা করে `PHJC::app('/app.js', producer)` route register করতে হয় (producer canonical `src/js/PHJS-min.php` রিটার্ন করে)।
+- `PHML::autoAssets(false)` দিলে auto `<script src="/app.js">` ট্যাগ বন্ধ হয় (নিজে script বসাতে চাইলে)।
+- `php -S` (router ছাড়া) extension-ওয়ালা `/app.js` কে static file ধরে 404 দেয়; Apache/nginx rewrite-এ ঠিকমতো route হয়। CSS cache file আসল ফাইল হওয়ায় সর্বত্র serve হয়।
+- একই request-এ আবার `init()` করলে buffer duplicate হয় না (`$bufferStarted` guard)।
+
 #### 17.2.8 `PHCS`
 
 **কাজ:** PHP-native Tailwind-style utility scanner/compiler। Public configuration variable নেই। Instance এবং static—দুই API আছে।
@@ -1027,6 +1051,8 @@ registerRoutes, dashboard, report, health, metrics, log, finishRequest
 | `registerUtilityHandler($pattern,$handler,$priority)` | Custom utility parser/handler extension point। |
 | `processHtml`, `processCss` | Instance-level parser entry point। |
 | `generateCss(array $classes)` | নির্দিষ্ট class list-এর CSS generate করে। |
+
+**নতুন utility set (additive handlers):** `rtl`/`ltr` (direction), `word-spacing-{tighter..widest|3px}`, `object-{center|top|bottom|left|right|left-top|...}` (object-position), `overscroll-{auto|contain|none}` + `overscroll-x/y-*`, `writing-{horizontal-tb|vertical-rl|...}` + `text-orientation-*`, `image-rendering-{auto|pixelated|crisp-edges|smooth}`, `scrollbar-gutter-{auto|stable|both-edges}`, `content-visibility-{auto|visible|hidden}` + `contain-{none|strict|content|layout|paint|style|size|inline-size|block-size}`, `clear-{left|right|both|none|start|end}`, `box-border`/`box-content`, `tab-{n}`, `field-sizing-{content|fixed}`। এগুলো বাকি utility-র মতোই responsive/variant (`md:`, `hover:`) ও arbitrary `[prop:value]` fallback সাপোর্ট করে।
 
 #### 17.2.9 `PHJS`
 
@@ -1046,8 +1072,37 @@ registerRoutes, dashboard, report, health, metrics, log, finishRequest
 | Typed compiler | `expr`, `value`, `translate`, `arrayValue`, `object`, `template`, `statement`, `program`, `compile`, `module`, `build` PHP value/AST-কে safe JS বানায়। |
 | Flow/function/class | `arrow`, `functionDef`, `assign`, `returnValue`, `throwValue`, `awaitValue`, `invoke`, `construct`, `dynamicImport`, `ternary`, `ifBlock`, loops, `switchBlock`, `tryCatch`, `classDef`। |
 | Modules/scripts | `importModule`, `exportDefault`, `exportNamed`, `call`, `script`, `moduleScript` ES module/script output তৈরি করে। |
+| Browser conveniences | `confirm`, `prompt`, `open`, `back`, `print`, `focus`, `blur`, `scrollTo`, `copy`, `stopPropagation`, `matchMedia`, `raf`, `geolocation`, `debounce`, `throttle` — pure browser-JS emitter (কোনো runtime subsystem লাগে না); `alert`/`redirect`/`reload`-এর companion। |
 
 Browser-side `APP` runtime-এর বিস্তারিত subsystem—state, directive compiler, component lifecycle, request de-duplication, SPA, CSS preparation, page cache, keymap, accessibility, PWA, PHFY, devtools—section 10-এ বর্ণিত। Canonical source সবসময় `src/js/PHJS-min.php`।
+
+**PHJS usage guide:**
+
+*১) Runtime wiring:* `index.php`-এ `PHML::init()` ডাকলেই প্রতিটি HTML response-এ `<script src="/app.js">` auto-inject হয়; `/app.js` route PHRO নিজেই serve করে (`src/js/PHJS-min.php`)। আলাদা করে কিছু যোগ করতে হয় না।
+
+*২) Declarative actions (HTML attribute):* element-এ `phjs="event: instruction"` বা `x-on:event="instruction"` বসালে runtime চালায়। Supported verbs: `toggle <sel>`, `open/close <sel>`, `show/hide <sel>`, `addClass/removeClass/toggleClass`, `toast "msg"`, `navigate <url>`, `redirect <url>`, `scroll <sel|top|bottom>`, `copy <text>`, `confirm <msg>`, `store <key> <value>`, `emit <event>`, `fetch <url>`, `submit`, `set`, `theme <name>`, `switch`, `tab`, `modal`।
+```php
+// PHP থেকে attribute-মান তৈরি:
+PHJS::gen('click: toast "Saved"');           // -> compiled JS string
+// সরাসরি HTML-এ:
+// <button x-on:click="toggle #menu">Menu</button>
+```
+
+*৩) PHP builder (JS emit):* `PHJS::gen($instruction)` declarative→JS; `PHJS::app*()` helpers runtime `APP.*` call emit করে; browser conveniences standard JS দেয়।
+```php
+PHJS::appToast('Saved', 'success');   // APP.ui.toast("Saved","success");
+PHJS::appNavigate('/dashboard');      // APP.navigate("/dashboard");
+PHJS::confirm('Delete?');             // window.confirm("Delete?")
+PHJS::debounce(PHJS::expr('save'), 300);
+```
+
+*৪) PHUI component-এ behavior pass:* যেকোনো `PHUI::ui()`/`@component`-এ `phjs` key দাও — PHUI সেটাকে `x-on:` attribute-এ বসায়।
+```php
+PHUI::ui('ui:button-primary', ['slot' => 'Save', 'phjs' => ['click' => 'toast "Saved"']]);
+```
+```blade
+<x-ui-button-primary phjs-click='toast "Saved"'>Save</x-ui-button-primary>
+```
 
 #### 17.2.10 `PHJC`
 
@@ -1058,10 +1113,12 @@ Browser-side `APP` runtime-এর বিস্তারিত subsystem—state,
 | View/UI | `fastUI`, `ui`, `icon`, `slot`, `layout`, `view`, `includeView`, `use`, `render` component/view load ও render করে। |
 | Cache | `clearCache()` compiled CSS/JS/PHP view cache clear করে। |
 | Loop/state | `startLoop`, `currentLoop`, `endLoop`, `share`, `set`, `get` render context ও iteration state। |
+| Render helpers | `once` (@once একবার-ই render), `classes` (@class conditional class merge) — compiled template থেকে call হয়। |
 | Extensibility | `directive` custom directive; `metaPreset` metadata preset; `op` builder operation। |
 | Document | `breadcrumb`, `reset`, `head`, `buildHead`, `header`, `body`, `css` HTML head/body/meta composition। |
 | Conversion | `newHTML`, `singleHTML`, `mergeHTML`, `p2j`, `h2p`, `countElements`, `generateId`, `import` HTML/PHP/JSON conversion ও helper। |
 | JS builder | `streamJS`, `newJS`, `phjs`, `app`, `render_h/c/b/j`, `endFun`, `endCod` compiled JS/HTML builder chain। |
+| Template directives | Blade-সদৃশ: layout `@extends/@section/@yield/@push/@prepend/@stack/@hasSection/@sectionMissing/@fragment`; control `@if/@unless/@foreach/@forelse/@each/@switch/@once/@verbatim/@continue`; form `@csrf/@method/@old/@checked/@selected/@disabled/@readonly/@required`; output `@js/@json/@asset/@class`; component `@component(...)...@endcomponent` + `@slot(name)...@endslot` — `<x-*>`/`PHJC::slot()`-এর alias (default `{{ $slot }}`, named slot `PHJC::slot('name')`)। |
 | Magic API | `__call`, `__callStatic` `tagMap`/builder grammar অনুযায়ী dynamic element/operation resolve করে। |
 
 #### 17.2.11 `PHCO`
@@ -1113,6 +1170,9 @@ Default path `.mystack`-এর private storage। Lock retry exhausted বা ma
 | `$host`, `$username`, `$password`, `$dbname` | MySQL/MariaDB connection settings। Password output/log করবেন না। |
 | `$charset = 'utf8mb4'` | Connection charset; Unicode-এর জন্য default রাখুন। |
 | `$error = true` | Database error behavior/detail policy। Production disclosure `PHDE::debug(false)`-এর সঙ্গে সীমিত রাখুন। |
+| `$driver = 'mysqli'` | Opt-in DB driver; default/empty হলে auto `mysqli` (আগের path অক্ষত)। `'sqlite'` ও `'pgsql'` core API-তে available; অন্য engine পরবর্তী phase। |
+| `$port = null` | TCP driver-এর optional port (mysqli host/php.ini থেকে নেয়)। |
+| `$options = []` | Driver-specific connection options; যেমন pgsql-এ `['sslmode'=>'require','channel_binding'=>'require']`। |
 
 | Method group | কাজ |
 | --- | --- |
@@ -1126,6 +1186,10 @@ Default path `.mystack`-এর private storage। Lock retry exhausted বা ma
 | API/transaction | `api` table result API envelope; `transaction(callable)` atomic commit/rollback। |
 | Maintenance | `clean($table,$options)` bounded cleanup/maintenance। |
 | JSON/array column | `array($action,...)`, `array_get`, `array_set` encoded column-এর nested value safely read/write। |
+
+**Multi-driver (opt-in):** `PHDB::$driver` শুধু `'mysqli'` (default), `'sqlite'` বা `'pgsql'`। mysqli path এক-একটা line অক্ষত; `'sqlite'` ও `'pgsql'` হলে connect/query/fast/CRUD/transaction/createTable/checker একই return shape দেয় (SQLite backtick ও `?` placeholder compatible)। সীমাবদ্ধতা: `clean()`, FULLTEXT `MATCH...AGAINST`, এবং schema-sync reorder/type-change শুধু mysqli-তে; অন্য driver-এ সেগুলো clear error/no-op দেয়, ভুল result চুপচাপ দেয় না। `createTable()` sqlite-এ create + add-missing-column করে। pgsql বিস্তারিত নিচে।
+
+**pgsql driver:** `PHDB::$driver = 'pgsql'` + `$host/$port/$dbname/$username/$password` এবং প্রয়োজনে `$options = ['sslmode'=>'require','channel_binding'=>'require']`। pgsql driver MySQL backtick identifier-কে double-quote-এ translate করে, `?` placeholder রাখে, এবং transaction-pooler (Neon/PgBouncer) compatibility-র জন্য emulated prepares ব্যবহার করে। `createTable()` MySQL type shortcode-কে pg type-এ map করে (id→BIGSERIAL, int→INTEGER, decimal→NUMERIC, json→JSONB, blob→BYTEA, datetime→TIMESTAMP)। Neon-এ ৪৩-চেক live round-trip (CRUD/select operators/IN/LIKE/BETWEEN/streaming/transaction commit+rollback/save/batchInsert/api/columns/JSON array helpers) দিয়ে verified। `createTable()` sync non-mysqli-তে column add ও drop করে (data preserved); column reorder ও type-change auto-apply হয় না (destructive rebuild এড়াতে)। `insert()`/`batchInsert()` overwrite mode `ON CONFLICT` atomic upsert ব্যবহার করে (PK/UNIQUE target introspect করে)। pgsql `fast()` server-side cursor দিয়ে সত্যিকারের unbuffered stream করে। `clean()` ও FULLTEXT `MATCH...AGAINST` এখনো mysqli-only—অন্য driver-এ এগুলো clear error/no-op দেয়, ভুল result চুপচাপ দেয় না।
 
 #### 17.2.15 `PHRQ`
 
@@ -1189,6 +1253,8 @@ Default path `.mystack`-এর private storage। Lock retry exhausted বা ma
 
 `PHVD::check(array $rules, array|bool|null $data = null, bool $debug = false): array` rules অনুযায়ী normalized validation result/errors/data দেয়। `PhvdRule::unique($table,$column,$except)` ও `exists($table,$column)` rule string তৈরি করে। Client validation থাকলেও server-side PHVD বাধ্যতামূলক।
 
+**নতুন rule set (additive):** presence — `prohibited`; text — `lowercase`, `uppercase`, `contains:a,b`, `ascii`, `utf8`, `hex`, `name`, `bengali`; numeric — `positive`, `negative`, `non_negative`, `multiple_of:n`, `even`, `odd`, `decimal:d` বা `decimal:min,max`; date/time — `time`, `timestamp`, `date_equals:Y-m-d`; identity/format (standard checksum) — `iban` (ISO 13616 mod-97), `bic`, `isbn` (10/13), `imei` (Luhn), `jwt`, `data_uri`, `csv`, `url_https`। এগুলো pure format/validation check—external service বা DB call করে না, এবং `nullable`/`required`-এর সঙ্গে combine করা যায়।
+
 #### 17.2.21 `PHCD`
 
 **কাজ:** browser package search/install/update/use এবং responsive manager UI। Public variable নেই।
@@ -1241,6 +1307,8 @@ Install/update staging, safe filename/path filter, atomic activation ও rollbac
 
 `img(...)` image transform/output options, `video(...)` media operation options, `zip(...)` archive create/extract/list flow, `text(...)` text/file transformation চালায়। Exact positional/option contract operationভেদে source method দেখুন। Path traversal, decompression bomb, executable upload ও memory limit validate করুন।
 
+Note: `video(...)` server-এ `exec()` enabled এবং PATH-এ `ffmpeg` binary থাকতে চায়; shared hosting-এ এগুলো না থাকলে operation fail করবে—এটা hosting dependency, framework guarantee না।
+
 #### 17.2.26 `PHAI`
 
 **কাজ:** multi-provider AI facade, cluster/fallback, remote bridge এবং MCP server। Public variable নেই।
@@ -1285,6 +1353,40 @@ Install/update staging, safe filename/path filter, atomic activation ও rollbac
 | `attributes($attributes)` | Attribute array/string safe HTML attribute output। |
 | `check($value)` | Raw/template HTML risk checker result; untrusted markup render-এর আগে ব্যবহার করুন। |
 | `boot()` | Built-in semantic registry একবার load করে। সাধারণত automatic। |
+
+**নতুন built-in components (additive):** `ui:calendar`, `ui:skeleton`, `ui:empty-state`, `ui:carousel`, `ui:countdown`, `ui:input-otp`, `ui:color-picker`, `ui:combobox`, `ui:command-palette`, `ui:chart`, `ui:cookie-consent`, `ui:language-switcher`, `ui:theme-toggle`, `ui:back-to-top`, `ui:scroll-area`, `ui:hover-card`, `ui:context-menu`, `ui:tree`, `ui:resizable`, `ui:signature-pad`, `ui:dropzone`, `ui:mention-input` — সব শেডকন-স্টাইল theme class, `{{class}}/{{style_attr}}/{{attr}}`, `@slot` ও placeholder convention মানে; `PHUI::ui('ui:calendar', [...])` দিয়ে render হয়।
+
+**আরও widgets ও marketing sections (additive):** `ui:masonry`, `ui:speed-dial`, `ui:data-maps`, `ui:form-wizard`, `ui:scrollspy`, `ui:widget`, `ui:ticker` এবং `section:about`, `section:awards`, `section:careers`, `section:downloads`, `section:integrations`, `section:portfolio`, `section:projects`, `section:work`, `section:utilities`, `section:page-examples`।
+
+**PHUI usage guide:**
+
+*১) তিনভাবে render (সব সমতুল্য):*
+```php
+PHUI::ui('ui:button-primary', ['slot' => 'Save']);                 // PHP
+```
+```blade
+@component('ui:button-primary')Save@endcomponent                    // PHJC view
+<x-ui-button-primary>Save</x-ui-button-primary>                     // component tag
+```
+
+*২) Slug convention:* `type:name` — `ui:` (widget), `form:` (input/select/switch…), `data:` (card/table/stat/gallery), `section:`/`sect:` (hero/pricing/team…), `shell:` (navbar/sidebar/dashboard), `auth:`/`payment:`/`courier:` (integration panels)। প্রতি widget-এর tone variant: `ui:button-primary`, `ui:badge-success`, `ui:alert-danger` ইত্যাদি।
+
+*৩) Data/props + default:* associative array পাঠাও; template-এ `{{key|Default}}` — value না দিলে Default (বা key-র নাম) দেখায়। `class` merge হয়, `attr`/`phjs`/`state`/`on` আলাদা key।
+```php
+PHUI::ui('ui:alert-info', ['title' => 'Heads up', 'slot' => 'Body text', 'class' => 'mt-4']);
+```
+
+*৪) Slots:* default slot = inner content (`{{ $slot }}`); named slot `@slot('name')…@endslot` → `PHJC::slot('name')` দিয়ে পড়া যায়।
+```blade
+@component('ui:widget', ['title' => 'Reports'])
+  @slot('actions')<button>Edit</button>@endslot
+  main body…
+@endcomponent
+```
+
+*৫) Theme-aware:* সব variant semantic token (`bg-primary`, `bg-success`, `text-muted-foreground`, `border-border`) ব্যবহার করে — `data-theme="dark"` বা custom theme-এ স্বয়ংক্রিয়ভাবে রঙ বদলায়; hardcoded রঙ নয়।
+
+*৬) Registry introspection:* `PHUI::exists($slug)`, `PHUI::search('button')`, `PHUI::categories()`, `PHUI::count()`, `PHUI::catalog()`; custom যোগে `PHUI::register($slug, $template, $meta)` / `registerMany()` / `alias()`।
 
 #### 17.2.29 `PHPA`
 
@@ -1426,13 +1528,14 @@ var_dump(PHFY::webPushCapability());
 
 বর্তমান Live Map self-hosted/local compatible assets ব্যবহার করবে। External script যোগ করলে CSP-তে explicit trusted source প্রয়োজন; ad blocker-এর Cloudflare beacon error framework failure নয়।
 
-## 19. AI discovery ও স্বয়ংক্রিয় API documentation
+## 20. AI discovery ও স্বয়ংক্রিয় API documentation
 
 MyStack-এর AI-readable documentation বর্তমান `library/*.php` source থেকে তৈরি হয়। কোনো library execute না করেই public class, method, parameter, return declaration, source hash এবং doc summary index করা হয়।
 
 ```bash
 php mystack docs:build
 php mystack docs:check
+php mystack extension:check
 ```
 
 তৈরি হওয়া resource:
@@ -1445,11 +1548,11 @@ php mystack docs:check
 - `llms-full.txt` — indexed public signature ও canonical documentation-সহ পূর্ণ context;
 Root ও `docs/`—দুই জায়গাতেই `llms.txt` ও `llms-full.txt` রাখা হয়: GitHub raw repository এবং published Pages site উভয় পথেই AI discovery কাজ করে। `robots.txt` ও `sitemap.xml` static file তৈরি করা হয় না; framework-এর PHRO router runtime-এ সেগুলো provide করে। `.github/workflows/docs.yml` কেবল generated `docs/` artifact GitHub Pages-এ deploy করে; executable PHP source documentation site-এ publish করে না। Repository settings-এ একবার Pages source হিসেবে **GitHub Actions** নির্বাচন করতে হবে। MyStack rolling `main` branch অনুসরণ করে এবং কোনো fixed framework version ঘোষণা করে না।
 
-Public API বদলানোর পরে `docs:build` চালাতে হবে। `docs:check` source hash ও public-method count মিলিয়ে stale documentation শনাক্ত করে এবং `php mystack smoke` একই check চালায়। Generated API page হাতে edit করবেন না; executable source সর্বশেষ সত্য।
+Public API বদলানোর পরে `docs:build` চালাতে হবে। `docs:check` source hash ও public-method count মিলিয়ে stale documentation শনাক্ত করে, আর `php mystack extension:check` AI-discoverable documentation ও official VS Code extension-এর stub, snippet, trusted-workspace/traversal guard ও packaged VSIX আলাদাভাবে যাচাই করে; এই artifact check-গুলো `php mystack smoke`-এর বাইরে রাখা হয়েছে। Generated API page হাতে edit করবেন না; executable source সর্বশেষ সত্য।
 
 ### Guarantee boundary
 
-Smoke test code path, synchronization ও local capability যাচাই করে। এটি live merchant account approval, third-party uptime, production DNS/TLS, browser vendor policy, real traffic scale বা backup restore সফলতা প্রমাণ করে না। এগুলোর জন্য target environment end-to-end test আবশ্যিক।
+Smoke test code path, synchronization ও local capability যাচাই করে। এটি live merchant account approval, third-party uptime, production DNS/TLS, browser vendor policy, real traffic scale বা backup restore সফলতা প্রমাণ করে না। এগুলোর জন্য target environment end-to-end test আবশ্যিক। একইভাবে PHOP `video(...)`-এর host FFmpeg/`exec()`, PHEM delivery-র reachable SMTP server, এবং `PHEM::queue()` payload-এর SMTP credential ও message content private `.mystack/console.sqlite`-এ at-rest থাকার বিষয়গুলো deployment-ভিত্তিক responsibility—`.mystack` ও root-এর `.env` (PHLS store) guard সক্রিয় রাখুন এবং queue state single-host ধরুন।
 
 ---
 

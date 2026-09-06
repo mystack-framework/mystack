@@ -160,7 +160,11 @@ final class MyStackBrain {
         'ui:list',
         'ui:search',
         'phjs:check',
+        'extension:check',
         'health:check',
+        'docs:build',
+        'docs:check',
+        'test:app',
         'db:check',
         'db:tables',
         'schema:status',
@@ -233,6 +237,7 @@ final class MyStackBrain {
             }
 
             $relative = self::relative($root, $file);
+            $code = self::stripComments($content);
             $stats['bytes'] += strlen($content);
             $stats['lines'] += substr_count($content, "\n") + 1;
 
@@ -249,7 +254,7 @@ final class MyStackBrain {
                     if (is_array($previous) && $previous[0] === T_DOUBLE_COLON) continue;
                     $name = self::nextTokenText($tokens, $index, T_STRING);
                     if ($name !== null) {
-                        $classes[$name][] = $relative;
+                        $classes[$name][] = $relative . ':' . $token[2];
                         $fileClasses[] = $name;
                         $stats['classes']++;
                     }
@@ -265,7 +270,7 @@ final class MyStackBrain {
                         $issues[] = self::issue(
                             'advice',
                             'architecture',
-                            $relative,
+                            $relative . ':' . $token[2],
                             "Use import('app:...') or import('component:...') instead of require/include."
                         );
                     }
@@ -280,14 +285,14 @@ final class MyStackBrain {
 
             preg_match_all(
                 '/\bimport\s*\((.*?)\)\s*;/is',
-                $content,
+                $code,
                 $importCalls,
-                PREG_SET_ORDER
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE
             );
             foreach ($importCalls as $call) {
                 preg_match_all(
                     '/([\'"])(app|component):([^\'"]+)\1/i',
-                    $call[1],
+                    (string) $call[1][0],
                     $importMatches,
                     PREG_SET_ORDER
                 );
@@ -296,69 +301,77 @@ final class MyStackBrain {
                         'type' => strtolower($match[2]),
                         'target' => $match[3],
                         'file' => $relative,
+                        'line' => substr_count($code, "\n", 0, (int) $call[0][1]) + 1,
                     ];
                 }
             }
 
             preg_match_all(
                 '/PHRO::(get|post|put|delete|patch|any)\s*\(\s*([\'"])(.*?)\2/is',
-                $content,
+                $code,
                 $routeMatches,
-                PREG_SET_ORDER
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE
             );
             foreach ($routeMatches as $match) {
                 $routes[] = [
-                    'method' => strtoupper($match[1]),
-                    'path' => $match[3],
+                    'method' => strtoupper((string) $match[1][0]),
+                    'path' => (string) $match[3][0],
                     'file' => $relative,
+                    'line' => substr_count($code, "\n", 0, (int) $match[0][1]) + 1,
                 ];
             }
             preg_match_all(
                 '/PHRO::(get|post|put|delete|patch|any)\s*\(\s*([\'"])(.*?)\2\s*,\s*\[\s*([a-zA-Z_][a-zA-Z0-9_]*)::class\s*,\s*([\'"])([a-zA-Z_][a-zA-Z0-9_]*)\5\s*\]/is',
-                $content,
+                $code,
                 $handlerMatches,
-                PREG_SET_ORDER
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE
             );
             foreach ($handlerMatches as $match) {
                 $routeHandlers[] = [
-                    'method' => strtoupper($match[1]),
-                    'path' => $match[3],
-                    'class' => $match[4],
-                    'action' => $match[6],
+                    'method' => strtoupper((string) $match[1][0]),
+                    'path' => (string) $match[3][0],
+                    'class' => (string) $match[4][0],
+                    'action' => (string) $match[6][0],
                     'file' => $relative,
+                    'line' => substr_count($code, "\n", 0, (int) $match[0][1]) + 1,
                 ];
             }
-            preg_match_all('/->name\s*\(\s*([\'"])(.*?)\1\s*\)/is', $content, $nameMatches, PREG_SET_ORDER);
+            preg_match_all('/->name\s*\(\s*([\'"])(.*?)\1\s*\)/is', $code, $nameMatches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
             foreach ($nameMatches as $match) {
-                $routeNames[$match[2]][] = $relative;
+                $routeNames[(string) $match[2][0]][] = $relative . ':' . (substr_count($code, "\n", 0, (int) $match[0][1]) + 1);
             }
 
             preg_match_all(
                 '/PHJC::view\s*\(\s*([\'"])([^\'"]+)\1/is',
-                $content,
+                $code,
                 $viewMatches,
-                PREG_SET_ORDER
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE
             );
             foreach ($viewMatches as $match) {
-                $views[] = ['target' => $match[2], 'file' => $relative];
+                $views[] = [
+                    'target' => (string) $match[2][0],
+                    'file' => $relative,
+                    'line' => substr_count($code, "\n", 0, (int) $match[0][1]) + 1,
+                ];
             }
             preg_match_all(
                 '/PHRO::add\s*\(\s*([\'"])(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\1\s*,\s*([\'"])(.*?)\3/is',
-                $content,
+                $code,
                 $addRouteMatches,
-                PREG_SET_ORDER
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE
             );
             foreach ($addRouteMatches as $match) {
                 $routes[] = [
-                    'method' => strtoupper($match[2]),
-                    'path' => $match[4],
+                    'method' => strtoupper((string) $match[2][0]),
+                    'path' => (string) $match[4][0],
                     'file' => $relative,
+                    'line' => substr_count($code, "\n", 0, (int) $match[0][1]) + 1,
                 ];
             }
 
             $bufferedMatches = preg_match_all(
                 '/PHDB::query\s*\(\s*([\'"])\s*SELECT\s+\*/i',
-                $content
+                $code
             );
             $stats['buffered_selects'] += $bufferedMatches === false ? 0 : $bufferedMatches;
 
@@ -391,12 +404,17 @@ final class MyStackBrain {
             }
         }
         foreach ($imports as $import) {
+            // Glob imports (e.g. import('app:*.php')) resolve many files at runtime
+            // and are not a single literal target, so they are not missing-import cases.
+            if (str_contains($import['target'], '*') || str_contains($import['target'], '?')) {
+                continue;
+            }
             $target = strtolower(pathinfo(str_replace('\\', '/', $import['target']), PATHINFO_FILENAME));
             if (!isset($availableTargets[$import['type']][$target])) {
                 $issues[] = self::issue(
                     'critical',
                     'missing-import',
-                    $import['file'],
+                    $import['file'] . ':' . $import['line'],
                     "Missing {$import['type']} import target: {$import['target']}"
                 );
             }
@@ -407,7 +425,7 @@ final class MyStackBrain {
                 $issues[] = self::issue(
                     'critical',
                     'missing-view',
-                    $view['file'],
+                    $view['file'] . ':' . $view['line'],
                     "Missing component view target: {$view['target']}"
                 );
             }
@@ -429,7 +447,7 @@ final class MyStackBrain {
                 $issues[] = self::issue(
                     'critical',
                     'missing-controller',
-                    $handler['file'],
+                    $handler['file'] . ':' . $handler['line'],
                     "{$handler['method']} {$handler['path']} references missing class {$handler['class']}."
                 );
                 continue;
@@ -438,7 +456,7 @@ final class MyStackBrain {
                 $issues[] = self::issue(
                     'critical',
                     'missing-action',
-                    $handler['file'],
+                    $handler['file'] . ':' . $handler['line'],
                     "{$handler['method']} {$handler['path']} references missing {$handler['class']}::{$handler['action']}()."
                 );
             }
@@ -447,7 +465,7 @@ final class MyStackBrain {
         $routeIndex = [];
         foreach ($routes as $route) {
             $key = $route['method'] . ' ' . $route['path'];
-            $routeIndex[$key][] = $route['file'];
+            $routeIndex[$key][] = $route['file'] . ':' . $route['line'];
         }
         foreach ($routeIndex as $route => $locations) {
             if (count($locations) > 1) {
@@ -466,10 +484,11 @@ final class MyStackBrain {
         if ($indexContent === '') {
             $issues[] = self::issue('critical', 'bootstrap', '/index.php', 'Application entry point is missing or empty.');
         } else {
-            if (!str_contains($indexContent, 'PHRO::guard(')) {
+            $indexCode = self::stripComments($indexContent);
+            if (!str_contains($indexCode, 'PHRO::guard(')) {
                 $issues[] = self::issue('advice', 'security', '/index.php', 'PHRO::guard() is not enabled.');
             }
-            if (preg_match('/PHDE::debug\s*\(\s*true\s*\)/i', $indexContent)) {
+            if (preg_match('/PHDE::debug\s*\(\s*true\s*\)/i', $indexCode)) {
                 $issues[] = self::issue(
                     'info',
                     'environment',
@@ -890,6 +909,19 @@ final class MyStackBrain {
         return compact('severity', 'type', 'location', 'message');
     }
 
+    private static function stripComments(string $content): string {
+        $offset = 0;
+        foreach (token_get_all($content) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                $length = strlen($token[1]);
+                $blank = preg_replace('/[^\r\n]/', ' ', $token[1]);
+                $content = substr_replace($content, $blank, $offset, $length);
+            }
+            $offset += is_array($token) ? strlen($token[1]) : strlen($token);
+        }
+        return $content;
+    }
+
     private static function relative(string $root, string $path): string {
         $root = rtrim(str_replace('\\', '/', $root), '/');
         $path = str_replace('\\', '/', $path);
@@ -918,10 +950,11 @@ final class MyStackUpdater {
     private const MAX_FILE_BYTES = 16 * 1024 * 1024;
     private const ROOT_FILES = [
         '.htaccess', '.github/CODEOWNERS', '.github/workflows/docs.yml', 'AGENTS.md', 'CONTRIBUTING.md', 'LICENSE',
-        'MANUAL_BN.md', 'NOTICE', 'README.md', 'llms.txt', 'llms-full.txt',
-        'mystack', 'mystack.cmd',
+        'MANUAL_BN.md', 'MANUAL_EN.md', 'NOTICE', 'README.md', 'llms.txt', 'llms-full.txt',
+        'mystack', 'mystack.cmd', 'mystack.sh',
     ];
     private static ?bool $nodeAvailable = null;
+    private static bool $rollbackRetainStage = false;
 
     public static function policy(): array {
         return [
@@ -956,6 +989,7 @@ final class MyStackUpdater {
         $archivePath = self::downloadBranchArchive();
         MyStackTui::progress(1, 4, 'Branch snapshot downloaded');
         $stageRoot = null;
+        self::$rollbackRetainStage = false;
         try {
             $remote = self::readAllowedFiles($archivePath, $scope);
             MyStackTui::progress(2, 4, 'Allowlisted files verified');
@@ -1012,7 +1046,11 @@ final class MyStackUpdater {
             return true;
         } finally {
             if (is_file($archivePath)) @unlink($archivePath);
-            if (is_string($stageRoot) && is_dir($stageRoot)) self::removeTree($stageRoot, $root);
+            if (self::$rollbackRetainStage) {
+                warning('Rollback backups were retained for manual recovery at: ' . $stageRoot);
+            } elseif (is_string($stageRoot) && is_dir($stageRoot)) {
+                self::removeTree($stageRoot, $root);
+            }
         }
     }
 
@@ -1324,17 +1362,24 @@ final class MyStackUpdater {
         info('Running post-update framework smoke test...');
         [$exitCode, $output] = self::process([PHP_BINARY, $cli, 'smoke'], 180);
         if ($exitCode !== 0) {
-            $lines = preg_split('/\R/', trim($output)) ?: [];
+            $lines = preg_split('/\r\n|\r|\n/', trim($output)) ?: [];
             throw new RuntimeException(implode("\n", array_slice($lines, -20)) ?: 'Smoke test failed.');
         }
         success('Post-update framework smoke test passed.');
     }
 
     private static function rollback(string $root, string $stageRoot, array $applied): void {
+        $failures = [];
         foreach (array_reverse($applied) as $item) {
             $destination = self::destination($root, $item['path'], false);
             if (is_file($destination)) @unlink($destination);
-            if (!empty($item['had_original']) && is_file($item['backup'])) @rename($item['backup'], $destination);
+            if (!empty($item['had_original']) && (!is_file($item['backup']) || !@rename($item['backup'], $destination))) {
+                $failures[] = (string) $item['path'];
+            }
+        }
+        if ($failures !== []) {
+            self::$rollbackRetainStage = true;
+            throw new RuntimeException('Rollback could not restore: ' . implode(', ', $failures) . ". Backups retained at: {$stageRoot}");
         }
         if ($applied !== []) warning('Updater rollback restored the previous framework files.');
     }
@@ -1438,7 +1483,7 @@ final class MyStackDocs {
         $catalog = self::catalog(); $docs = ROOT_DIR . '/docs'; self::directory($docs . '/api'); self::removeLegacyCrawlerFiles();
         $manifest = ['name' => 'MyStack Framework', 'repository' => self::REPO, 'documentation' => self::SITE, 'license' => 'Apache-2.0', 'release_model' => 'rolling main branch; no fixed framework version', 'source_branch' => 'main', 'generator' => 'mystack docs:build', 'deterministic' => true, 'libraries' => count($catalog['libraries']), 'classes' => $catalog['totals']['classes'], 'public_methods' => $catalog['totals']['public_methods'], 'public_functions' => $catalog['totals']['public_functions'], 'source_sha256' => $catalog['source_sha256'], 'knowledge_sha256' => $catalog['knowledge_sha256']];
         self::write($docs . '/api.json', self::json($catalog)); self::write($docs . '/manifest.json', self::json($manifest));
-        $index = "# MyStack Framework Documentation\n\nSource-verified documentation for humans and AI.\n\n- [README](../README.md)\n- [Bangla manual](../MANUAL_BN.md)\n- [AI summary](../llms.txt)\n- [Full AI context](../llms-full.txt)\n- [Machine API catalog](api.json)\n\n## Library API\n\n";
+        $index = "# MyStack Framework Documentation\n\nSource-verified documentation for humans and AI.\n\n- [README](" . self::REPO . "/blob/main/README.md)\n- [English manual](" . self::REPO . "/blob/main/MANUAL_EN.md)\n- [Bangla manual](" . self::REPO . "/blob/main/MANUAL_BN.md)\n- [AI summary](" . self::REPO . "/blob/main/llms.txt)\n- [Full AI context](" . self::REPO . "/blob/main/llms-full.txt)\n- [Machine API catalog](api.json)\n\n## Library API\n\n";
         foreach ($catalog['libraries'] as $library) {
             $index .= '- [' . $library['name'] . '](api/' . $library['name'] . '.md) — ' . count($library['public_methods']) . " public methods\n";
             self::write($docs . '/api/' . $library['name'] . '.md', self::libraryPage($library));
@@ -1473,8 +1518,8 @@ final class MyStackDocs {
     }
 
     private static function llms(array $catalog, bool $full): string {
-        $out = "# MyStack Framework\n\n> Official repository: " . self::REPO . "\n> Documentation: " . self::SITE . "\n> License: Apache-2.0\n\nMyStack is a zero-Composer PHP full-stack framework. Executable code in library/, src/js/PHJS-min.php and mystack is authoritative. Never invent APIs; verify exact signatures.\n\n## Canonical resources\n- AGENTS.md: agent contract\n- README.md: overview\n- MANUAL_BN.md: detailed Bangla manual\n- docs/api.json: machine API catalog\n\n## Source API map\n";
-        foreach ($catalog['libraries'] as $lib) { $out .= "\n### " . $lib['name'] . " — " . $lib['file'] . "\n"; if ($full) foreach ($lib['public_methods'] as $method) $out .= '- `' . ($method['static'] ? 'static ' : '') . $method['name'] . '(' . $method['parameters'] . ')' . ($method['return'] ? ': ' . $method['return'] : '') . '`' . ($method['summary'] ? ' — ' . $method['summary'] : '') . "\n"; else { $names = array_column($lib['public_methods'], 'name'); $out .= count($names) . ' public methods: ' . implode(', ', array_slice($names, 0, 24)) . (count($names) > 24 ? ', …' : '') . "\n"; } }
+        $out = "# MyStack Framework\n\n> Official repository: " . self::REPO . "\n> Documentation: " . self::SITE . "\n> License: Apache-2.0\n\nMyStack is a zero-Composer PHP full-stack framework. Executable code in library/, src/js/PHJS-min.php and mystack is authoritative. Never invent APIs; verify exact signatures.\n\n## Canonical resources\n- AGENTS.md: agent contract\n- README.md: overview\n- MANUAL_BN.md: detailed Bangla manual (includes the PHJS and PHUI usage guides)\n- docs/api.json: machine API catalog\n\n## Capabilities & usage index\n- PHDB: opt-in `PHDB::\$driver` — `mysqli` default, plus `sqlite` and `pgsql` core paths\n- PHEM: `PHEM::queue()`/`queueSend()` console-queue mail bridge\n- PHVD: extended validators — `iban`, `bic`, `isbn`, `imei`, `jwt`, `utf8`, `bengali`, numeric sign/multiple/decimal, time/timestamp/date_equals\n- PHCS: utility CSS engine, extensible handler registry, arbitrary `[prop:value]` fallback\n- PHJS: declarative actions + browser-convenience emitters; see the PHJS usage guide in MANUAL_BN.md\n- PHJC: `@component`/`@slot`, `@class`, `@verbatim`, `@forelse`, `@each`, `@once`; `PHML::init()` auto asset pipeline (`autoAssets` toggle)\n- PHUI: theme-aware components (e.g. `ui:calendar`, `ui:skeleton`, `ui:empty-state`, `ui:carousel`); see the PHUI usage guide in MANUAL_BN.md\n- CLI: `extension:check`, `test:app`, `docs:build`, `docs:check`, `smoke`, `audit`, `doctor`\n\n## Source API map\n";
+        foreach ($catalog['libraries'] as $lib) { $out .= "\n### " . $lib['name'] . " — " . $lib['file'] . "\n"; if ($full) foreach ($lib['public_methods'] as $method) $out .= '- `' . ($method['static'] ? 'static ' : '') . $method['name'] . '(' . $method['parameters'] . ')' . ($method['return'] ? ': ' . $method['return'] : '') . '`' . ($method['summary'] ? ' — ' . $method['summary'] : '') . "\n"; else { $names = array_values(array_unique(array_column($lib['public_methods'], 'name'))); $out .= count($names) . ' public methods: ' . implode(', ', array_slice($names, 0, 24)) . (count($names) > 24 ? ', …' : '') . "\n"; } }
         if ($full) foreach (['README.md','MANUAL_BN.md','AGENTS.md'] as $file) $out .= "\n\n---\n\n# Embedded {$file}\n\n" . trim((string) file_get_contents(ROOT_DIR . '/' . $file)) . "\n";
         return $out;
     }
@@ -1534,7 +1579,7 @@ final class MyStackDocs {
             if ($isOldGenerated) @unlink($path);
         }
     }
-    private static function summary(string $doc): string { $doc = preg_replace('/^\\s*\\/\\*\\*|\\*\\/\\s*$/', '', $doc) ?? ''; foreach (preg_split('/\\R/', $doc) ?: [] as $line) { $line = trim(preg_replace('/^\\s*\\*\\s?/', '', $line) ?? ''); if ($line !== '' && !str_starts_with($line, '@')) return self::clean($line); } return ''; }
+    private static function summary(string $doc): string { $doc = preg_replace('/^\\s*\\/\\*\\*|\\*\\/\\s*$/', '', $doc) ?? ''; foreach (preg_split('/\\R/u', $doc) ?: [] as $line) { $line = trim(preg_replace('/^\\s*\\*\\s?/', '', $line) ?? ''); if ($line !== '' && !str_starts_with($line, '@')) return self::clean($line); } return ''; }
     private static function clean(string $text): string { return trim(preg_replace('/\\s+/', ' ', $text) ?? $text); }
     private static function json(array $value): string { return (string) json_encode($value, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE) . "\n"; }
     private static function readJson(string $file): array { $value = is_file($file) ? json_decode((string) file_get_contents($file), true) : null; return is_array($value) ? $value : []; }
@@ -1569,6 +1614,7 @@ final class MyStackConsoleKernel {
                 'update [path] [--check|--yes]' => 'Safely compare/update framework files from GitHub main.',
                 'docs:build' => 'Build source-verified docs, AI context, API catalog and static portal.',
                 'docs:check' => 'Verify generated documentation coverage and source freshness.',
+                'extension:check' => 'Verify AI-discoverable documentation and the official VS Code extension artifacts.',
             ],
             'Original generators' => [
                 'make:controller <Name>' => 'Generate the original controller scaffold.',
@@ -1656,6 +1702,7 @@ final class MyStackConsoleKernel {
                 'logs:report [--date=YYYY-MM-DD]' => 'Show PHMO metrics and problem summary.',
                 'monitor:status' => 'Show health, queue, scheduler and cache status.',
                 'test' => 'Run the complete framework test suite.',
+                'test:app' => 'Run discovered application tests from flat app/*Test.php files.',
             ],
         ];
     }
@@ -1688,6 +1735,7 @@ final class MyStackConsoleKernel {
                 'health:check' => self::healthCheck($options),
                 'docs:build' => self::docsBuild($options),
                 'docs:check' => self::docsCheck($options),
+                'extension:check' => self::extensionCheck($options),
                 'cache:status' => self::cacheStatus($options),
                 'cache:warm' => self::cacheWarm($options),
                 'cache:prune' => self::cachePrune($options),
@@ -1725,6 +1773,7 @@ final class MyStackConsoleKernel {
                 'logs:report' => self::logsReport($options),
                 'monitor:status' => self::monitorStatus($options),
                 'test' => runSmokeTests() ? 0 : 1,
+                'test:app' => self::testApp($options),
                 default => str_starts_with($command, 'make:')
                     ? self::generate($command, $args, $options)
                     : self::runCustom($command, $args, $options),
@@ -1763,6 +1812,172 @@ final class MyStackConsoleKernel {
 
     private static function docsCheck(array $options): int {
         $result = MyStackDocs::check(); self::emit($result, $options, $result['status'] ? 'info' : 'error'); return $result['status'] ? 0 : 1;
+    }
+
+    private static function extensionCheck(array $options): int {
+        $aiDocumentation = MyStackDocs::check();
+        $documentationProblems = $aiDocumentation['errors'] ?? [];
+        if (($aiDocumentation['libraries'] ?? 0) !== 31) {
+            $documentationProblems[] = 'API catalog covers ' . ($aiDocumentation['libraries'] ?? 0) . ' libraries, expected 31.';
+        }
+        if (($aiDocumentation['public_methods'] ?? 0) <= 500) {
+            $documentationProblems[] = 'API catalog indexes only ' . ($aiDocumentation['public_methods'] ?? 0) . ' public methods.';
+        }
+        foreach (['llms.txt', 'llms-full.txt', 'docs/index.html'] as $requiredFile) {
+            if (!is_file(ROOT_DIR . '/' . $requiredFile)) $documentationProblems[] = $requiredFile . ' is missing.';
+        }
+        foreach (['robots.txt', 'sitemap.xml'] as $forbiddenFile) {
+            if (is_file(ROOT_DIR . '/' . $forbiddenFile)) {
+                $documentationProblems[] = 'static ' . $forbiddenFile . ' must not exist; PHRO serves it dynamically.';
+            }
+        }
+        $phroSource = (string) file_get_contents(ROOT_DIR . '/library/PHRO.php');
+        if (!str_contains($phroSource, 'self::get("/robots.txt"')) $documentationProblems[] = 'PHRO robots.txt route is missing.';
+        if (!str_contains($phroSource, 'self::get("/sitemap.xml"')) $documentationProblems[] = 'PHRO sitemap.xml route is missing.';
+        $documentationOk = $documentationProblems === [];
+
+        $extensionRoot = ROOT_DIR . '/mystack-extension-main';
+        $extensionPackage = is_file($extensionRoot . '/package.json') ? json_decode((string) file_get_contents($extensionRoot . '/package.json'), true) : null;
+        $extensionSnippets = is_file($extensionRoot . '/snippets/snippets.json') ? json_decode((string) file_get_contents($extensionRoot . '/snippets/snippets.json'), true) : null;
+        $extensionSource = is_file($extensionRoot . '/extension.js') ? (string) file_get_contents($extensionRoot . '/extension.js') : '';
+        $extensionStubOk = false;
+        $extensionStubPath = $extensionRoot . '/stubs/mystack-stubs.php';
+        if (is_file($extensionStubPath)) {
+            try {
+                token_get_all((string) file_get_contents($extensionStubPath), TOKEN_PARSE);
+                $extensionStubOk = true;
+            } catch (Throwable) { $extensionStubOk = false; }
+        }
+        $extensionVsixOk = false;
+        $extensionVsix = $extensionRoot . '/mystack-helper-' . (string) ($extensionPackage['version'] ?? '') . '.vsix';
+        if (is_file($extensionVsix) && class_exists('ZipArchive')) {
+            $archive = new ZipArchive();
+            if ($archive->open($extensionVsix) === true) {
+                $extensionVsixOk = $archive->locateName('extension.vsixmanifest', ZipArchive::FL_NOCASE) !== false
+                    && $archive->locateName('extension/package.json', ZipArchive::FL_NOCASE) !== false;
+                $archive->close();
+            }
+        }
+        $extensionProblems = [];
+        if (!is_array($extensionPackage)) {
+            $extensionProblems[] = 'mystack-extension-main/package.json is missing or invalid.';
+        } else {
+            if (($extensionPackage['name'] ?? '') !== 'mystack-helper') {
+                $extensionProblems[] = "package name is '" . ($extensionPackage['name'] ?? '') . "', expected 'mystack-helper'.";
+            }
+            if (($extensionPackage['publisher'] ?? '') !== 'Sakibweb') {
+                $extensionProblems[] = "publisher is '" . ($extensionPackage['publisher'] ?? '') . "', expected 'Sakibweb'.";
+            }
+        }
+        if (!is_array($extensionSnippets)) {
+            $extensionProblems[] = 'snippets/snippets.json is missing or invalid.';
+        } elseif (count($extensionSnippets) <= 2000) {
+            $extensionProblems[] = 'only ' . count($extensionSnippets) . ' snippets, expected more than 2000.';
+        }
+        if (!$extensionStubOk) $extensionProblems[] = 'stubs/mystack-stubs.php is missing or contains PHP syntax errors.';
+        if (!$extensionVsixOk) $extensionProblems[] = 'mystack-helper-' . (string) ($extensionPackage['version'] ?? '?') . '.vsix is missing or fails ZIP manifest validation.';
+        if (!str_contains($extensionSource, 'workspace.isTrusted')) $extensionProblems[] = 'extension.js lacks the workspace.isTrusted guard.';
+        if (!str_contains($extensionSource, "segment === '..'")) $extensionProblems[] = "extension.js lacks the '..' path traversal guard.";
+        if (!str_contains((string) file_get_contents(ROOT_DIR . '/.htaccess'), 'mystack-extension(?:-main)?')) {
+            $extensionProblems[] = '.htaccess lacks the mystack-extension HTTP denial rule.';
+        }
+        $extensionOk = $extensionProblems === [];
+
+        $status = $documentationOk && $extensionOk;
+        $result = [
+            'status' => $status,
+            'documentation' => [
+                'status' => $documentationOk,
+                'public_methods' => $aiDocumentation['public_methods'] ?? 0,
+                'libraries' => $aiDocumentation['libraries'] ?? 0,
+                'problems' => $documentationProblems,
+            ],
+            'extension' => [
+                'status' => $extensionOk,
+                'snippets' => is_array($extensionSnippets) ? count($extensionSnippets) : 0,
+                'stubs' => $extensionStubOk,
+                'vsix' => $extensionVsixOk,
+                'problems' => $extensionProblems,
+            ],
+        ];
+        if (!empty($options['json'])) { self::emit($result, $options, $status ? 'info' : 'error'); return $status ? 0 : 1; }
+        MyStackTui::section('Extension verification');
+        printColor($documentationOk ? '[PASS] ' : '[FAIL] ', $documentationOk ? '1;32' : '1;31');
+        echo 'AI-discoverable source documentation - ' . ($aiDocumentation['public_methods'] ?? 0) . ' source-indexed public methods, portal, llms and machine API catalog'
+            . ($documentationOk ? '' : ' [' . implode('; ', $documentationProblems) . ']') . "\n";
+        printColor($extensionOk ? '[PASS] ' : '[FAIL] ', $extensionOk ? '1;32' : '1;31');
+        echo 'Official MyStack VS Code extension - ' . (is_array($extensionSnippets) ? count($extensionSnippets) : 0) . ' snippets, source-derived stubs, trusted workspace and validated VSIX'
+            . ($extensionOk ? '' : ' [' . implode('; ', $extensionProblems) . ']') . "\n";
+        echo "\n";
+        return $status ? 0 : 1;
+    }
+
+    private static function testApp(array $options): int {
+        ensureFrameworkRuntime();
+        $files = glob(ROOT_DIR . '/app/*Test.php') ?: [];
+        sort($files, SORT_NATURAL | SORT_FLAG_CASE);
+        $rows = [];
+        $passed = 0;
+        $failed = 0;
+        foreach ($files as $file) {
+            $class = basename($file, '.php');
+            $row = ['test' => $class, 'file' => '/app/' . $class . '.php', 'status' => false, 'assertions' => 0, 'message' => ''];
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $class)) {
+                $row['message'] = 'Test file name must be a valid PHP class name.';
+            } else {
+                try {
+                    include_once $file;
+                    if (!class_exists($class, false)) {
+                        $row['message'] = 'File declares no class matching its name.';
+                    } elseif (!method_exists($class, 'run')) {
+                        $row['message'] = 'Missing static run(): array.';
+                    } elseif (!(new ReflectionMethod($class, 'run'))->isStatic()) {
+                        $row['message'] = 'run() must be static.';
+                    } else {
+                        $result = $class::run();
+                        if (!is_array($result)) {
+                            $row['message'] = 'run() must return an array with status and assertions.';
+                        } else {
+                            $assertions = (int) ($result['assertions'] ?? 0);
+                            $row['assertions'] = $assertions;
+                            $row['message'] = (string) ($result['message'] ?? '');
+                            if (!empty($result['status']) && $assertions > 0) {
+                                $row['status'] = true;
+                            } elseif (!empty($result['status'])) {
+                                $row['message'] = 'run() reported success without any assertion.';
+                            }
+                        }
+                    }
+                } catch (Throwable $error) {
+                    $row['message'] = $error->getMessage()
+                        . ' at ' . str_replace('\\', '/', str_replace(ROOT_DIR, '', $error->getFile())) . ':' . $error->getLine();
+                }
+            }
+            if ($row['status']) { $passed++; } else { $failed++; }
+            $rows[] = $row;
+        }
+        $result = [
+            'status' => $failed === 0,
+            'discovered' => count($files),
+            'passed' => $passed,
+            'failed' => $failed,
+            'tests' => $rows,
+        ];
+        if (!empty($options['json'])) { self::emit($result, $options, $result['status'] ? 'info' : 'error'); return $result['status'] ? 0 : 1; }
+        MyStackTui::section('Application tests');
+        if ($files === []) {
+            info('No application tests found; generate one with: php mystack make:test <Name>');
+            return 0;
+        }
+        foreach ($rows as $row) {
+            printColor($row['status'] ? '[PASS] ' : '[FAIL] ', $row['status'] ? '1;32' : '1;31');
+            echo $row['test'] . ' - ' . $row['assertions'] . ' assertion(s)'
+                . ($row['status'] || $row['message'] === '' ? '' : ': ' . $row['message'] . ' (' . $row['file'] . ')') . "\n";
+        }
+        MyStackTui::badge('PASSED', (string) $passed, '1;42;30', '+');
+        MyStackTui::badge('FAILED', (string) $failed, $failed === 0 ? '1;42;30' : '1;41;97', $failed === 0 ? '+' : 'x');
+        echo "\n";
+        return $failed === 0 ? 0 : 1;
     }
 
     private static function parse(array $arguments): array {
@@ -1846,10 +2061,14 @@ final class MyStackConsoleKernel {
         if (file_put_contents($temporary, $content, LOCK_EX) !== strlen($content) || !@rename($temporary, $launcher)) {
             @unlink($temporary); throw new RuntimeException('Unable to install the launcher atomically.');
         }
-        if (PHP_OS_FAMILY !== 'Windows') @chmod($launcher, 0755);
+        if (PHP_OS_FAMILY !== 'Windows') {
+            @chmod($launcher, 0755);
+            @chmod(ROOT_DIR . '/mystack', 0755);
+        }
         $inPath = self::pathContains(dirname($launcher));
         self::emit([
             'status' => true, 'launcher' => $launcher, 'command' => 'mystack', 'php_mystack_preserved' => true,
+            'project_direct_executable' => PHP_OS_FAMILY === 'Windows' ? null : is_executable(ROOT_DIR . '/mystack'),
             'path_ready' => $inPath,
             'next' => $inPath ? 'Run: mystack help' : 'Add this directory to PATH: ' . dirname($launcher),
         ], $options);
@@ -1873,6 +2092,7 @@ final class MyStackConsoleKernel {
         self::emit([
             'status' => true, 'os' => PHP_OS_FAMILY, 'php_binary' => PHP_BINARY,
             'project_launchers' => $projectLaunchers, 'path_matches' => array_values(array_unique($matches)),
+            'project_direct_executable' => PHP_OS_FAMILY === 'Windows' ? null : is_executable(ROOT_DIR . '/mystack'),
             'direct_command_ready' => $matches !== [], 'fallback' => 'php mystack',
         ], $options);
         return 0;
@@ -1939,7 +2159,7 @@ final class MyStackConsoleKernel {
             $reflection = new ReflectionClass($class);
             $rows[] = ['class' => $class, 'methods' => count($reflection->getMethods(ReflectionMethod::IS_PUBLIC)), 'properties' => count($reflection->getProperties(ReflectionProperty::IS_PUBLIC)), 'file' => basename($reflection->getFileName())];
         }
-        self::emit(['count' => count($rows), 'libraries' => $rows], $options); return 0;
+        self::emit(['count' => count($rows), 'files' => count(glob(ROOT_DIR . '/library/*.php') ?: []), 'libraries' => $rows], $options); return 0;
     }
 
     private static function libraryCheck(array $args, array $options): int {
@@ -2028,8 +2248,12 @@ final class MyStackConsoleKernel {
     public static function configureDatabase(): bool {
         if (!class_exists('PHDB')) return false;
         $source = is_file(ROOT_DIR . '/index.php') ? (string) file_get_contents(ROOT_DIR . '/index.php') : '';
-        foreach (['host','username','password','dbname','charset'] as $property) {
-            if (preg_match('/PHDB::\$' . $property . '\s*=\s*([\'"])(.*?)\1\s*;/s', $source, $match)) PHDB::${$property} = stripcslashes($match[2]);
+        foreach (explode("\n", str_replace(["\r\n", "\r"], "\n", $source)) as $line) {
+            $trimmed = ltrim($line);
+            if (str_starts_with($trimmed, '//') || str_starts_with($trimmed, '#') || str_starts_with($trimmed, '*')) continue;
+            foreach (['host','username','password','dbname','charset'] as $property) {
+                if (preg_match('/PHDB::\$' . $property . '\s*=\s*([\'"])(.*?)\1\s*;/', $line, $match)) PHDB::${$property} = stripcslashes($match[2]);
+            }
         }
         return is_string(PHDB::$host) && PHDB::$host !== '' && is_string(PHDB::$username) && PHDB::$username !== '' && is_string(PHDB::$dbname) && PHDB::$dbname !== '';
     }
@@ -2161,19 +2385,88 @@ final class MyStackConsoleKernel {
         ensureFrameworkRuntime();
         static $commands = null; if (is_array($commands)) return $commands; $commands = [];
         foreach (glob(ROOT_DIR . '/app/*Command.php') ?: [] as $file) {
-            $before = get_declared_classes(); try { require_once $file; } catch (Throwable) { continue; }
-            foreach (array_diff(get_declared_classes(), $before) as $class) {
-                if (!method_exists($class, 'commandName') || !method_exists($class, 'handle')) continue;
-                $name = (string) $class::commandName(); if (!preg_match('/^[a-z][a-z0-9:_-]*$/', $name)) continue;
-                $commands[$name] = ['class' => $class, 'description' => method_exists($class, 'description') ? (string) $class::description() : 'Application command.'];
+            $definition = self::parseCommandFile($file);
+            if ($definition !== null) $commands[$definition['name']] = $definition;
+        }
+        ksort($commands);
+        return $commands;
+    }
+
+    /**
+     * Discovers an application command from source tokens only, without executing
+     * any application code during help, list, doctor, audit or dispatch lookup.
+     */
+    private static function parseCommandFile(string $file): ?array {
+        $source = (string) @file_get_contents($file);
+        if ($source === '' || !str_contains($source, 'commandName')) return null;
+        $tokens = @token_get_all($source);
+        if (!is_array($tokens)) return null;
+        $namespace = ''; $class = null; $name = null; $description = null; $hasHandle = false;
+        $count = count($tokens);
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (is_array($token) && $token[0] === T_NAMESPACE) {
+                for ($j = $i + 1; $j < $count; $j++) {
+                    $part = $tokens[$j];
+                    if (is_array($part) && ($part[0] === T_STRING || $part[0] === T_NAME_QUALIFIED)) $namespace .= $part[1];
+                    elseif ($part === ';' || $part === '{') break;
+                }
+                continue;
+            }
+            if ($class === null && is_array($token) && $token[0] === T_CLASS) {
+                for ($j = $i + 1; $j < $count; $j++) {
+                    if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) { $class = $tokens[$j][1]; break; }
+                    if ($tokens[$j] === '{') break;
+                }
+                continue;
+            }
+            if (!is_array($token) || $token[0] !== T_FUNCTION) continue;
+            $method = null;
+            for ($j = $i + 1; $j < $count; $j++) {
+                if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) { $method = $tokens[$j][1]; break; }
+                if (!(is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE)) break;
+            }
+            if ($method === 'handle') $hasHandle = true;
+            elseif ($method === 'commandName') $name = self::firstReturnLiteral($tokens, $i, $count);
+            elseif ($method === 'description') $description = self::firstReturnLiteral($tokens, $i, $count);
+        }
+        if ($class === null || $name === null || !$hasHandle) return null;
+        if (!preg_match('/^[a-z][a-z0-9:_-]*$/', $name)) return null;
+        return [
+            'name' => $name,
+            'class' => ($namespace !== '' ? $namespace . '\\' : '') . $class,
+            'description' => is_string($description) && $description !== '' ? $description : 'Application command.',
+            'file' => $file,
+        ];
+    }
+
+    private static function firstReturnLiteral(array $tokens, int $functionIndex, int $count): ?string {
+        $depth = 0; $inBody = false;
+        for ($j = $functionIndex + 1; $j < $count; $j++) {
+            $token = $tokens[$j];
+            if ($token === '{') { $depth++; $inBody = true; continue; }
+            if ($token === '}') { $depth--; if ($inBody && $depth === 0) break; continue; }
+            if (!$inBody || !is_array($token) || $token[0] !== T_RETURN) continue;
+            for ($k = $j + 1; $k < $count; $k++) {
+                $value = $tokens[$k];
+                if (is_array($value) && $value[0] === T_CONSTANT_ENCAPSED_STRING) {
+                    $literal = substr((string) $value[1], 1, -1);
+                    return str_starts_with((string) $value[1], '"') ? stripcslashes($literal) : str_replace(["\\'", '\\\\'], ["'", '\\'], $literal);
+                }
+                if (is_array($value) && in_array($value[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) continue;
+                return null;
             }
         }
-        return $commands;
+        return null;
     }
 
     private static function customCommand(string $command): ?array { return self::customCommands()[$command] ?? null; }
     private static function runCustom(string $command, array $args, array $options): int {
         $definition = self::customCommand($command); if ($definition === null) return 1;
+        if (!class_exists($definition['class'], false) && is_file($definition['file'])) require_once $definition['file'];
+        if (!class_exists($definition['class']) || !method_exists($definition['class'], 'handle')) {
+            error("Application command '{$command}' could not be loaded from {$definition['file']}.");
+        }
         $result = $definition['class']::handle($args, $options); return is_int($result) ? $result : 0;
     }
 }
@@ -2214,13 +2507,20 @@ final class MyStackQueueScheduler {
 
     public static function work(array $options): int {
         $daemon = !empty($options['daemon']); $limit = max(1, min(1000, (int) ($options['limit'] ?? ($daemon ? 1000 : 1)))); $processed = 0; $sleep = max(1, min(60, (int) ($options['sleep'] ?? 2)));
+        $reclaimed = self::reclaimStale(max(60, (int) ($options['timeout'] ?? 900)));
         do {
             $job = self::reserve();
             if ($job === null) { if ($daemon) { sleep($sleep); continue; } break; }
             self::execute($job); $processed++;
             if (!$daemon && $processed >= $limit) break;
         } while (true);
-        self::output(['status' => true, 'processed' => $processed, 'queue' => self::counts()], $options); return 0;
+        self::output(['status' => true, 'processed' => $processed, 'reclaimed' => $reclaimed, 'queue' => self::counts()], $options); return 0;
+    }
+
+    public static function reclaimStale(int $timeoutSeconds = 900): int {
+        $statement = self::db()->prepare('UPDATE jobs SET status="pending", available_at=?, error=? WHERE status="running" AND reserved_at>0 AND reserved_at < ?');
+        $statement->execute([time(), "Reclaimed: reserved longer than {$timeoutSeconds}s", time() - $timeoutSeconds]);
+        return $statement->rowCount();
     }
 
     private static function reserve(): ?array {
@@ -2339,7 +2639,10 @@ final class MyStackQueueScheduler {
     }
 
     public static function scheduleAdd(array $args, array $options): int {
-        $name=trim((string)($args[0]??''));$expression=trim((string)($args[1]??''));$command=trim(implode(' ',array_slice($args,2)));
+        $name=trim((string)($args[0]??''));$expression=trim((string)($args[1]??''));$command=trim(implode(' ', array_map(static function ($argument): string {
+            $argument = (string) $argument;
+            return preg_match('/\s/', $argument) === 1 ? '"' . str_replace('"', '\\"', $argument) . '"' : $argument;
+        }, array_slice($args, 2))));
         if(!preg_match('/^[a-zA-Z][a-zA-Z0-9_.-]*$/',$name)||!self::validExpression($expression)||$command===''||str_starts_with($command,'schedule:'))throw new InvalidArgumentException('Usage: schedule:add <name> <every-minute|hourly|daily|@every:N> <command>.');
         $s=self::db()->prepare('INSERT INTO schedules(name,expression,command,created_at) VALUES(?,?,?,?) ON CONFLICT(name) DO UPDATE SET expression=excluded.expression,command=excluded.command,enabled=1');$s->execute([$name,$expression,$command,time()]);self::output(['status'=>true,'name'=>$name,'expression'=>$expression,'command'=>$command],$options);return 0;
     }
@@ -2407,43 +2710,6 @@ function generateFile($path, $content, $type) {
     }
     file_put_contents($path, $content);
     success("$type successfully created -> $path");
-}
-
-function showHelp() {
-    echo "\n";
-    printColor(" MyStack Intelligent CLI \n", "1;44;97");
-    echo "\n";
-    printColor(" Usage:\n", "1;33");
-    echo "  php mystack [command] [arguments]\n\n";
-    
-    printColor(" Backend Commands (Generated in ./app):\n", "1;36");
-    echo "  make:controller <Name>      Generate a Controller with CRUD demo code.\n";
-    echo "  make:model <Name>           Generate a Model with PHDB demo queries.\n";
-    echo "  make:middleware <Name>      Generate a Middleware for Auth/Protection.\n\n";
-
-    printColor(" Frontend Commands (Generated in ./component):\n", "1;35");
-    echo "  make:component <Name>       Generate a reusable UI component (Tailwind ready).\n";
-    echo "  make:view <Name>            Generate a full page view structure.\n\n";
-
-    printColor(" Utility Commands:\n", "1;32");
-    echo "  get:started                 Generate a demo controller, route and view to quickly start.
-";
-    echo "  serve [port]                Start the PHP local development server (default: 8000).\n";
-    echo "  cache:clear                 Clear application cache.\n";
-    echo "  update [path]               Compare and update allowlisted files from GitHub main.\n";
-    echo "  update [path] --check       Show remote SHA-256/byte differences without changing files.\n";
-    echo "  update [path] --yes         Apply verified changes without an interactive prompt.\n";
-    echo "  doctor                      Scan code; auto-heal framework folders and permissions.\n";
-    echo "  doctor --fix                Apply safe formatting and permission fixes.\n";
-    echo "  audit                       Run the read-only framework production audit.\n";
-    echo "  smoke                       Run the full read-only framework smoke test.\n";
-    echo "  help                        Show this beautiful help screen.\n\n";
-    echo "  Intelligence is automatic: dependency graph, route/class collision reasoning,\n";
-    echo "  contextual advice, generator preflight and typo suggestions need no new command.\n\n";
-    
-    printColor(" Example:\n", "1;37");
-    echo "  php mystack make:controller User\n";
-    echo "  php mystack make:view dashboard\n\n";
 }
 
 function runDoctorLegacyUnsafe($dirPaths) {
@@ -3106,6 +3372,56 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         && str_contains($phdbSource, 'STRICT_ALL_TABLES');
     $check('PHDB automatic schema synchronization', $phdbSchemaSyncWorks);
 
+    $phdbDriverOk = property_exists('PHDB', 'driver')
+        && PHDB::$driver === 'mysqli'
+        && interface_exists('PHDB_Driver')
+        && class_exists('PHDB_Result')
+        && class_exists('PHDB_SqliteDriver')
+        && is_subclass_of('PHDB_SqliteDriver', 'PHDB_Driver')
+        && class_exists('PHDB_PgsqlDriver')
+        && is_subclass_of('PHDB_PgsqlDriver', 'PHDB_Driver')
+        && str_contains($phdbSource, "'sqlite' => new PHDB_SqliteDriver()")
+        && str_contains($phdbSource, "'pgsql'  => new PHDB_PgsqlDriver()")
+        && str_contains($phdbSource, 'private static function active(): ?PHDB_Driver')
+        && str_contains($phdbSource, 'self::queryVia(')
+        && str_contains($phdbSource, 'self::fastVia(')
+        && str_contains($phdbSource, 'self::createTableVia(');
+    $phdbSqliteRoundTrip = false;
+    if ($phdbDriverOk && extension_loaded('pdo_sqlite')) {
+        $previousDriver = PHDB::$driver;
+        $previousDbname = PHDB::$dbname;
+        $sqliteFile = sys_get_temp_dir() . '/mystack-smoke-phdb-' . getmypid() . '.sqlite';
+        @unlink($sqliteFile);
+        try {
+            PHDB::$driver = 'sqlite';
+            PHDB::$dbname = $sqliteFile;
+            $phdbSqliteRoundTrip = PHDB::createTable('smoke_phdb', ['id' => 'id', 'name' => 'text50']) === true
+                && PHDB::insert('smoke_phdb', ['name' => 'row-a']) === true
+                && is_numeric(PHDB::id())
+                && PHDB::query('SELECT * FROM smoke_phdb WHERE id = ?', [PHDB::id()], true)['name'] === 'row-a'
+                && PHDB::update('smoke_phdb', ['name' => 'row-b'], ['id' => 1]) === true
+                && PHDB::getValue('smoke_phdb', 'name', ['id' => 1]) === 'row-b'
+                && iterator_to_array(PHDB::fast('smoke_phdb')) !== []
+                && PHDB::transaction(static fn() => PHDB::insert('smoke_phdb', ['name' => 'row-c'])) === true
+                && PHDB::count('smoke_phdb') === 2
+                && PHDB::delete('smoke_phdb', ['id' => 1]) === true
+                && PHDB::count('smoke_phdb') === 1;
+        } catch (\Throwable $error) {
+            $phdbSqliteRoundTrip = false;
+        } finally {
+            PHDB::$driver = $previousDriver;
+            PHDB::$dbname = $previousDbname;
+            @unlink($sqliteFile);
+            @unlink($sqliteFile . '-wal');
+            @unlink($sqliteFile . '-shm');
+        }
+    }
+    $check(
+        'PHDB multi-driver seam (mysqli default + sqlite round-trip + pgsql wiring)',
+        $phdbDriverOk && $phdbSqliteRoundTrip,
+        'opt-in driver, legacy mysqli path untouched, identical return shapes on sqlite; pgsql driver present (live-verified against Neon)'
+    );
+
     $phpaSource = (string) file_get_contents(__DIR__ . '/library/PHPA.php');
     $phpaRequests = [];
     $phpaStripe = PHPA::stripe()
@@ -3223,6 +3539,19 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             && PHPA::courierProfile('DHL')['auth'] === 'basic'
             && PHPA::courierProfile('FedEx')['auth'] === 'oauth_client',
         '10 Bangladesh + 10 international provider profiles'
+    );
+
+    $phemQueueSource = (string) file_get_contents(ROOT_DIR . '/library/PHEM.php');
+    $check(
+        'PHEM queued mail bridge',
+        method_exists('PHEM', 'queue')
+            && method_exists('PHEM', 'queueSend')
+            && class_exists('PHEM_MailQueueHandler')
+            && method_exists('PHEM_MailQueueHandler', 'handle')
+            && str_contains($phemQueueSource, 'INSERT INTO jobs(job,payload,max_attempts,available_at,created_at)')
+            && str_contains($phemQueueSource, "'PHEM_MailQueueHandler'")
+            && str_contains($phemQueueSource, 'self::smtpSend('),
+        'additive enqueue to private console.sqlite, worker-side restore, queue retry/backoff preserved'
     );
 
     $phuiRegistered = PHUI::register(
@@ -3350,6 +3679,18 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         && hash_file('sha256', $phpPair[0]) === hash_file('sha256', $phpPair[1])
         && hash_file('sha256', $jsPair[0]) === hash_file('sha256', $jsPair[1]);
     $check('PHJS synchronized builds', $pairMatches);
+
+    $phpCanonicalSource = is_file($phpPair[0]) ? (string) file_get_contents($phpPair[0]) : '';
+    $phpInjections = substr_count($phpCanonicalSource, '<?php echo ');
+    $phpResolved = ($phpCanonicalSource !== '' && $phpInjections === 4)
+        ? preg_replace_callback('/<\?php echo .*?\?>/', static function (array $block): string {
+            return str_contains($block[0], 'PHCO::path') || str_contains($block[0], 'PHCO::pre') ? '""' : 'false';
+        }, $phpCanonicalSource)
+        : null;
+    $crossPairMatches = is_string($phpResolved) && $phpResolved !== '' && is_file($jsPair[0])
+        && hash('sha256', str_replace(["\r\n", "\r"], "\n", $phpResolved))
+            === hash('sha256', str_replace(["\r\n", "\r"], "\n", (string) file_get_contents($jsPair[0])));
+    $check('PHJS PHP-to-JS build equivalence (resolved injections)', $crossPairMatches);
 
     $nativeSource = is_file($phpPair[0]) ? (string) file_get_contents($phpPair[0]) : '';
     $nativeIncluded = is_string(@file_get_contents($phpPair[0]))
@@ -3574,8 +3915,10 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             && in_array('src/js/*', $updatePolicy['paths'] ?? [], true)
             && in_array('docs/*', $updatePolicy['paths'] ?? [], true)
             && in_array('mystack-extension-main/*', $updatePolicy['paths'] ?? [], true)
-            && count($updatePolicy['root_files'] ?? []) === 13
+            && count($updatePolicy['root_files'] ?? []) === 15
             && in_array('.htaccess', $updatePolicy['root_files'] ?? [], true)
+            && in_array('MANUAL_BN.md', $updatePolicy['root_files'] ?? [], true)
+            && in_array('MANUAL_EN.md', $updatePolicy['root_files'] ?? [], true)
             && in_array('LICENSE', $updatePolicy['root_files'] ?? [], true)
             && in_array('NOTICE', $updatePolicy['root_files'] ?? [], true)
             && in_array('CONTRIBUTING.md', $updatePolicy['root_files'] ?? [], true)
@@ -3674,54 +4017,6 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         'UTF-8, framework-only content, 31 detailed API sections, Apache-2.0, NOTICE and contribution governance'
     );
 
-    $aiDocumentation = MyStackDocs::check();
-    $check(
-        'AI-discoverable source documentation',
-        !empty($aiDocumentation['status'])
-            && ($aiDocumentation['libraries'] ?? 0) === 31
-            && ($aiDocumentation['public_methods'] ?? 0) > 500
-            && is_file(ROOT_DIR . '/llms.txt')
-            && is_file(ROOT_DIR . '/llms-full.txt')
-            && is_file(ROOT_DIR . '/docs/index.html')
-            && !is_file(ROOT_DIR . '/robots.txt')
-            && !is_file(ROOT_DIR . '/sitemap.xml')
-            && str_contains((string) file_get_contents(ROOT_DIR . '/library/PHRO.php'), 'self::get("/robots.txt"')
-            && str_contains((string) file_get_contents(ROOT_DIR . '/library/PHRO.php'), 'self::get("/sitemap.xml"'),
-        ($aiDocumentation['public_methods'] ?? 0) . ' source-indexed public methods, portal, llms and machine API catalog'
-    );
-
-    $extensionRoot = ROOT_DIR . '/mystack-extension-main';
-    $extensionPackage = is_file($extensionRoot . '/package.json') ? json_decode((string) file_get_contents($extensionRoot . '/package.json'), true) : null;
-    $extensionSnippets = is_file($extensionRoot . '/snippets/snippets.json') ? json_decode((string) file_get_contents($extensionRoot . '/snippets/snippets.json'), true) : null;
-    $extensionSource = is_file($extensionRoot . '/extension.js') ? (string) file_get_contents($extensionRoot . '/extension.js') : '';
-    $extensionStubOk = false;
-    try {
-        $extensionStub = (string) file_get_contents($extensionRoot . '/stubs/mystack-stubs.php');
-        token_get_all($extensionStub, TOKEN_PARSE); $extensionStubOk = true;
-    } catch (Throwable) { $extensionStubOk = false; }
-    $extensionVsixOk = false;
-    $extensionVsix = $extensionRoot . '/mystack-helper-' . (string) ($extensionPackage['version'] ?? '') . '.vsix';
-    if (is_file($extensionVsix) && class_exists('ZipArchive')) {
-        $archive = new ZipArchive();
-        if ($archive->open($extensionVsix) === true) {
-            $extensionVsixOk = $archive->locateName('extension.vsixmanifest', ZipArchive::FL_NOCASE) !== false
-                && $archive->locateName('extension/package.json', ZipArchive::FL_NOCASE) !== false;
-            $archive->close();
-        }
-    }
-    $check(
-        'Official MyStack VS Code extension',
-        is_array($extensionPackage)
-            && ($extensionPackage['name'] ?? '') === 'mystack-helper'
-            && ($extensionPackage['publisher'] ?? '') === 'Sakibweb'
-            && is_array($extensionSnippets) && count($extensionSnippets) > 2000
-            && $extensionStubOk && $extensionVsixOk
-            && str_contains($extensionSource, 'workspace.isTrusted')
-            && str_contains($extensionSource, "segment === '..'")
-            && str_contains($rootAccessGuard ?? (string) file_get_contents(ROOT_DIR . '/.htaccess'), 'mystack-extension(?:-main)?'),
-        (is_array($extensionSnippets) ? count($extensionSnippets) : 0) . ' snippets, source-derived stubs, trusted workspace and validated VSIX'
-    );
-
     $registeredConsoleCommands = [];
     foreach (MyStackConsoleKernel::commands() as $consoleGroup) {
         foreach (array_keys($consoleGroup) as $signature) $registeredConsoleCommands[] = strtok($signature, ' ');
@@ -3729,7 +4024,8 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
     $requiredConsoleCommands = [
         'list', 'about', 'cli:install', 'cli:status', 'route:list', 'library:check', 'make:command', 'make:crud',
         'make:migration', 'migrate', 'migrate:rollback', 'db:seed', 'queue:push',
-        'queue:work', 'schedule:add', 'schedule:run', 'monitor:status', 'docs:build', 'docs:check', 'test',
+        'queue:work', 'schedule:add', 'schedule:run', 'monitor:status', 'docs:build', 'docs:check',
+        'extension:check', 'test', 'test:app',
     ];
     $check(
         'Extensible console kernel registry',
@@ -3750,20 +4046,126 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
         'private local SQLite, WAL, atomic reservation, tracked migrations and confirmation gates'
     );
 
+    $check(
+        'Queue stale reservation reclaim',
+        str_contains($cliSource, 'function reclaimStale')
+            && str_contains($cliSource, 'WHERE status="running" AND reserved_at>0 AND reserved_at < ?')
+            && str_contains($cliSource, "self::reclaimStale(max(60, (int) (\$options['timeout'] ?? 900)))"),
+        'crashed worker running jobs return to pending with attempts preserved'
+    );
+
+    $check(
+        'CLI hardening contract - validated serve port, token-only discovery, retained rollback backups, comment-safe DB literals',
+        str_contains($cliSource, "case 'serve':")
+            && str_contains($cliSource, "FILTER_VALIDATE_INT, ['options' => ['min_range' => 1024, 'max_range' => 65535]]")
+            && str_contains($cliSource, 'PHP_BINARY . \' -S localhost:\'')
+            && str_contains($cliSource, 'function parseCommandFile')
+            && str_contains($cliSource, 'token_get_all($source)')
+            && !preg_match('/private static function customCommands\(\)[\s\S]{0,700}?require_once/', $cliSource)
+            && str_contains($cliSource, 'self::$rollbackRetainStage = true;')
+            && str_contains($cliSource, "if (str_starts_with(\$trimmed, '//')")
+            && str_contains($cliSource, 'Rollback could not restore'),
+        'serve rejects non-numeric ports, app commands are discovered without execution, failed rollback retains backups, commented PHDB literals are ignored'
+    );
+
+    $manualSections = preg_split('/^## /m', (string) file_get_contents(ROOT_DIR . '/MANUAL_BN.md')) ?: [];
+    $manualNumbered = [];
+    foreach ($manualSections as $section) {
+        if (preg_match('/^(\d+)\.\s/', $section, $match) === 1) $manualNumbered[] = (int) $match[1];
+    }
+    $manualSource = (string) file_get_contents(ROOT_DIR . '/MANUAL_BN.md');
+    $manualTocEntries = 0; $manualInToc = false;
+    foreach (explode("\n", $manualSource) as $manualLine) {
+        if (str_starts_with($manualLine, '## ')) {
+            if ($manualInToc) break;
+            $manualInToc = str_contains($manualLine, 'সূচিপত্র');
+            continue;
+        }
+        if ($manualInToc && preg_match('/^\d+\.\s+\[/', $manualLine) === 1) $manualTocEntries++;
+    }
+    $readmeSource = (string) file_get_contents(ROOT_DIR . '/README.md');
+    $manualEnSource = (string) file_get_contents(ROOT_DIR . '/MANUAL_EN.md');
+    $manualEnNumbered = [];
+    foreach (preg_split('/^## /m', $manualEnSource) ?: [] as $enSection) {
+        if (preg_match('/^(\d+)\.\s/', $enSection, $enMatch) === 1) $manualEnNumbered[] = (int) $enMatch[1];
+    }
+    $manualEnTocEntries = 0; $manualEnInToc = false;
+    foreach (explode("\n", $manualEnSource) as $enLine) {
+        if (str_starts_with($enLine, '## ')) {
+            if ($manualEnInToc) break;
+            $manualEnInToc = str_contains($enLine, 'Table of contents');
+            continue;
+        }
+        if ($manualEnInToc && preg_match('/^\d+\.\s+\[/', $enLine) === 1) $manualEnTocEntries++;
+    }
+    $llmsSync = is_file(ROOT_DIR . '/llms.txt') && is_file(ROOT_DIR . '/docs/llms.txt')
+        && is_file(ROOT_DIR . '/llms-full.txt') && is_file(ROOT_DIR . '/docs/llms-full.txt')
+        && hash_file('sha256', ROOT_DIR . '/llms.txt') === hash_file('sha256', ROOT_DIR . '/docs/llms.txt')
+        && hash_file('sha256', ROOT_DIR . '/llms-full.txt') === hash_file('sha256', ROOT_DIR . '/docs/llms-full.txt');
+    $check(
+        'Documentation structure contract - unique numbered sections, complete TOC, license placement, synchronized llms copies',
+        $manualNumbered === range(1, max($manualNumbered))
+            && $manualTocEntries === count($manualNumbered)
+            && $manualEnNumbered === $manualNumbered
+            && $manualEnTocEntries === count($manualEnNumbered)
+            && preg_match_all('/^#### 17\.2\.\d+\s+`/m', $manualEnSource) === preg_match_all('/^#### 17\.2\.\d+\s+`/m', $manualSource)
+            && preg_match('/^## License\s+MyStack is licensed under the Apache License 2\.0/m', $readmeSource) === 1
+            && str_contains($readmeSource, '## Documentation workflow')
+            && $llmsSync,
+        'BN and EN manuals share sections 1..N with complete TOCs and equal 17.2 catalogs, README License heading sits on license text, root and docs llms files are byte-identical'
+    );
+
+    $validationProbe = PHVD::check([
+        'email' => ['sakib@example.com', 'required|email'],
+        'amount' => [250, 'required|integer|min:100'],
+        'iban' => ['DE89370400440532013000', 'iban'],
+        'name' => ['সাকিব', 'bengali'],
+        'site' => ['https://example.com', 'url_https'],
+    ]);
+    $validationReject = PHVD::check([
+        'email' => ['not-an-email', 'required|email'],
+        'site' => ['http://example.com', 'url_https'],
+        'amount' => [50, 'required|integer|min:100'],
+    ]);
+    $check(
+        'PHVD validation rule round-trip',
+        is_array($validationProbe) && !empty($validationProbe['status'])
+            && is_array($validationReject) && empty($validationReject['status']),
+        'email, integer/min, iban checksum, bengali text and url_https accept valid input and reject invalid input'
+    );
+
+    PHTM::setZone('Asia/Dhaka');
+    $check(
+        'PHTM timezone and formatting helpers',
+        PHTM::getZone() === 'Asia/Dhaka'
+            && PHTM::to12h('14:30:00') === '2:30:00 PM'
+            && PHTM::to24h('02:30:00 PM') === '14:30:00',
+        'zone round-trip and 12h/24h clock conversion'
+    );
+
     $windowsCmd = ROOT_DIR . '/mystack.cmd';
+    $unixSh = ROOT_DIR . '/mystack.sh';
     $rootAccessGuard = (string) file_get_contents(ROOT_DIR . '/.htaccess');
     $check(
         'Cross-platform CLI launcher and adaptive TUI',
         is_file($windowsCmd)
+            && is_file($unixSh)
+            && str_contains((string) file_get_contents($unixSh), '#!/bin/sh')
+            && str_contains((string) file_get_contents($unixSh), 'exec php "$(dirname "$0")/mystack" "$@"')
             && str_starts_with((string) file_get_contents(__FILE__), '#!/usr/bin/env php')
             && str_contains((string) file_get_contents($windowsCmd), '%~dp0mystack')
-            && str_contains($rootAccessGuard, 'mystack(?:\\.cmd)?')
+            && str_contains($rootAccessGuard, 'mystack(?:\\.(?:cmd|sh))?')
             && str_contains($rootAccessGuard, 'AGENTS\\.md|CONTRIBUTING\\.md|MANUAL_BN\\.md|README\\.md|LICENSE|NOTICE')
+            && str_contains($rootAccessGuard, 'MANUAL_EN\\.md')
             && str_contains($rootAccessGuard, 'RewriteRule ^\\..*$ - [F,L]')
             && str_contains($rootAccessGuard, '^(?!index\\.php$).*\\.php$')
             && str_contains($rootAccessGuard, 'mystack-extension(?:-main)?')
             && str_contains($rootAccessGuard, '\\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml)')
             && str_contains($rootAccessGuard, 'Require all denied')
+            && str_contains($cliSource, "#!/usr/bin/env sh\\nexec '{\$php}' '{\$script}'")
+            && str_contains($cliSource, "/.local/bin")
+            && str_contains($cliSource, "@chmod(ROOT_DIR . '/mystack', 0755);")
+            && str_contains($cliSource, "'project_direct_executable'")
             && str_contains($cliSource, 'NO_COLOR')
             && !defined(MyStackConsoleKernel::class . '::VERSION')
             && preg_match('/MyStack Intelligent CLI \\x28v[0-9]/', $cliSource) !== 1
@@ -3786,10 +4188,23 @@ function runFrameworkAudit(string $reportTitle = 'MyStack Framework Audit'): boo
             . ($intelligence['stats']['classes'] ?? 0) . ' classes, '
             . ($intelligence['stats']['imports'] ?? 0) . ' imports'
     );
+    $criticalConflicts = array_values(array_filter(
+        $intelligence['issues'],
+        static fn(array $issue): bool => $issue['severity'] === 'critical'
+    ));
     $check(
         'Route/class collision reasoning',
         !empty($intelligence['status']),
-        ($intelligence['counts']['critical'] ?? 0) . ' critical conflict(s)'
+        $criticalConflicts === []
+            ? '0 critical conflict(s)'
+            : count($criticalConflicts) . ' critical conflict(s): ' . implode(
+                ' | ',
+                array_map(
+                    static fn(array $issue): string => $issue['type'] . ' — ' . $issue['message']
+                        . ' at ' . $issue['location'],
+                    $criticalConflicts
+                )
+            )
     );
     foreach ($intelligence['issues'] as $insight) {
         if ($insight['severity'] === 'advice') {
@@ -3962,10 +4377,13 @@ PHRO::get(\"/\", [WelcomeController::class, \"index\"]);
         break;
 
     case 'serve':
-        $port = $name ?? 8000;
+        $port = ($name === null || $name === '') ? 8000 : filter_var($name, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1024, 'max_range' => 65535]]);
+        if ($port === false) {
+            error("Invalid port '$name'. Use an integer between 1024 and 65535.");
+        }
         info("Starting MyStack intelligent dev server on http://localhost:$port");
         info("Press Ctrl+C to stop the server.");
-        passthru("php -S localhost:$port");
+        passthru(PHP_BINARY . ' -S localhost:' . (int) $port);
         break;
         
     case 'cache:clear':
