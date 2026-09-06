@@ -1,7 +1,7 @@
 # PHAP API
 
 Source: `library/PHAP.php`  
-SHA-256: `5894f45b36c2fa4a9ce2d76ab3a8eb7cb024633bffda15928d7b5c1dc70a0e9d`
+SHA-256: `689f4eeaab5d848490fc74f17a456ba6cdc6b585f9ee11d83df733b4931b07d1`
 
 Classes: `PHAP`
 

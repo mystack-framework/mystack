@@ -1,7 +1,7 @@
 # PHTP API
 
 Source: `library/PHTP.php`  
-SHA-256: `a56bf3263770a6fd44ac22ec71f167afd5f8a2c32fb1714b78ec8f0cfaac7205`
+SHA-256: `f988c258e6905046f1fb5a22f323717576c41a1547b4a348c6a06a3bb3e6ee6c`
 
 Classes: `PHTP`
 

@@ -1,7 +1,7 @@
 # library API
 
 Source: `library/library.php`  
-SHA-256: `5408df5464ab0f33648a667b676c5c1da045b44b7ca3b8b091edf45782b9547e`
+SHA-256: `de1347daeed4f85cddbb336b690b41a6c6ac867f5b1cf2bbed41db80da4462b8`
 
 Classes: `DIR`, `Importer`
 

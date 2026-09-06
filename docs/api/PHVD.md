@@ -1,7 +1,7 @@
 # PHVD API
 
 Source: `library/PHVD.php`  
-SHA-256: `f59a1e2bc9eb711b71edc1411ed04b3cb1a35addfed9e82b91d66434d792ebf1`
+SHA-256: `9f974bed1154e792c3a04556e288e04861bfd422a087ee6bdb214fee87a2cf21`
 
 Classes: `PhvdInternalException`, `PhvdRule`, `PHVD`
 

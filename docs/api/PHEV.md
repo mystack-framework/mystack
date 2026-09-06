@@ -1,7 +1,7 @@
 # PHEV API
 
 Source: `library/PHEV.php`  
-SHA-256: `046d13cf9ad3a45068ca6afe2bee9a1c928af57d2545d980801bd7f17a299490`
+SHA-256: `37628c31b04b6c42edccf04c14a1e916a05f9bb89d1c72781a44c53449355f3d`
 
 Classes: `PHEV`
 

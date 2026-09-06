@@ -1,7 +1,7 @@
 # PHJT API
 
 Source: `library/PHJT.php`  
-SHA-256: `2b92cb9b94d8ecb94601447f736ce7e2ce243e8a9d5b1aa4455969d089c81686`
+SHA-256: `56374c05e459050dcd109941d050e96adcaed91d13b5b7e41aff303612b65b75`
 
 Classes: `PHJT`
 

@@ -1,7 +1,7 @@
 # PHCD API
 
 Source: `library/PHCD.php`  
-SHA-256: `ca51043124e43736c326a0e47974ca81d0cd9b3e9fc9fefbbe8c5559badef40e`
+SHA-256: `9dc1470e140b62ba2d8dcbf31fc17f52ba79cb9ac3639f19f82e59d9f28d5689`
 
 Classes: `PHCD`
 

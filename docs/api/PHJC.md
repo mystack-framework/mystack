@@ -1,7 +1,7 @@
 # PHJC API
 
 Source: `library/PHJC.php`  
-SHA-256: `757abc4b8b4a2536e3b0cdc2839e4a837348429c0965e7b070af4125664c580f`
+SHA-256: `f514aabe8bc2476b9f02163d474993b9e31dd2343292231cd6714d318cfe5a3d`
 
 Classes: `PHJC`
 
@@ -74,6 +74,14 @@ See executable source and call sites for the behavioral contract.
 ### `static reset()`
 
 See executable source and call sites for the behavioral contract.
+
+### `static once(string $key): bool`
+
+Return true only the first time a given key is seen in this request.
+
+### `static classes(array $map): string`
+
+Merge a conditional class map into a class string (Blade-style @class).
 
 ### `static head(array $data)`
 

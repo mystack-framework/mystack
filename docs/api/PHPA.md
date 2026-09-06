@@ -1,7 +1,7 @@
 # PHPA API
 
 Source: `library/PHPA.php`  
-SHA-256: `cc71cbbaf3e4c4858c75b3fbf5ae7a67358087ab8fe262924d4011398a64c202`
+SHA-256: `79e8fdb46d47ca555765f771d97911d3c2bc48c9f3d33c2d7f6a9d4fec5afe68`
 
 Classes: `PHPAGatewayInterface`, `PHPA_BaseGateway`, `PHPACourierInterface`, `PHPA_Courier`, `PHPA`, `PHPA_Stripe`, `PHPA_Paypal`, `PHPA_Razorpay`, `PHPA_Braintree`, `PHPA_Authorize`, `PHPA_Twocheckout`, `PHPA_Payoneer`, `PHPA_Square`, `PHPA_Adyen`, `PHPA_Mollie`, `PHPA_Coinbase`, `PHPA_Binance`, `PHPA_Coinpayments`, `PHPA_Bitpay`, `PHPA_Nowpayments`, `PHPA_Cryptocom`, `PHPA_Coingate`, `PHPA_Trustwallet`, `PHPA_Btcpay`, `PHPA_Metamask`, `PHPA_Bkash`, `PHPA_Nagad`, `PHPA_Rocket`, `PHPA_Sslcommerz`, `PHPA_Aamarpay`, `PHPA_Surjopay`, `PHPA_Portwallet`, `PHPA_Upay`, `PHPA_Shurjomukhi`, `PHPA_Nexuspay`
 

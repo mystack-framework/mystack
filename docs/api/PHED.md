@@ -1,7 +1,7 @@
 # PHED API
 
 Source: `library/PHED.php`  
-SHA-256: `11400da27d9d40024a3ff9c31a0180c5be2d0f24663200339f676ff15cfb7d51`
+SHA-256: `ae43014ef16868809ff9b8cdf03c567fb4f46cc36d8fb49a337c011ab9b03f75`
 
 Classes: `PHED`
 

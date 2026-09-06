@@ -1,7 +1,7 @@
 # PHFY API
 
 Source: `library/PHFY.php`  
-SHA-256: `eff83db1c52213bbf4182e3a16166673e6700d969e0decdb2ec8768ae07a3589`
+SHA-256: `e4ef374bdb3e72bf1d16f7a18a9956a086ddfd1b01aea2f2e4b884eb491a78cd`
 
 Classes: `PHFY`
 

@@ -1,7 +1,7 @@
 # PHAI API
 
 Source: `library/PHAI.php`  
-SHA-256: `c21a776948b7dc3ae59b95920a462e7c7086fb52007698eeb44f587eea809b7a`
+SHA-256: `cb968c433fce6574f481617295ec1934c3132bc916dab0b8401c3e6490fca904`
 
 Classes: `PHAI`, `PhaiBuilder`, `PhaiMemory`, `PHAI_AI`
 

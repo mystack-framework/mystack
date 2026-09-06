@@ -1,7 +1,7 @@
 # PHSE API
 
 Source: `library/PHSE.php`  
-SHA-256: `bca9a159b0d7242882dfaac5a6b7758ba381ed8608f1f086d42c5df195bbbc1d`
+SHA-256: `adc2c9e80eb40e218ce6e7c9007eb59275450ccfba05d80c5843d1d9b0cf7ee4`
 
 Classes: `PHSE`
 
@@ -29,7 +29,7 @@ Classes: `PHSE`
 
 ### `static isActive($key)`
 
-সেশন ভেরিয়েবলটি ?
+সেশন ভেরিয়েবলটি অ্যাক্টিভ এবং ভ্যালিড কিনা তা চেক করা।
 
 ### `static expireAll()`
 

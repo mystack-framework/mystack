@@ -1,7 +1,7 @@
 # PHOB API
 
 Source: `library/PHOB.php`  
-SHA-256: `fd0f552663c37884987c4feece72972e13ae0b6e7869152ad156c79020eefa99`
+SHA-256: `c94601e1c1b129c66bf8ac66245614d70252af97188b58cbbff3c25f5db10977`
 
 Classes: `PHOB`
 
@@ -13,7 +13,7 @@ See executable source and call sites for the behavioral contract.
 
 ### `static build(string|array $input, string|array $output, array $skip = [], array $skipName = [], array $customName = [], array $config = [])`
 
-Protect a PHP file by generating a secure, obfuscated output file
+Build protected output from one or more PHP files using the phob extension.
 
 ### `static deviceID()`
 

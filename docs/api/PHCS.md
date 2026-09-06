@@ -1,7 +1,7 @@
 # PHCS API
 
 Source: `library/PHCS.php`  
-SHA-256: `d3285fa72479d88d414a1bc76212e6f5fa5ddf9106217d2c839def5e1199c041`
+SHA-256: `a4776ca68af97ed461e1a61a17342259261dfa87bb5d3ce04dd3a53abee7bd27`
 
 Classes: `PHCS`
 

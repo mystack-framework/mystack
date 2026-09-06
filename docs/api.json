@@ -4,18 +4,18 @@
     "repository": "https://github.com/mystack-framework/mystack",
     "release_model": "rolling main branch; no fixed framework version",
     "generated_from": "library/*.php",
-    "source_sha256": "226564e9b882b40db8aac26ad6e4136f88667bfde7c13c798a1eac4f2219eb77",
-    "knowledge_sha256": "856d1b829ade2b003243892a44e6feff76b27f83339a6b1422095b79a0e7e265",
+    "source_sha256": "5cc81185863ef980bdbf71fcb4b0de95f75c04986dcb8fb367484074b41e37da",
+    "knowledge_sha256": "4438e4842dc5f20fcdeb816f6a11fc83be2fe17fdd5627a55349e15224ce2425",
     "totals": {
-        "classes": 98,
-        "public_methods": 844,
+        "classes": 103,
+        "public_methods": 918,
         "public_functions": 6
     },
     "libraries": [
         {
             "name": "PHAI",
             "file": "library/PHAI.php",
-            "sha256": "c21a776948b7dc3ae59b95920a462e7c7086fb52007698eeb44f587eea809b7a",
+            "sha256": "cb968c433fce6574f481617295ec1934c3132bc916dab0b8401c3e6490fca904",
             "classes": [
                 "PHAI",
                 "PhaiBuilder",
@@ -218,7 +218,7 @@
         {
             "name": "PHAP",
             "file": "library/PHAP.php",
-            "sha256": "5894f45b36c2fa4a9ce2d76ab3a8eb7cb024633bffda15928d7b5c1dc70a0e9d",
+            "sha256": "689f4eeaab5d848490fc74f17a456ba6cdc6b585f9ee11d83df733b4931b07d1",
             "classes": [
                 "PHAP"
             ],
@@ -355,7 +355,7 @@
         {
             "name": "PHAU",
             "file": "library/PHAU.php",
-            "sha256": "d8d48e4625c02a902b014428b1039b4dd81aa5e2c985cde433ca7968416d6f6f",
+            "sha256": "5ab4a19debda95933442960cc07ed798dd8f2a82466a2daaf7f9456c28c15db8",
             "classes": [
                 "PHAU"
             ],
@@ -422,7 +422,7 @@
         {
             "name": "PHCD",
             "file": "library/PHCD.php",
-            "sha256": "ca51043124e43736c326a0e47974ca81d0cd9b3e9fc9fefbbe8c5559badef40e",
+            "sha256": "9dc1470e140b62ba2d8dcbf31fc17f52ba79cb9ac3639f19f82e59d9f28d5689",
             "classes": [
                 "PHCD"
             ],
@@ -454,7 +454,7 @@
         {
             "name": "PHCO",
             "file": "library/PHCO.php",
-            "sha256": "91b944f90be0563acb7d497e9095cd0200f169dabd53dfb2064a45b71865c815",
+            "sha256": "b16b5c96c34f0280cc7e460a446a90348bffba217c39bd0cad294716486e104c",
             "classes": [
                 "PHCO"
             ],
@@ -556,7 +556,7 @@
         {
             "name": "PHCS",
             "file": "library/PHCS.php",
-            "sha256": "d3285fa72479d88d414a1bc76212e6f5fa5ddf9106217d2c839def5e1199c041",
+            "sha256": "a4776ca68af97ed461e1a61a17342259261dfa87bb5d3ce04dd3a53abee7bd27",
             "classes": [
                 "PHCS"
             ],
@@ -658,9 +658,13 @@
         {
             "name": "PHDB",
             "file": "library/PHDB.php",
-            "sha256": "dad7bc749d25b2053ce00ada2b4c422613a41aa0a8a5f99a8286e9cb9341dfca",
+            "sha256": "7196e6feb5fc0128a1b74879c37cf58df261a1d54952b1e9a797ec01690f64c5",
             "classes": [
-                "PHDB"
+                "PHDB",
+                "PHDB_Result",
+                "PHDB_Driver",
+                "PHDB_SqliteDriver",
+                "PHDB_PgsqlDriver"
             ],
             "public_methods": [
                 {
@@ -956,6 +960,391 @@
                     "parameters": "",
                     "return": "",
                     "summary": "Close the database connection."
+                },
+                {
+                    "name": "__construct",
+                    "static": false,
+                    "parameters": "public readonly bool $isSelect, public readonly array $rows = [], public readonly int $affected = 0, public readonly int|string|null $insertId = null,",
+                    "return": "",
+                    "summary": ""
+                },
+                {
+                    "name": "name",
+                    "static": false,
+                    "parameters": "",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "isAvailable",
+                    "static": false,
+                    "parameters": "",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "connect",
+                    "static": false,
+                    "parameters": "array $config",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "isConnected",
+                    "static": false,
+                    "parameters": "",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "disconnect",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "run",
+                    "static": false,
+                    "parameters": "string $sql, array $params = []",
+                    "return": "PHDB_Result",
+                    "summary": ""
+                },
+                {
+                    "name": "stream",
+                    "static": false,
+                    "parameters": "string $sql, array $params = []",
+                    "return": "\\Generator",
+                    "summary": ""
+                },
+                {
+                    "name": "quoteIdentifier",
+                    "static": false,
+                    "parameters": "string $name",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "tableExists",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "columns",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "primaryKey",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "uniqueConstraints",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "normalizeColumn",
+                    "static": false,
+                    "parameters": "string $mysqlDefinition",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "createTableSql",
+                    "static": false,
+                    "parameters": "string $table, array $definitions",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "begin",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "commit",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "rollback",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "probe",
+                    "static": false,
+                    "parameters": "array $config",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "name",
+                    "static": false,
+                    "parameters": "",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "isAvailable",
+                    "static": false,
+                    "parameters": "",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "connect",
+                    "static": false,
+                    "parameters": "array $config",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "isConnected",
+                    "static": false,
+                    "parameters": "",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "disconnect",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "run",
+                    "static": false,
+                    "parameters": "string $sql, array $params = []",
+                    "return": "PHDB_Result",
+                    "summary": ""
+                },
+                {
+                    "name": "stream",
+                    "static": false,
+                    "parameters": "string $sql, array $params = []",
+                    "return": "\\Generator",
+                    "summary": ""
+                },
+                {
+                    "name": "quoteIdentifier",
+                    "static": false,
+                    "parameters": "string $name",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "tableExists",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "columns",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "primaryKey",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "uniqueConstraints",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "normalizeColumn",
+                    "static": false,
+                    "parameters": "string $mysqlDefinition",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "createTableSql",
+                    "static": false,
+                    "parameters": "string $table, array $definitions",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "begin",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "commit",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "rollback",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "probe",
+                    "static": false,
+                    "parameters": "array $config",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "name",
+                    "static": false,
+                    "parameters": "",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "isAvailable",
+                    "static": false,
+                    "parameters": "",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "connect",
+                    "static": false,
+                    "parameters": "array $config",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "isConnected",
+                    "static": false,
+                    "parameters": "",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "disconnect",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "run",
+                    "static": false,
+                    "parameters": "string $sql, array $params = []",
+                    "return": "PHDB_Result",
+                    "summary": ""
+                },
+                {
+                    "name": "stream",
+                    "static": false,
+                    "parameters": "string $sql, array $params = []",
+                    "return": "\\Generator",
+                    "summary": ""
+                },
+                {
+                    "name": "quoteIdentifier",
+                    "static": false,
+                    "parameters": "string $name",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "tableExists",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "bool",
+                    "summary": ""
+                },
+                {
+                    "name": "columns",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "primaryKey",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "uniqueConstraints",
+                    "static": false,
+                    "parameters": "string $table",
+                    "return": "array",
+                    "summary": ""
+                },
+                {
+                    "name": "normalizeColumn",
+                    "static": false,
+                    "parameters": "string $mysqlDefinition",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "createTableSql",
+                    "static": false,
+                    "parameters": "string $table, array $definitions",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "begin",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "commit",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "rollback",
+                    "static": false,
+                    "parameters": "",
+                    "return": "void",
+                    "summary": ""
+                },
+                {
+                    "name": "probe",
+                    "static": false,
+                    "parameters": "array $config",
+                    "return": "array",
+                    "summary": ""
                 }
             ],
             "public_functions": []
@@ -963,7 +1352,7 @@
         {
             "name": "PHDE",
             "file": "library/PHDE.php",
-            "sha256": "f47aceeaf852a92d31428aead1d2365b67c1dea964b47b89c85734c0866ee7ad",
+            "sha256": "3870ffc9319288835c1e5d199e685dd80225020b4e03e32d0806b4301642ec50",
             "classes": [
                 "PHDE"
             ],
@@ -1072,7 +1461,7 @@
         {
             "name": "PHED",
             "file": "library/PHED.php",
-            "sha256": "11400da27d9d40024a3ff9c31a0180c5be2d0f24663200339f676ff15cfb7d51",
+            "sha256": "ae43014ef16868809ff9b8cdf03c567fb4f46cc36d8fb49a337c011ab9b03f75",
             "classes": [
                 "PHED"
             ],
@@ -1111,9 +1500,10 @@
         {
             "name": "PHEM",
             "file": "library/PHEM.php",
-            "sha256": "bce3112c5a6dde26c13e2e47257a158bbca39a6ae7e9e2ae7ee1252eaf40327e",
+            "sha256": "2c1f894f1e35598334db00b387cf15e489259cbd87f5b404332e3a90d72ee661",
             "classes": [
-                "PHEM"
+                "PHEM",
+                "PHEM_MailQueueHandler"
             ],
             "public_methods": [
                 {
@@ -1206,6 +1596,27 @@
                     "parameters": "",
                     "return": "",
                     "summary": "Display the SMTP log."
+                },
+                {
+                    "name": "queue",
+                    "static": true,
+                    "parameters": "$from, $name, $to, $cc, $bcc, $subject, $message, $delay = 0, $tries = 3",
+                    "return": "",
+                    "summary": "Queue an SMTP email for asynchronous delivery through the local console queue."
+                },
+                {
+                    "name": "queueSend",
+                    "static": true,
+                    "parameters": "array $payload",
+                    "return": "",
+                    "summary": "Restore a queued SMTP configuration and deliver one email message."
+                },
+                {
+                    "name": "handle",
+                    "static": true,
+                    "parameters": "array $payload",
+                    "return": "void",
+                    "summary": ""
                 }
             ],
             "public_functions": []
@@ -1213,7 +1624,7 @@
         {
             "name": "PHEV",
             "file": "library/PHEV.php",
-            "sha256": "046d13cf9ad3a45068ca6afe2bee9a1c928af57d2545d980801bd7f17a299490",
+            "sha256": "37628c31b04b6c42edccf04c14a1e916a05f9bb89d1c72781a44c53449355f3d",
             "classes": [
                 "PHEV"
             ],
@@ -1357,7 +1768,7 @@
         {
             "name": "PHFY",
             "file": "library/PHFY.php",
-            "sha256": "eff83db1c52213bbf4182e3a16166673e6700d969e0decdb2ec8768ae07a3589",
+            "sha256": "e4ef374bdb3e72bf1d16f7a18a9956a086ddfd1b01aea2f2e4b884eb491a78cd",
             "classes": [
                 "PHFY"
             ],
@@ -1424,7 +1835,7 @@
         {
             "name": "PHJC",
             "file": "library/PHJC.php",
-            "sha256": "757abc4b8b4a2536e3b0cdc2839e4a837348429c0965e7b070af4125664c580f",
+            "sha256": "f514aabe8bc2476b9f02163d474993b9e31dd2343292231cd6714d318cfe5a3d",
             "classes": [
                 "PHJC"
             ],
@@ -1547,6 +1958,20 @@
                     "parameters": "",
                     "return": "",
                     "summary": ""
+                },
+                {
+                    "name": "once",
+                    "static": true,
+                    "parameters": "string $key",
+                    "return": "bool",
+                    "summary": "Return true only the first time a given key is seen in this request."
+                },
+                {
+                    "name": "classes",
+                    "static": true,
+                    "parameters": "array $map",
+                    "return": "string",
+                    "summary": "Merge a conditional class map into a class string (Blade-style @class)."
                 },
                 {
                     "name": "head",
@@ -1757,7 +2182,7 @@
         {
             "name": "PHJS",
             "file": "library/PHJS.php",
-            "sha256": "48d84a19b9fbe5bf998750e6ac9aa274c6f2b6f0a635c25c7938215ea221c2d7",
+            "sha256": "98d3364770be2e6b8b2ede483672925a57500395960dcc90118b200341c7e85f",
             "classes": [
                 "PHJSExpression",
                 "PHJS",
@@ -2202,6 +2627,104 @@
                     "name": "raw",
                     "static": true,
                     "parameters": "string $code",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "confirm",
+                    "static": true,
+                    "parameters": "string $message",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "prompt",
+                    "static": true,
+                    "parameters": "string $message, string $default = ''",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "open",
+                    "static": true,
+                    "parameters": "string $url, string $target = '_blank', string $features = ''",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "back",
+                    "static": true,
+                    "parameters": "",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "focus",
+                    "static": true,
+                    "parameters": "string $selector",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "blur",
+                    "static": true,
+                    "parameters": "string $selector",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "scrollTo",
+                    "static": true,
+                    "parameters": "string $selector, string $behavior = 'smooth'",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "copy",
+                    "static": true,
+                    "parameters": "mixed $text",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "stopPropagation",
+                    "static": true,
+                    "parameters": "string $eventVar = 'e'",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "matchMedia",
+                    "static": true,
+                    "parameters": "string $query",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "raf",
+                    "static": true,
+                    "parameters": "mixed $callback",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "geolocation",
+                    "static": true,
+                    "parameters": "mixed $onSuccess, array $options = []",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "debounce",
+                    "static": true,
+                    "parameters": "mixed $callback, int $wait = 250",
+                    "return": "string",
+                    "summary": ""
+                },
+                {
+                    "name": "throttle",
+                    "static": true,
+                    "parameters": "mixed $callback, int $wait = 250",
                     "return": "string",
                     "summary": ""
                 },
@@ -2866,7 +3389,7 @@
         {
             "name": "PHJT",
             "file": "library/PHJT.php",
-            "sha256": "2b92cb9b94d8ecb94601447f736ce7e2ce243e8a9d5b1aa4455969d089c81686",
+            "sha256": "56374c05e459050dcd109941d050e96adcaed91d13b5b7e41aff303612b65b75",
             "classes": [
                 "PHJT"
             ],
@@ -2912,7 +3435,7 @@
         {
             "name": "PHLS",
             "file": "library/PHLS.php",
-            "sha256": "cc268f12d253ea4061c63f2985989c1ddbf4e2fe879175da3434bb5419b6c834",
+            "sha256": "6c8d9901522182951be23b0476957f29fd7a3050f8d76e18481306ebb7b85926",
             "classes": [
                 "PHLS"
             ],
@@ -3063,7 +3586,7 @@
         {
             "name": "PHML",
             "file": "library/PHML.php",
-            "sha256": "547161f759ae54fa3d62de70ea437995fbdf1d72fe95a1d1af40e661db293b8b",
+            "sha256": "44a9ed0619af73b6321d5ad4a08eca6d1c1f4b0cdeda93215b880fd54973740d",
             "classes": [
                 "PHML"
             ],
@@ -3260,7 +3783,7 @@
         {
             "name": "PHMO",
             "file": "library/PHMO.php",
-            "sha256": "a6d50ed684f2b68a1e676d60491c071f9617f062a4adfb5eb334e43ba1a10785",
+            "sha256": "915200ac9fb02ed9ba5e35b2200342c727d6737f6604e57883d7610fe6fb7c7c",
             "classes": [
                 "PHMO"
             ],
@@ -3355,7 +3878,7 @@
         {
             "name": "PHOB",
             "file": "library/PHOB.php",
-            "sha256": "fd0f552663c37884987c4feece72972e13ae0b6e7869152ad156c79020eefa99",
+            "sha256": "c94601e1c1b129c66bf8ac66245614d70252af97188b58cbbff3c25f5db10977",
             "classes": [
                 "PHOB"
             ],
@@ -3372,7 +3895,7 @@
                     "static": true,
                     "parameters": "string|array $input, string|array $output, array $skip = [], array $skipName = [], array $customName = [], array $config = []",
                     "return": "",
-                    "summary": "Protect a PHP file by generating a secure, obfuscated output file"
+                    "summary": "Build protected output from one or more PHP files using the phob extension."
                 },
                 {
                     "name": "deviceID",
@@ -3387,7 +3910,7 @@
         {
             "name": "PHOP",
             "file": "library/PHOP.php",
-            "sha256": "0326270c921da968ecf3c4cf07c685db61e3f12bfeaea3f6ec791d5ece065026",
+            "sha256": "232407f6c73df8894d3eb54f6aa992f546b2af1f66b51f5b279fdab481524ce3",
             "classes": [
                 "PHOP"
             ],
@@ -3426,7 +3949,7 @@
         {
             "name": "PHPA",
             "file": "library/PHPA.php",
-            "sha256": "cc71cbbaf3e4c4858c75b3fbf5ae7a67358087ab8fe262924d4011398a64c202",
+            "sha256": "79e8fdb46d47ca555765f771d97911d3c2bc48c9f3d33c2d7f6a9d4fec5afe68",
             "classes": [
                 "PHPAGatewayInterface",
                 "PHPA_BaseGateway",
@@ -4542,7 +5065,7 @@
         {
             "name": "PHQR",
             "file": "library/PHQR.php",
-            "sha256": "d7ce97420cb7e0d1ce604eff7081b50e40c04b9eb191eccb7e3ef0796ab9ee80",
+            "sha256": "6e9fe9b33a273fa997ef32be4a3b8b7e5a4fac2f5587b376f5eb5c99cf87d678",
             "classes": [
                 "PHQR",
                 "QRCode",
@@ -5159,7 +5682,7 @@
         {
             "name": "PHRO",
             "file": "library/PHRO.php",
-            "sha256": "9951ff5d55fc29f54519f3d63904f23c2bdae60fe04832641655fd0e2415cfed",
+            "sha256": "d34d50a3188aef0c37edb845b32dc603c2de9d58fcf58f62014a54d8826b5faf",
             "classes": [
                 "PhroSecurityException",
                 "PhroShield",
@@ -5744,7 +6267,7 @@
         {
             "name": "PHRQ",
             "file": "library/PHRQ.php",
-            "sha256": "ce7da285ecbc08021efe9c9e113b683b5a3dfa488684a34e5969114d5177d564",
+            "sha256": "85f4309b355eeaa5b30c997c0c0b244e770d8b031a53f91d82c11768c517dfe2",
             "classes": [
                 "PHRQ"
             ],
@@ -5811,7 +6334,7 @@
         {
             "name": "PHSE",
             "file": "library/PHSE.php",
-            "sha256": "bca9a159b0d7242882dfaac5a6b7758ba381ed8608f1f086d42c5df195bbbc1d",
+            "sha256": "adc2c9e80eb40e218ce6e7c9007eb59275450ccfba05d80c5843d1d9b0cf7ee4",
             "classes": [
                 "PHSE"
             ],
@@ -5856,7 +6379,7 @@
                     "static": true,
                     "parameters": "$key",
                     "return": "",
-                    "summary": "সেশন ভেরিয়েবলটি �"
+                    "summary": "সেশন ভেরিয়েবলটি অ্যাক্টিভ এবং ভ্যালিড কিনা তা চেক করা।"
                 },
                 {
                     "name": "expireAll",
@@ -5899,7 +6422,7 @@
         {
             "name": "PHTM",
             "file": "library/PHTM.php",
-            "sha256": "468f8a7ff5036679ba970a794e28a64f434dc21692928c47c1c390ae94073ab4",
+            "sha256": "8015e3f4fca1ef429b099659578fb57aa98831f1dbaa351ec5e485b43310f842",
             "classes": [
                 "PHTM"
             ],
@@ -5973,7 +6496,7 @@
         {
             "name": "PHTP",
             "file": "library/PHTP.php",
-            "sha256": "a56bf3263770a6fd44ac22ec71f167afd5f8a2c32fb1714b78ec8f0cfaac7205",
+            "sha256": "f988c258e6905046f1fb5a22f323717576c41a1547b4a348c6a06a3bb3e6ee6c",
             "classes": [
                 "PHTP"
             ],
@@ -6061,7 +6584,7 @@
         {
             "name": "PHTR",
             "file": "library/PHTR.php",
-            "sha256": "7501273fb4653fb42d955ec15ca6140e02d814abf3ee3c65842b71a45972973f",
+            "sha256": "5146d41b4957a2f9b241cd7bfd9819a28d0c6068f0416686b539fd26acd002a6",
             "classes": [
                 "PHTR"
             ],
@@ -6100,7 +6623,7 @@
         {
             "name": "PHUI",
             "file": "library/PHUI.php",
-            "sha256": "a440c1fbbe337890fc70f6996890338125ee31367a0aa6646ad269bd98efb40b",
+            "sha256": "d392800e393805897c060b4a7294c32631bcc8e753eef16983782e64bc5b5063",
             "classes": [
                 "PHUI"
             ],
@@ -6230,7 +6753,7 @@
         {
             "name": "PHVD",
             "file": "library/PHVD.php",
-            "sha256": "f59a1e2bc9eb711b71edc1411ed04b3cb1a35addfed9e82b91d66434d792ebf1",
+            "sha256": "9f974bed1154e792c3a04556e288e04861bfd422a087ee6bdb214fee87a2cf21",
             "classes": [
                 "PhvdInternalException",
                 "PhvdRule",
@@ -6264,7 +6787,7 @@
         {
             "name": "library",
             "file": "library/library.php",
-            "sha256": "5408df5464ab0f33648a667b676c5c1da045b44b7ca3b8b091edf45782b9547e",
+            "sha256": "de1347daeed4f85cddbb336b690b41a6c6ac867f5b1cf2bbed41db80da4462b8",
             "classes": [
                 "DIR",
                 "Importer"

@@ -1,7 +1,7 @@
 # PHQR API
 
 Source: `library/PHQR.php`  
-SHA-256: `d7ce97420cb7e0d1ce604eff7081b50e40c04b9eb191eccb7e3ef0796ab9ee80`
+SHA-256: `6e9fe9b33a273fa997ef32be4a3b8b7e5a4fac2f5587b376f5eb5c99cf87d678`
 
 Classes: `PHQR`, `QRCode`, `QRUtil`, `QRRSBlock`, `QRNumber`, `QRKanji`, `QRAlphaNum`, `QR8BitByte`, `QRData`, `QRMath`, `QRPolynomial`, `QRBitBuffer`
 

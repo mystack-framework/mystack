@@ -1,7 +1,7 @@
 # PHAU API
 
 Source: `library/PHAU.php`  
-SHA-256: `d8d48e4625c02a902b014428b1039b4dd81aa5e2c985cde433ca7968416d6f6f`
+SHA-256: `5ab4a19debda95933442960cc07ed798dd8f2a82466a2daaf7f9456c28c15db8`
 
 Classes: `PHAU`
 

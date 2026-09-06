@@ -1,9 +1,9 @@
 # PHDB API
 
 Source: `library/PHDB.php`  
-SHA-256: `dad7bc749d25b2053ce00ada2b4c422613a41aa0a8a5f99a8286e9cb9341dfca`
+SHA-256: `7196e6feb5fc0128a1b74879c37cf58df261a1d54952b1e9a797ec01690f64c5`
 
-Classes: `PHDB`
+Classes: `PHDB`, `PHDB_Result`, `PHDB_Driver`, `PHDB_SqliteDriver`, `PHDB_PgsqlDriver`
 
 ## Public methods
 
@@ -174,6 +174,226 @@ Sets a value in a column containing array-like data.
 ### `static close()`
 
 Close the database connection.
+
+### `__construct(public readonly bool $isSelect, public readonly array $rows = [], public readonly int $affected = 0, public readonly int|string|null $insertId = null,)`
+
+See executable source and call sites for the behavioral contract.
+
+### `name(): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `isAvailable(): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `connect(array $config): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `isConnected(): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `disconnect(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `run(string $sql, array $params = []): PHDB_Result`
+
+See executable source and call sites for the behavioral contract.
+
+### `stream(string $sql, array $params = []): \Generator`
+
+See executable source and call sites for the behavioral contract.
+
+### `quoteIdentifier(string $name): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `tableExists(string $table): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `columns(string $table): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `primaryKey(string $table): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `uniqueConstraints(string $table): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `normalizeColumn(string $mysqlDefinition): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `createTableSql(string $table, array $definitions): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `begin(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `commit(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `rollback(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `probe(array $config): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `name(): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `isAvailable(): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `connect(array $config): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `isConnected(): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `disconnect(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `run(string $sql, array $params = []): PHDB_Result`
+
+See executable source and call sites for the behavioral contract.
+
+### `stream(string $sql, array $params = []): \Generator`
+
+See executable source and call sites for the behavioral contract.
+
+### `quoteIdentifier(string $name): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `tableExists(string $table): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `columns(string $table): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `primaryKey(string $table): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `uniqueConstraints(string $table): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `normalizeColumn(string $mysqlDefinition): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `createTableSql(string $table, array $definitions): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `begin(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `commit(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `rollback(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `probe(array $config): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `name(): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `isAvailable(): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `connect(array $config): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `isConnected(): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `disconnect(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `run(string $sql, array $params = []): PHDB_Result`
+
+See executable source and call sites for the behavioral contract.
+
+### `stream(string $sql, array $params = []): \Generator`
+
+See executable source and call sites for the behavioral contract.
+
+### `quoteIdentifier(string $name): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `tableExists(string $table): bool`
+
+See executable source and call sites for the behavioral contract.
+
+### `columns(string $table): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `primaryKey(string $table): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `uniqueConstraints(string $table): array`
+
+See executable source and call sites for the behavioral contract.
+
+### `normalizeColumn(string $mysqlDefinition): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `createTableSql(string $table, array $definitions): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `begin(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `commit(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `rollback(): void`
+
+See executable source and call sites for the behavioral contract.
+
+### `probe(array $config): array`
+
+See executable source and call sites for the behavioral contract.
 
 
 Generated by `mystack docs:build`; do not hand-edit.

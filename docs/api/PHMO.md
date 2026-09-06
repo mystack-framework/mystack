@@ -1,7 +1,7 @@
 # PHMO API
 
 Source: `library/PHMO.php`  
-SHA-256: `a6d50ed684f2b68a1e676d60491c071f9617f062a4adfb5eb334e43ba1a10785`
+SHA-256: `915200ac9fb02ed9ba5e35b2200342c727d6737f6604e57883d7610fe6fb7c7c`
 
 Classes: `PHMO`
 

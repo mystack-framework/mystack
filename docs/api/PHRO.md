@@ -1,7 +1,7 @@
 # PHRO API
 
 Source: `library/PHRO.php`  
-SHA-256: `9951ff5d55fc29f54519f3d63904f23c2bdae60fe04832641655fd0e2415cfed`
+SHA-256: `d34d50a3188aef0c37edb845b32dc603c2de9d58fcf58f62014a54d8826b5faf`
 
 Classes: `PhroSecurityException`, `PhroShield`, `PhroGuard`, `PhroContentTypeShield`, `PhroSqlInjectionShield`, `PhroXssShield`, `PhroRateLimitShield`, `PhroAttemptShield`, `PhroFileUploadShield`, `PhroHeaderInspectionShield`, `PhroHoneypotShield`, `PhroOpenRedirectShield`, `PhroCsrfShield`, `PhroChannel`, `PHRO`
 

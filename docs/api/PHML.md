@@ -1,7 +1,7 @@
 # PHML API
 
 Source: `library/PHML.php`  
-SHA-256: `547161f759ae54fa3d62de70ea437995fbdf1d72fe95a1d1af40e661db293b8b`
+SHA-256: `44a9ed0619af73b6321d5ad4a08eca6d1c1f4b0cdeda93215b880fd54973740d`
 
 Classes: `PHML`
 

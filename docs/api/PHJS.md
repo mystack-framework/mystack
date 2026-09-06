@@ -1,7 +1,7 @@
 # PHJS API
 
 Source: `library/PHJS.php`  
-SHA-256: `48d84a19b9fbe5bf998750e6ac9aa274c6f2b6f0a635c25c7938215ea221c2d7`
+SHA-256: `98d3364770be2e6b8b2ede483672925a57500395960dcc90118b200341c7e85f`
 
 Classes: `PHJSExpression`, `PHJS`, `PHJS_Chain`
 
@@ -256,6 +256,62 @@ See executable source and call sites for the behavioral contract.
 See executable source and call sites for the behavioral contract.
 
 ### `static raw(string $code): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static confirm(string $message): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static prompt(string $message, string $default = ''): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static open(string $url, string $target = '_blank', string $features = ''): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static back(): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static focus(string $selector): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static blur(string $selector): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static scrollTo(string $selector, string $behavior = 'smooth'): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static copy(mixed $text): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static stopPropagation(string $eventVar = 'e'): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static matchMedia(string $query): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static raf(mixed $callback): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static geolocation(mixed $onSuccess, array $options = []): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static debounce(mixed $callback, int $wait = 250): string`
+
+See executable source and call sites for the behavioral contract.
+
+### `static throttle(mixed $callback, int $wait = 250): string`
 
 See executable source and call sites for the behavioral contract.
 

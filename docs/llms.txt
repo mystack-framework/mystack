@@ -9,13 +9,23 @@ MyStack is a zero-Composer PHP full-stack framework. Executable code in library/
 ## Canonical resources
 - AGENTS.md: agent contract
 - README.md: overview
-- MANUAL_BN.md: detailed Bangla manual
+- MANUAL_BN.md: detailed Bangla manual (includes the PHJS and PHUI usage guides)
 - docs/api.json: machine API catalog
+
+## Capabilities & usage index
+- PHDB: opt-in `PHDB::$driver` — `mysqli` default, plus `sqlite` and `pgsql` core paths
+- PHEM: `PHEM::queue()`/`queueSend()` console-queue mail bridge
+- PHVD: extended validators — `iban`, `bic`, `isbn`, `imei`, `jwt`, `utf8`, `bengali`, numeric sign/multiple/decimal, time/timestamp/date_equals
+- PHCS: utility CSS engine, extensible handler registry, arbitrary `[prop:value]` fallback
+- PHJS: declarative actions + browser-convenience emitters; see the PHJS usage guide in MANUAL_BN.md
+- PHJC: `@component`/`@slot`, `@class`, `@verbatim`, `@forelse`, `@each`, `@once`; `PHML::init()` auto asset pipeline (`autoAssets` toggle)
+- PHUI: theme-aware components (e.g. `ui:calendar`, `ui:skeleton`, `ui:empty-state`, `ui:carousel`); see the PHUI usage guide in MANUAL_BN.md
+- CLI: `extension:check`, `test:app`, `docs:build`, `docs:check`, `smoke`, `audit`, `doctor`
 
 ## Source API map
 
 ### PHAI — library/PHAI.php
-27 public methods: setAccounts, setPriority, setModels, setTimeout, getModels, registerBridgeProcess, getBridgeProcess, cleanup, serve, clusterAPI, cluster, getInstance, routes, tool, prompt, resource, resourceTemplate, alias, middleware, handleRequest, bridge, __construct, middleware, retries, …
+26 public methods: setAccounts, setPriority, setModels, setTimeout, getModels, registerBridgeProcess, getBridgeProcess, cleanup, serve, clusterAPI, cluster, getInstance, routes, tool, prompt, resource, resourceTemplate, alias, middleware, handleRequest, bridge, __construct, retries, set, …
 
 ### PHAP — library/PHAP.php
 18 public methods: api, all, get, add, up, rm, run, input, resource, ok, fail, valid, page, auth, send, item, collection, clean
@@ -33,7 +43,7 @@ MyStack is a zero-Composer PHP full-stack framework. Executable code in library/
 13 public methods: __construct, config, HTML, addHtml, CSS, addCss, process, build, registerUtilityHandler, processHtml, processCss, generateCss, buildCss
 
 ### PHDB — library/PHDB.php
-42 public methods: error, id, affected, checker, connect, disconnect, query, fast, first, scalar, save, insert, batchInsert, update, delete, select, find, specificSelect, getValue, getSpecificValue, addDB, createTable, dropTable, alterTable, …
+58 public methods: error, id, affected, checker, connect, disconnect, query, fast, first, scalar, save, insert, batchInsert, update, delete, select, find, specificSelect, getValue, getSpecificValue, addDB, createTable, dropTable, alterTable, …
 
 ### PHDE — library/PHDE.php
 14 public methods: __construct, enableErrorReporting, disableErrorReporting, customErrorHandler, debug, isDebug, errors, errorJSON, getType, displayErrors, api, apibar, file, memory
@@ -42,7 +52,7 @@ MyStack is a zero-Composer PHP full-stack framework. Executable code in library/
 4 public methods: hide, make, score, key
 
 ### PHEM — library/PHEM.php
-13 public methods: smtp, imap, pop, smtpLogin, imapLogin, popLogin, smtpGet, imapSend, popSend, imapGet, popGet, smtpSend, showLog
+16 public methods: smtp, imap, pop, smtpLogin, imapLogin, popLogin, smtpGet, imapSend, popSend, imapGet, popGet, smtpSend, showLog, queue, queueSend, handle
 
 ### PHEV — library/PHEV.php
 19 public methods: allowWebWorker, initialize, start, restart, stop, running, clients, debugClients, getHandler, handler, message, broadcast, disconnect, initHeaders, sendSE, setRetry, stream, streamUInew, streamUI
@@ -51,10 +61,10 @@ MyStack is a zero-Composer PHP full-stack framework. Executable code in library/
 8 public methods: configure, config, send, clientConfig, webPushCapability, cryptoCapability, registerRoutes, privateFeed
 
 ### PHJC — library/PHJC.php
-46 public methods: fastUI, ui, icon, slot, layout, clearCache, view, includeView, startLoop, currentLoop, endLoop, share, directive, minify, metaPreset, breadcrumb, reset, head, buildHead, newHTML, singleHTML, mergeHTML, p2j, h2p, …
+48 public methods: fastUI, ui, icon, slot, layout, clearCache, view, includeView, startLoop, currentLoop, endLoop, share, directive, minify, metaPreset, breadcrumb, reset, once, classes, head, buildHead, newHTML, singleHTML, mergeHTML, …
 
 ### PHJS — library/PHJS.php
-155 public methods: __construct, code, __toString, assets, js, __callStatic, render, parse, alpineData, alpineStore, alpineBind, el, refs, store, watch, dispatch, nextTick, root, data, id, state_magic, params_magic, route_magic, ui_magic, …
+167 public methods: __construct, code, __toString, assets, js, __callStatic, render, parse, alpineData, alpineStore, alpineBind, el, refs, store, watch, dispatch, nextTick, root, data, id, state_magic, params_magic, route_magic, ui_magic, …
 
 ### PHJT — library/PHJT.php
 5 public methods: key, rotate, algorithm, create, verify
@@ -75,13 +85,13 @@ MyStack is a zero-Composer PHP full-stack framework. Executable code in library/
 4 public methods: img, video, zip, text
 
 ### PHPA — library/PHPA.php
-153 public methods: setKeys, setLogic, charge, verify, setLogic, setRefundLogic, setWebhookLogic, setTransport, timeout, expect, setKeys, sandbox, capabilities, refund, webhook, setKeys, configure, sandbox, setTransport, create, track, rate, cancel, label, …
+36 public methods: setKeys, setLogic, charge, verify, setRefundLogic, setWebhookLogic, setTransport, timeout, expect, sandbox, capabilities, refund, webhook, configure, create, track, rate, cancel, label, pickup, call, __construct, profile, name, …
 
 ### PHQR — library/PHQR.php
-85 public methods: make, __construct, getTypeNumber, setTypeNumber, getErrorCorrectLevel, setErrorCorrectLevel, addData, clearData, addDataImpl, getDataCount, getData, isDark, getModuleCount, hex2rgb, make, getBestMaskPattern, createNullArray, makeImpl, mapData, setupPositionAdjustPattern, setupPositionProbePattern, setupTimingPattern, setupTypeNumber, setupTypeInfo, …
+64 public methods: make, __construct, getTypeNumber, setTypeNumber, getErrorCorrectLevel, setErrorCorrectLevel, addData, clearData, addDataImpl, getDataCount, getData, isDark, getModuleCount, hex2rgb, getBestMaskPattern, createNullArray, makeImpl, mapData, setupPositionAdjustPattern, setupPositionProbePattern, setupTimingPattern, setupTypeNumber, setupTypeInfo, createData, …
 
 ### PHRO — library/PHRO.php
-80 public methods: __construct, inspect, __construct, addShield, getShield, removeShield, protect, block, inspect, inspect, inspect, inspect, inspect, checkAndIncrementAttempt, performAttemptReset, inspect, inspect, inspect, inspect, inspect, __construct, authorize, worker, listen, …
+67 public methods: __construct, inspect, addShield, getShield, removeShield, protect, block, checkAndIncrementAttempt, performAttemptReset, authorize, worker, listen, initialize, guard, secure, getToken, csrfField, regenerateToken, trustProxies, root, getCallbackContext, get, post, put, …
 
 ### PHRQ — library/PHRQ.php
 8 public methods: php, js, header, cross, status, file, livemap, stream
