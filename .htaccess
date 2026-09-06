@@ -32,14 +32,14 @@
   RewriteRule ^src/(?:cache/.*\.php|js/.*\.php)$ - [F,L,NC]
   # CLI source/launchers and framework metadata are local-only. Keep this
   # explicit rule in addition to FilesMatch for Apache/LiteSpeed portability.
-  RewriteRule ^(?:database\.php|database_schema\.sql|AGENTS\.md|CONTRIBUTING\.md|MANUAL_BN\.md|README\.md|LICENSE|NOTICE|mystack(?:\.cmd)?)$ - [F,L,NC]
+  RewriteRule ^(?:database\.php|database_schema\.sql|AGENTS\.md|CONTRIBUTING\.md|MANUAL_BN\.md|README\.md|LICENSE|NOTICE|MANUAL_EN\.md|mystack(?:\.(?:cmd|sh))?)$ - [F,L,NC]
   RewriteRule ^favicon\.ico$ favicon.svg [L,NC]
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
   RewriteRule . %{ENV:BASE}/index.php [QSA,L]
 </IfModule>
-<FilesMatch "(^\..*|^(?!index\.php$).*\.php$|composer\.(json|lock)|\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml)$|^(?:AGENTS\.md|CONTRIBUTING\.md|MANUAL_BN\.md|README\.md|LICENSE|NOTICE|mystack(?:\.cmd)?)$|mystack\.)">
+<FilesMatch "(^\..*|^(?!index\.php$).*\.php$|composer\.(json|lock)|\.(env|git|log|ini|sql|sqlite|db|sh|cmd|bat|bash|bak|backup|yml|yaml)$|^(?:AGENTS\.md|CONTRIBUTING\.md|MANUAL_BN\.md|README\.md|LICENSE|NOTICE|MANUAL_EN\.md|mystack(?:\.(?:cmd|sh))?)$|mystack\.)">
     Require all denied
 </FilesMatch>
 
