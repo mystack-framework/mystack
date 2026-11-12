@@ -68,7 +68,7 @@ class PHEM {
         if (self::$smtpSecure == 'tls') self::$smtpServer = 'tcp://' . self::$smtpHost;
         if (self::$smtpSecure == 'ssl') self::$smtpServer = 'ssl://' . self::$smtpHost;
 
-        self::$local = !empty($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : (!empty($_SERVER['SERVER_NAME']) ? $_SERVER['SERVER_NAME'] : $_SERVER['SERVER_ADDR']);
+        self::$local = !empty($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : (!empty($_SERVER['SERVER_NAME']) ? $_SERVER['SERVER_NAME'] : (!empty($_SERVER['SERVER_ADDR']) ? $_SERVER['SERVER_ADDR'] : 'localhost'));
     }
 
     /**
